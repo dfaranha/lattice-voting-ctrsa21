@@ -113,6 +113,7 @@ void vericrypt_hash(uint8_t hash[SHA256HashSize], publickey_t *pk,
 
 	fmpz_poly_init(s);
 	SHA256Reset(&sha);
+	
 	/* Hash public key (A,t). */
 	for (int i = 0; i < DIM; i++) {
 		for (int j = 0; j < DIM; j++) {
@@ -120,10 +121,12 @@ void vericrypt_hash(uint8_t hash[SHA256HashSize], publickey_t *pk,
 				fmpz_mod_poly_get_fmpz_poly(s, pk->A[i][j][k], *ctx);
 				str = fmpz_poly_get_str(s);
 				SHA256Input(&sha, (const uint8_t*)str, strlen(str));
+				free(str);
 			}
 			fmpz_mod_poly_get_fmpz_poly(s, pk->t[i][j], *ctx);
 			str = fmpz_poly_get_str(s);
 			SHA256Input(&sha, (const uint8_t*)str, strlen(str));
+			free(str);
 		}
 	}
 	/* Hash linear relation pair (T,u). */
@@ -131,10 +134,13 @@ void vericrypt_hash(uint8_t hash[SHA256HashSize], publickey_t *pk,
 		fmpz_mod_poly_get_fmpz_poly(s, t[i], *ctx);
 		str = fmpz_poly_get_str(s);
 		SHA256Input(&sha, (const uint8_t*)str, strlen(str));
+		free(str);
 	}
 	fmpz_mod_poly_get_fmpz_poly(s, u, *ctx);
 	str = fmpz_poly_get_str(s);
 	SHA256Input(&sha, (const uint8_t*)str, strlen(str));
+	free(str);
+
 	/* Hash ciphertexts c = (v, w), y. */
 	for (int i = 0; i < VECTOR; i++) {
 		for (int j = 0; j < DIM; j++) {
@@ -142,23 +148,28 @@ void vericrypt_hash(uint8_t hash[SHA256HashSize], publickey_t *pk,
 				fmpz_mod_poly_get_fmpz_poly(s, out->cipher[i].v[j][k], *ctx);
 				str = fmpz_poly_get_str(s);
 				SHA256Input(&sha, (const uint8_t*)str, strlen(str));
+				free(str);
 				fmpz_mod_poly_get_fmpz_poly(s, y[i].v[j][k], *ctx);
 				str = fmpz_poly_get_str(s);
 				SHA256Input(&sha, (const uint8_t*)str, strlen(str));
+				free(str);
 			}
 		}
 		for (int k = 0; k < 2; k++) {
 			fmpz_mod_poly_get_fmpz_poly(s, out->cipher[i].w[k], *ctx);
 			str = fmpz_poly_get_str(s);
 			SHA256Input(&sha, (const uint8_t*)str, strlen(str));
+			free(str);
 			fmpz_mod_poly_get_fmpz_poly(s, y[i].w[k], *ctx);
 			str = fmpz_poly_get_str(s);
 			SHA256Input(&sha, (const uint8_t*)str, strlen(str));
+			free(str);
 		}
 	}
 	fmpz_mod_poly_get_fmpz_poly(s, _u, *encrypt_modulus_ctx());
 	str = fmpz_poly_get_str(s);
 	SHA256Input(&sha, (const uint8_t*)str, strlen(str));
+	free(str);
 
 	SHA256Result(&sha, hash);
 	fmpz_poly_clear(s);

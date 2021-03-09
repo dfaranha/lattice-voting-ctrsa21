@@ -15,14 +15,14 @@ commit: commit.c ${TEST} ${BENCH} ${INCLUDES} gaussian_ct.cpp
 encrypt: encrypt.c ${TEST} ${BENCH} ${INCLUDES}
 	${CPP} ${CFLAGS} -DMAIN encrypt.c ${TEST} ${BENCH} -o encrypt ${LIBS}
 
-vericrypt: vericrypt.c encrypt.c ${TEST} ${BENCH} ${INCLUDES} gaussian_ct_large.cpp
+vericrypt: vericrypt.c encrypt.c ${TEST} ${BENCH} ${INCLUDES} gaussian_ct.cpp
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_E -c gaussian_ct.cpp -o gaussian.o
 	${CPP} ${CFLAGS} -c encrypt.c -o encrypt.o
 	${CPP} ${CFLAGS} -DMAIN vericrypt.c encrypt.o sha224-256.c ${GAUSSIAN} ${TEST} ${BENCH} -o vericrypt ${LIBS}
 
 shuffle: shuffle.c commit.c ${TEST} ${BENCH}
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_C -c gaussian_ct.cpp -o gaussian.o
-	${CPP} ${CFLAGS} commit.c shuffle.c ${GAUSSIAN} ${TEST} ${BENCH} -o shuffle ${LIBS}
+	${CPP} ${CFLAGS} commit.c shuffle.c sha224-256.c ${GAUSSIAN} ${TEST} ${BENCH} -o shuffle ${LIBS}
 
 clean:
 	rm *.o commit encrypt vericrypt shuffle

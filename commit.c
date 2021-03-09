@@ -271,6 +271,7 @@ void commit_sample_chall_crt(pcrt_poly_t f) {
 	commit_sample_chall(t);
 	nmod_poly_rem(f[0], t, irred[0]);
 	nmod_poly_rem(f[1], t, irred[1]);
+	nmod_poly_clear(t);
 }
 
 // Sample a polynomial according to a Gaussian distribution.
