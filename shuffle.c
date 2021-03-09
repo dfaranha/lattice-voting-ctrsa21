@@ -13,7 +13,7 @@
 /* Private definitions                                                        */
 /*============================================================================*/
 
-#define MSGS        2
+#define MSGS        16
 
 void shuffle_hash(nmod_poly_t d[2], commitkey_t *key, commit_t x, commit_t y,
 		nmod_poly_t alpha, nmod_poly_t beta, nmod_poly_t u[2],

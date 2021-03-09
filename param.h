@@ -26,6 +26,6 @@
 /* Degree of each polynomial used to define the CRT representation. */
 #define DEGCRT 	(DEGREE >> 1)
 /* Standard deviation for discrete Gaussians. */
-#define SIGMA_C 27000
+#define SIGMA_C 54000
 // Standard deviation of discrete Gaussian
 #define SIGMA_E	54000
