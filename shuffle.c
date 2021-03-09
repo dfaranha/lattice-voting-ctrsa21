@@ -13,7 +13,7 @@
 /* Private definitions                                                        */
 /*============================================================================*/
 
-#define MSGS        16
+#define MSGS        2
 
 void shuffle_hash(nmod_poly_t d[2], commitkey_t *key, commit_t x, commit_t y,
 		nmod_poly_t alpha, nmod_poly_t beta, nmod_poly_t u[2],
@@ -435,10 +435,11 @@ static void bench(flint_rand_t rand) {
 	commitkey_t key;
 	commit_t com[MSGS];
 	nmod_poly_t m[MSGS], _m[MSGS];
-	nmod_poly_t beta, s[MSGS - 1], _d[MSGS];
+	nmod_poly_t alpha, beta, s[MSGS - 1], _d[MSGS];
 	nmod_poly_t r[WIDTH][2], y[WIDTH][2], _y[WIDTH][2];
 	nmod_poly_t t[2], _t[2], u[2], v[2], _v[2], z[WIDTH], _z[WIDTH];
 
+	nmod_poly_init(alpha, MODP);
 	nmod_poly_init(beta, MODP);
 	for (int i = 0; i < MSGS; i++) {
 		nmod_poly_init(m[i], MODP);
@@ -451,19 +452,18 @@ static void bench(flint_rand_t rand) {
 		}
 	}
 
-	commit_setup();
-
 	/* Generate commitment key-> */
+	commit_setup();
 	commit_keygen(&key, rand);
 
 	for (int i = 0; i < WIDTH; i++) {
 		commit_sample_short_crt(r[i]);
 	}
-
 	for (int i = 0; i < MSGS; i++) {
 		commit_sample_short(m[i]);
 		commit_doit(&com[i], m[i], &key, r);
 	}
+
 	/* Prover shuffles messages (only a circular shift for simplicity). */
 	for (int i = 0; i < MSGS; i++) {
 		nmod_poly_set(_m[i], m[(i + 1) % MSGS]);
@@ -495,17 +495,20 @@ static void bench(flint_rand_t rand) {
 		commit_sample_short_crt(r[i]);
 	}
 	commit_sample_rand(beta, rand);
+	commit_sample_rand(alpha, rand);
 
 	BENCH_BEGIN("linear-proof") {
-		BENCH_ADD(prover_lin(y, _y, t, _t, u, com[0], com[1], &key, beta, beta, r, 0));
+		BENCH_ADD(prover_lin(y, _y, t, _t, u, com[0], com[1], &key, alpha, beta, r, 0));
 	} BENCH_END;
 
 	BENCH_BEGIN("verifier proof") {
-		BENCH_ADD(verifier_lin(com[0], com[1], _m, y, _y, t, _t, u, &key, beta, beta, 0));
+		BENCH_ADD(verifier_lin(com[0], com[1], _m, y, _y, t, _t, u, &key, alpha, beta, 0));
 	} BENCH_END;
 
 	commit_finish();
 
+	nmod_poly_clear(alpha);
+	nmod_poly_clear(beta);
 	for (int i = 0; i < MSGS; i++) {
 		commit_free(&com[i]);
 		nmod_poly_clear(m[i]);
