@@ -510,7 +510,7 @@ static void bench(flint_rand_t rand) {
 	BENCH_BEGIN("commit_open") {
 		commit_sample_chall_crt(f);
 		commit_doit(&com, m, &key, r);
-		BENCH_ADD(commit_open(&com, m, &key, s, f));
+		BENCH_ADD(commit_open(&com, m, &key, r, f));
 	} BENCH_END;
 
 	commit_keyfree(&key);
