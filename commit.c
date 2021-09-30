@@ -73,6 +73,7 @@ void commit_setup() {
 
 	nmod_poly_invmod(inv[0], irred[0], irred[1]);
 	nmod_poly_invmod(inv[1], irred[1], irred[0]);
+	nmod_poly_mul(inv[1], inv[1], irred[1]);
 }
 
 // Finalize commitment scheme.
@@ -96,18 +97,10 @@ nmod_poly_t *commit_irred(int i) {
 
 // Recover polynomial from CRT representation.
 void pcrt_poly_rec(nmod_poly_t c, pcrt_poly_t a) {
-	nmod_poly_t t;
-
-	nmod_poly_init(t, MODP);
-
-	nmod_poly_sub(t, a[0], a[1]);
-	nmod_poly_mul(t, t, inv[1]);
-	nmod_poly_mul(c, t, irred[1]);
+	nmod_poly_sub(c, a[0], a[1]);
+	nmod_poly_mul(c, c, inv[1]);
 	nmod_poly_add(c, c, a[1]);
-	nmod_poly_mul(t, irred[0], irred[1]);
-	nmod_poly_rem(c, c, t);
-
-	nmod_poly_clear(t);
+	nmod_poly_rem(c, c, cyclo_poly);
 }
 
 // Compute squared l2-norm.
