@@ -526,6 +526,44 @@ static void bench(flint_rand_t rand) {
 	}
 }
 
+static void microbench(flint_rand_t rand) {
+	nmod_poly_t alpha, beta, t[2], u[2];
+
+	nmod_poly_init(alpha, MODP);
+	nmod_poly_init(beta, MODP);
+	for (int i = 0; i < 2; i++) {
+		nmod_poly_init(t[i], MODP);
+		nmod_poly_init(u[i], MODP);
+	}
+
+	commit_sample_rand(beta, rand);
+	commit_sample_rand(alpha, rand);
+
+	BENCH_BEGIN("Polynomial addition") {
+		BENCH_ADD(nmod_poly_add(alpha, alpha, beta));
+	} BENCH_END;
+
+	BENCH_BEGIN("Polynomial multiplication") {
+		BENCH_ADD(nmod_poly_mulmod(alpha, alpha, beta, cyclo_poly));
+	} BENCH_END;
+
+	commit_sample_rand_crt(t, rand);
+	commit_sample_rand_crt(u, rand);
+
+	BENCH_BEGIN("Polynomial mult in CRT form") {
+		BENCH_ADD(nmod_poly_mulmod(t[0], t[0], u[0], irred[0]));
+	}}
+	bench_compute(BENCH * (BENCH >> 1));
+	bench_print();
+
+	nmod_poly_clear(alpha);
+	nmod_poly_clear(beta);
+	for (int i = 0; i < 2; i++) {
+		nmod_poly_clear(t[i]);
+		nmod_poly_clear(u[i]);
+	}
+}
+
 int main(int argc, char *arv[]) {
 	flint_rand_t rand;
 
@@ -534,6 +572,9 @@ int main(int argc, char *arv[]) {
 
 	printf("\n** Tests for lattice-based commitments:\n\n");
 	test(rand);
+
+	printf("\n** Microbenchmarks for polynomial arithmetic:\n\n");
+	microbench(rand);
 
 	printf("\n** Benchmarks for lattice-based commitments:\n\n");
 	bench(rand);
