@@ -186,20 +186,29 @@ void commit_keyfree(commitkey_t *key) {
 void commit_sample_short(nmod_poly_t r) {
 	uint64_t buf;
 	uint32_t coeff;
+	int i, j, s;
 
 	nmod_poly_zero(r);
 	nmod_poly_fit_length(r, DEGREE);
-	for (int i = 0; i < DEGREE; i += 32) {
-		getrandom(&buf, sizeof(buf), 0);
-		for (int j = 0; j < 64; j += 2) {
-			if ((buf >> j) & 1) {
-				coeff = MODP - ((buf >> (j + 1)) & 1);
-			} else {
-				coeff = (buf >> (j + 1)) & 1;
-			}
-			nmod_poly_set_coeff_ui(r, (i+j/2) % DEGREE, coeff);
+	i = 0;
+	s = 8 * sizeof(buf);
+	j = s;
+
+	do {
+		if(j == s) {
+			getrandom(&buf, sizeof(buf), 0);
+			j = 0;
 		}
-	}
+
+		if (((buf >> j) & 1) & ((buf >> (j+1)) & 1)){
+			j += 2;
+		} else {
+			coeff = MODP - 1 + ((buf >> j) & 3);
+			nmod_poly_set_coeff_ui(r, i, coeff);
+			i++;
+			j += 2;
+		}
+	} while(i < DEGREE);
 }
 
 // Sample a short polynomial in CRT representation.
@@ -344,8 +353,10 @@ int commit_open(commit_t *com, nmod_poly_t m, commitkey_t *key,  pcrt_poly_t r[W
 			for (int k = 0; k < 2; k++) {
 				nmod_poly_mulmod(t, key->B1[i][j][k], r[j][k], irred[k]);
 				nmod_poly_add(c1[k], c1[k], t);
-				nmod_poly_mulmod(t, key->b2[j][k], r[j][k], irred[k]);
-				nmod_poly_add(c2[k], c2[k], t);
+				if (i == 0) {
+					nmod_poly_mulmod(t, key->b2[j][k], r[j][k], irred[k]);
+					nmod_poly_add(c2[k], c2[k], t);
+				}
 			}
 		}
 	}
