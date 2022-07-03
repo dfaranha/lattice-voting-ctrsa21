@@ -316,8 +316,10 @@ void commit_doit(commit_t *com, nmod_poly_t m, commitkey_t *key, pcrt_poly_t r[W
 			for (int k = 0; k < 2; k++) {
 				nmod_poly_mulmod(t, key->B1[i][j][k], r[j][k], irred[k]);
 				nmod_poly_add(com->c1[k], com->c1[k], t);
-				nmod_poly_mulmod(t, key->b2[j][k], r[j][k], irred[k]);
-				nmod_poly_add(com->c2[k], com->c2[k], t);
+				if (i == 0) {
+					nmod_poly_mulmod(t, key->b2[j][k], r[j][k], irred[k]);
+					nmod_poly_add(com->c2[k], com->c2[k], t);
+				}
 			}
 		}
 	}
