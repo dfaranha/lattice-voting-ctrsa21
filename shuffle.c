@@ -13,7 +13,7 @@
 /* Private definitions                                                        */
 /*============================================================================*/
 
-#define MSGS        2
+#define MSGS        25
 
 void shuffle_hash(nmod_poly_t d[2], commitkey_t *key, commit_t x, commit_t y,
 		nmod_poly_t alpha, nmod_poly_t beta, nmod_poly_t u[2],
@@ -77,7 +77,7 @@ void shuffle_hash(nmod_poly_t d[2], commitkey_t *key, commit_t x, commit_t y,
 static void prover_lin(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
 		nmod_poly_t t[2], nmod_poly_t _t[2], nmod_poly_t u[2],
 		commit_t x, commit_t _x, commitkey_t *key,
-		nmod_poly_t alpha, nmod_poly_t beta, nmod_poly_t r[WIDTH][2], int l) {
+		nmod_poly_t alpha, nmod_poly_t beta, nmod_poly_t r[WIDTH][2], nmod_poly_t _r[WIDTH][2], int l) {
 	nmod_poly_t tmp, d[2];
 
 	nmod_poly_init(tmp, MODP);
@@ -121,7 +121,7 @@ static void prover_lin(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
 		for (int j = 0; j < 2; j++) {
 			nmod_poly_mulmod(tmp, d[j], r[i][j], *commit_irred(j));
 			nmod_poly_add(y[i][j], y[i][j], tmp);
-			nmod_poly_mulmod(tmp, d[j], r[i][j], *commit_irred(j));
+			nmod_poly_mulmod(tmp, d[j], _r[i][j], *commit_irred(j));
 			nmod_poly_add(_y[i][j], _y[i][j], tmp);
 		}
 	}
@@ -245,11 +245,11 @@ static int verifier_lin(commit_t com, commit_t x,
 }
 
 static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
-		nmod_poly_t r[WIDTH][2], commitkey_t *key, flint_rand_t rng) {
+		nmod_poly_t r[MSGS][WIDTH][2], commitkey_t *key, flint_rand_t rng) {
 	int flag, result = 1;
 	commit_t d[MSGS];
 	nmod_poly_t t0, t1, rho, beta, theta[MSGS], s[MSGS];
-	nmod_poly_t y[WIDTH][2], _y[WIDTH][2], t[2], _t[2], u[2];
+	nmod_poly_t y[WIDTH][2], _y[WIDTH][2], t[2], _t[2], u[2], _r[MSGS][WIDTH][2];
 
 	nmod_poly_init(t0, MODP);
 	nmod_poly_init(t1, MODP);
@@ -268,6 +268,13 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		for (int j = 0; j < 2; j++) {
 			nmod_poly_init(y[i][j], MODP);
 			nmod_poly_init(_y[i][j], MODP);
+		}
+	}
+	for (int w = 0; w < MSGS; w++) {
+		for (int i = 0; i < WIDTH; i++) {
+			for (int j = 0; j < 2; j++) {
+				nmod_poly_init(_r[w][i][j], MODP);
+			}
 		}
 	}
 
@@ -299,16 +306,25 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	/* Prover samples theta_i and computes commitments D_i. */
 	commit_sample_rand(theta[0], rng);
 	nmod_poly_mulmod(t0, theta[0], _m[0], *commit_poly());
-	commit_doit(&d[0], t0, key, r);
+	for (int j = 0; j < WIDTH; j++) {
+		commit_sample_short_crt(_r[0][j]);
+	}
+	commit_doit(&d[0], t0, key, _r[0]);
 	for (int i = 1; i < MSGS - 1; i++) {
 		commit_sample_rand(theta[i], rng);
 		nmod_poly_mulmod(t0, theta[i - 1], m[i], *commit_poly());
 		nmod_poly_mulmod(t1, theta[i], _m[i], *commit_poly());
 		nmod_poly_add(t0, t0, t1);
-		commit_doit(&d[i], t0, key, r);
+		for (int j = 0; j < WIDTH; j++) {
+			commit_sample_short_crt(_r[i][j]);
+		}
+		commit_doit(&d[i], t0, key, _r[i]);
 	}
 	nmod_poly_mulmod(t0, theta[MSGS - 2], m[MSGS - 1], *commit_poly());
-	commit_doit(&d[MSGS - 1], t0, key, r);
+	for (int j = 0; j < WIDTH; j++) {
+		commit_sample_short_crt(_r[MSGS - 1][j]);
+	}
+	commit_doit(&d[MSGS - 1], t0, key, _r[MSGS - 1]);
 
 	commit_sample_rand(beta, rng);
 	nmod_poly_mulmod(s[0], theta[0], _m[0], *commit_poly());
@@ -346,10 +362,10 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		}
 
 		if (l == 0) {
-			prover_lin(y, _y, t, _t, u, com[0], d[0], key, beta, t0, r, l);
+			prover_lin(y, _y, t, _t, u, com[0], d[0], key, beta, t0, r[0], _r[0], l);
 			result &= verifier_lin(com[0], d[0], y, _y, t, _t, u, key, beta, t0, l);
 		} else {
-			prover_lin(y, _y, t, _t, u, com[l], d[l], key, s[l - 1], t0, r, l);
+			prover_lin(y, _y, t, _t, u, com[l], d[l], key, s[l - 1], t0, r[l], _r[l], l);
 			result &= verifier_lin(com[l], d[l], y, _y, t, _t, u, key, s[l - 1], t0, l);
 		}
 	}
@@ -361,6 +377,11 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	for (int i = 0; i < MSGS; i++) {
 		nmod_poly_clear(theta[i]);
 		nmod_poly_clear(s[i]);
+		for (int w = 0; w < WIDTH; w++) {
+			for (int j = 0; j < 2; j++) {
+				nmod_poly_clear(_r[i][w][j]);
+			}
+		}
 	}
 	for (int i = 0; i < 2; i++) {
 		nmod_poly_clear(t[i]);
@@ -380,15 +401,15 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 static void test(flint_rand_t rand) {
 	commitkey_t key;
 	commit_t com[MSGS];
-	nmod_poly_t m[MSGS], _m[MSGS], r[WIDTH][2];
+	nmod_poly_t m[MSGS], _m[MSGS], r[MSGS][WIDTH][2];
 
 	for (int i = 0; i < MSGS; i++) {
 		nmod_poly_init(m[i], MODP);
 		nmod_poly_init(_m[i], MODP);
-	}
-	for (int i = 0; i < WIDTH; i++) {
-		for (int j = 0; j < 2; j++) {
-			nmod_poly_init(r[i][j], MODP);
+		for (int j = 0; j < WIDTH; j++) {
+			for (int k = 0; k < 2; k++) {
+				nmod_poly_init(r[i][j][k], MODP);
+			}
 		}
 	}
 
@@ -396,12 +417,12 @@ static void test(flint_rand_t rand) {
 	commit_setup();
 	commit_keygen(&key, rand);
 
-	for (int i = 0; i < WIDTH; i++) {
-		commit_sample_short_crt(r[i]);
-	}
 	for (int i = 0; i < MSGS; i++) {
+		for (int j = 0; j < WIDTH; j++) {
+			commit_sample_short_crt(r[i][j]);
+		}
 		commit_sample_short(m[i]);
-		commit_doit(&com[i], m[i], &key, r);
+		commit_doit(&com[i], m[i], &key, r[i]);
 	}
 
 	/* Prover shuffles messages (only a circular shift for simplicity). */
@@ -420,10 +441,10 @@ end:
 		commit_free(&com[i]);
 		nmod_poly_clear(m[i]);
 		nmod_poly_clear(_m[i]);
-	}
-	for (int i = 0; i < WIDTH; i++) {
-		for (int j = 0; j < 2; j++) {
-			nmod_poly_clear(r[i][j]);
+		for (int j = 0; j < WIDTH; j++) {
+			for (int k = 0; k < 2; k++) {
+				nmod_poly_clear(r[i][j][k]);
+			}
 		}
 	}
 	commit_keyfree(&key);
@@ -434,7 +455,7 @@ static void bench(flint_rand_t rand) {
 	commit_t com[MSGS];
 	nmod_poly_t m[MSGS], _m[MSGS];
 	nmod_poly_t alpha, beta, s[MSGS - 1];
-	nmod_poly_t r[WIDTH][2], y[WIDTH][2], _y[WIDTH][2];
+	nmod_poly_t r[MSGS][WIDTH][2], y[WIDTH][2], _y[WIDTH][2];
 	nmod_poly_t t[2], _t[2], u[2], v[2], _v[2];
 
 	nmod_poly_init(alpha, MODP);
@@ -443,10 +464,10 @@ static void bench(flint_rand_t rand) {
 		nmod_poly_init(m[i], MODP);
 		nmod_poly_init(_m[i], MODP);
 		if (i != MSGS - 1) nmod_poly_init(s[i], MODP);
-	}
-	for (int i = 0; i < WIDTH; i++) {
-		for (int j = 0; j < 2; j++) {
-			nmod_poly_init(r[i][j], MODP);
+		for (int j = 0; j < WIDTH; j++) {
+			for (int k = 0; k < 2; k++) {
+				nmod_poly_init(r[i][j][k], MODP);
+			}
 		}
 	}
 
@@ -454,12 +475,12 @@ static void bench(flint_rand_t rand) {
 	commit_setup();
 	commit_keygen(&key, rand);
 
-	for (int i = 0; i < WIDTH; i++) {
-		commit_sample_short_crt(r[i]);
-	}
 	for (int i = 0; i < MSGS; i++) {
+		for (int j = 0; j < WIDTH; j++) {
+			commit_sample_short_crt(r[i][j]);
+		}
 		commit_sample_short(m[i]);
-		commit_doit(&com[i], m[i], &key, r);
+		commit_doit(&com[i], m[i], &key, r[i]);
 	}
 
 	/* Prover shuffles messages (only a circular shift for simplicity). */
@@ -480,20 +501,21 @@ static void bench(flint_rand_t rand) {
 	}
 	for (int i = 0; i < WIDTH; i++) {
 		for (int j = 0; j < 2; j++) {
-			nmod_poly_init(r[i][j], MODP);
 			nmod_poly_init(y[i][j], MODP);
 			nmod_poly_init(_y[i][j], MODP);
 		}
 	}
 
-	for (int i = 0; i < WIDTH; i++) {
-		commit_sample_short_crt(r[i]);
+	for (int i = 0; i < MSGS; i++) {
+		for (int j = 0; j < WIDTH; j++) {
+			commit_sample_short_crt(r[i][j]);
+		}
 	}
 	commit_sample_rand(beta, rand);
 	commit_sample_rand(alpha, rand);
 
 	BENCH_BEGIN("linear-proof") {
-		BENCH_ADD(prover_lin(y, _y, t, _t, u, com[0], com[1], &key, alpha, beta, r, 0));
+		BENCH_ADD(prover_lin(y, _y, t, _t, u, com[0], com[1], &key, alpha, beta, r[0], r[0], 0));
 	} BENCH_END;
 
 	BENCH_BEGIN("verifier proof") {
@@ -508,6 +530,11 @@ static void bench(flint_rand_t rand) {
 		commit_free(&com[i]);
 		nmod_poly_clear(m[i]);
 		nmod_poly_clear(_m[i]);
+		for (int j = 0; j < WIDTH; j++) {
+			for (int k = 0; k < 2; k++) {
+				nmod_poly_clear(r[i][j][k]);
+			}
+		}
 	}
 	for (int i = 0; i < 2; i++) {
 		nmod_poly_clear(t[i]);
@@ -518,7 +545,6 @@ static void bench(flint_rand_t rand) {
 	}
 	for (int i = 0; i < WIDTH; i++) {
 		for (int j = 0; j < 2; j++) {
-			nmod_poly_clear(r[i][j]);
 			nmod_poly_clear(y[i][j]);
 			nmod_poly_clear(_y[i][j]);
 		}
