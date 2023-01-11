@@ -128,7 +128,7 @@ void commit_sample_short_crt(pcrt_poly_t r);
  *
  * @param[out] r		- the polynomial to sample.
  */
-void commit_sample_rand(nmod_poly_t r, flint_rand_t rand);
+void commit_sample_rand(nmod_poly_t r, flint_rand_t rand, int degree);
 
 /**
  * Sample a random polynomial in CRT representation.

@@ -15,15 +15,17 @@
 
 #define MSGS        25
 
-void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS]) {
+void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS],
+		nmod_poly_t _m[MSGS], nmod_poly_t rho) {
 	flint_rand_t rand;
 	SHA256Context sha;
 	uint8_t hash[SHA256HashSize];
-	uint64_t seed0, seed1;
+	uint64_t seed0, seed1, seed2, seed3;
 
 	SHA256Reset(&sha);
 
 	for (int i = 0; i < MSGS; i++) {
+		SHA256Input(&sha, (const uint8_t*)_m[i]->coeffs, _m[i]->alloc * sizeof(uint64_t));
 		for (int j = 0; j < 2; j++) {
 			SHA256Input(&sha, (const uint8_t*)c[i].c1[j]->coeffs, c[i].c1[j]->alloc * sizeof(uint64_t));
 			SHA256Input(&sha, (const uint8_t*)c[i].c2[j]->coeffs, c[i].c2[j]->alloc * sizeof(uint64_t));
@@ -31,14 +33,18 @@ void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS]) {
 			SHA256Input(&sha, (const uint8_t*)d[i].c2[j]->coeffs, d[i].c2[j]->alloc * sizeof(uint64_t));
 		}
 	}
-
+	SHA256Input(&sha, (const uint8_t*)rho->coeffs, rho->alloc * sizeof(uint64_t));
 	SHA256Result(&sha, hash);
 
 	flint_randinit(rand);
 	memcpy(&seed0, hash, sizeof(uint64_t));
-	memcpy(&seed1, hash + SHA256HashSize/2, sizeof(uint64_t));
+	memcpy(&seed1, hash + sizeof(uint64_t), sizeof(uint64_t));
+	memcpy(&seed2, hash + 2 * sizeof(uint64_t), sizeof(uint64_t));
+	memcpy(&seed3, hash + 3 * sizeof(uint64_t), sizeof(uint64_t));
+	seed0 ^= seed2;
+	seed1 ^= seed3;
 	flint_randseed(rand, seed0, seed1);
-	commit_sample_rand(beta, rand);
+	commit_sample_rand(beta, rand, DEGREE);
 	flint_randclear(rand);
 }
 
@@ -297,14 +303,14 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2], nmod_poly_t _y[MSGS][W
 	}
 
 	/* Prover samples theta_i and computes commitments D_i. */
-	commit_sample_rand(theta[0], rng);
+	commit_sample_rand(theta[0], rng, DEGREE);
 	nmod_poly_mulmod(t0, theta[0], _m[0], *commit_poly());
 	for (int j = 0; j < WIDTH; j++) {
 		commit_sample_short_crt(_r[0][j]);
 	}
 	commit_doit(&d[0], t0, key, _r[0]);
 	for (int i = 1; i < MSGS - 1; i++) {
-		commit_sample_rand(theta[i], rng);
+		commit_sample_rand(theta[i], rng, DEGREE);
 		nmod_poly_mulmod(t0, theta[i - 1], m[i], *commit_poly());
 		nmod_poly_mulmod(t1, theta[i], _m[i], *commit_poly());
 		nmod_poly_add(t0, t0, t1);
@@ -319,7 +325,7 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2], nmod_poly_t _y[MSGS][W
 	}
 	commit_doit(&d[MSGS - 1], t0, key, _r[MSGS - 1]);
 
-	shuffle_hash(beta, com, d);
+	shuffle_hash(beta, com, d, _m, rho);
 	nmod_poly_mulmod(s[0], theta[0], _m[0], *commit_poly());
 	nmod_poly_mulmod(t0, beta, m[0], *commit_poly());
 	nmod_poly_sub(s[0], s[0], t0);
@@ -365,14 +371,14 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2], nmod_poly_t _y[MSGS][W
 static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2], nmod_poly_t _y[MSGS][WIDTH][2],
 		nmod_poly_t t[MSGS][2], nmod_poly_t _t[MSGS][2], nmod_poly_t u[MSGS][2],
 		commit_t d[MSGS], nmod_poly_t s[MSGS], commit_t com[MSGS],
-		nmod_poly_t _m[MSGS], commitkey_t *key) {
+		nmod_poly_t _m[MSGS], nmod_poly_t rho, commitkey_t *key) {
 	int result = 1;
 	nmod_poly_t beta, t0;
 
 	nmod_poly_init(t0, MODP);
 	nmod_poly_init(beta, MODP);
 
-	shuffle_hash(beta, com, d);
+	shuffle_hash(beta, com, d, _m, rho);
 	/* Now verify each \Prod_LIN instance, one for each commitment. */
 	for (int l = 0; l < MSGS; l++) {
 		if (l < MSGS - 1) {
@@ -419,7 +425,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	/* Verifier samples \rho that is different from the messages, and \beta. */
 	do {
 		flag = 1;
-		commit_sample_rand(rho, rng);
+		commit_sample_rand(rho, rng, DEGREE);
 		for (int i = 0; i < MSGS; i++) {
 			if (nmod_poly_equal(rho, _m[i]) == 1) {
 				flag = 0;
@@ -437,7 +443,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 
 	shuffle_prover(y, _y, t, _t, u, d, s, com, m, _m, r, rho, key, rng);
 
-	result = shuffle_verifier(y, _y, t, _t, u, d, s, com, _m, key);
+	result = shuffle_verifier(y, _y, t, _t, u, d, s, com, _m, rho, key);
 
 	nmod_poly_clear(t0);
 	nmod_poly_clear(t1);
@@ -571,8 +577,8 @@ static void bench(flint_rand_t rand) {
 			commit_sample_short_crt(r[i][j]);
 		}
 	}
-	commit_sample_rand(beta, rand);
-	commit_sample_rand(alpha, rand);
+	commit_sample_rand(beta, rand, DEGREE);
+	commit_sample_rand(alpha, rand, DEGREE);
 
 	BENCH_BEGIN("linear-proof") {
 		BENCH_ADD(lin_prover(y, _y, t, _t, u, com[0], com[1], &key, alpha, beta, r[0], r[0], 0));

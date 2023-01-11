@@ -148,7 +148,7 @@ void commit_keygen(commitkey_t *key, flint_rand_t rand) {
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = HEIGHT; j < WIDTH; j++) {
 			for (int k = 0; k < 2; k++) {
-				nmod_poly_randtest(key->B1[i][j][k], rand, DEGCRT);
+				commit_sample_rand(key->B1[i][j][k], rand, DEGCRT);
 			}
 		}
 	}
@@ -160,7 +160,7 @@ void commit_keygen(commitkey_t *key, flint_rand_t rand) {
 				nmod_poly_set_coeff_ui(key->b2[i][j], 0, 1);
 			}
 			if (i > HEIGHT) {
-				nmod_poly_randtest(key->b2[i][j], rand, DEGCRT);
+				commit_sample_rand(key->b2[i][j], rand, DEGCRT);
 			}
 		}
 	}
@@ -224,8 +224,13 @@ void commit_sample_short_crt(pcrt_poly_t r) {
 }
 
 // Sample a random polynomial.
-void commit_sample_rand(nmod_poly_t r, flint_rand_t rand) {
-	nmod_poly_randtest(r, rand, DEGREE);
+void commit_sample_rand(nmod_poly_t r, flint_rand_t rand, int degree) {
+	nmod_poly_fit_length(r, degree);
+	for (int i = 0; i < degree; i++) {
+		r->coeffs[i] = n_randtest(rand) % MODP;
+	}
+	r->length = degree;
+    _nmod_poly_normalise(r);
 }
 
 // Sample a random polynomial in CRT representation.
@@ -233,7 +238,7 @@ void commit_sample_rand_crt(pcrt_poly_t r, flint_rand_t rand) {
 	nmod_poly_t t;
 
 	nmod_poly_init(t, MODP);
-	commit_sample_rand(t, rand);
+	commit_sample_rand(t, rand, DEGREE);
 	for (int i = 0; i < 2; i++) {
 		nmod_poly_rem(r[i], t, irred[i]);
 	}
@@ -542,8 +547,8 @@ static void microbench(flint_rand_t rand) {
 		nmod_poly_init(u[i], MODP);
 	}
 
-	commit_sample_rand(beta, rand);
-	commit_sample_rand(alpha, rand);
+	commit_sample_rand(beta, rand, DEGREE);
+	commit_sample_rand(alpha, rand, DEGREE);
 
 	BENCH_BEGIN("Polynomial addition") {
 		BENCH_ADD(nmod_poly_add(alpha, alpha, beta));
@@ -572,8 +577,12 @@ static void microbench(flint_rand_t rand) {
 
 int main(int argc, char *arv[]) {
 	flint_rand_t rand;
+	uint64_t buf[2];
 
+	getrandom(buf, sizeof(buf), GRND_RANDOM);
 	flint_randinit(rand);
+	flint_randseed(rand, buf[0], buf[1]);
+
 	commit_setup();
 
 	printf("\n** Tests for lattice-based commitments:\n\n");
@@ -586,5 +595,6 @@ int main(int argc, char *arv[]) {
 	bench(rand);
 
 	commit_finish();
+	flint_randclear(rand);
 }
 #endif
