@@ -97,6 +97,7 @@ void lin_hash(nmod_poly_t d[2], commitkey_t *key, commit_t x, commit_t y,
 	nmod_poly_sub(d[1], d[0], d[1]);
 	nmod_poly_rem(d[0], d[1], *commit_irred(0));
 	nmod_poly_rem(d[1], d[1], *commit_irred(1));
+	/* TODO: rejection sampling. */
 }
 
 static void lin_prover(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
@@ -275,10 +276,11 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2], nmod_poly_t _y[MSGS][W
 		commit_t d[MSGS], nmod_poly_t s[MSGS], commit_t com[MSGS],
 		nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS], nmod_poly_t r[MSGS][WIDTH][2],
 		nmod_poly_t rho, commitkey_t *key, flint_rand_t rng) {
-	nmod_poly_t t0, t1, theta[MSGS], _r[MSGS][WIDTH][2];
+	nmod_poly_t beta, t0, t1, theta[MSGS], _r[MSGS][WIDTH][2];
 
 	nmod_poly_init(t0, MODP);
 	nmod_poly_init(t1, MODP);
+	nmod_poly_init(beta, MODP);
 	for (int i = 0; i < MSGS; i++) {
 		nmod_poly_init(theta[i], MODP);
 		for (int k = 0; k < 2; k++) {
@@ -317,35 +319,39 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2], nmod_poly_t _y[MSGS][W
 	}
 	commit_doit(&d[MSGS - 1], t0, key, _r[MSGS - 1]);
 
-
-	shuffle_hash(s[0], com, d);
-	nmod_poly_mulmod(s[1], theta[0], _m[0], *commit_poly());
-	nmod_poly_mulmod(t0, s[0], m[0], *commit_poly());
-	nmod_poly_sub(s[1], s[1], t0);
+	shuffle_hash(beta, com, d);
+	nmod_poly_mulmod(s[0], theta[0], _m[0], *commit_poly());
+	nmod_poly_mulmod(t0, beta, m[0], *commit_poly());
+	nmod_poly_sub(s[0], s[0], t0);
 	nmod_poly_invmod(t0, _m[0], *commit_poly());
-	nmod_poly_mulmod(s[1], s[1], t0, *commit_poly());
+	nmod_poly_mulmod(s[0], s[0], t0, *commit_poly());
 	for (int i = 1; i < MSGS - 1; i++) {
-		nmod_poly_mulmod(s[i + 1], theta[i - 1], m[i], *commit_poly());
+		nmod_poly_mulmod(s[i], theta[i - 1], m[i], *commit_poly());
 		nmod_poly_mulmod(t0, theta[i], _m[i], *commit_poly());
-		nmod_poly_add(s[i + 1], s[i + 1], t0);
-		nmod_poly_mulmod(t0, s[i], m[i], *commit_poly());
-		nmod_poly_sub(s[i + 1], s[i + 1], t0);
+		nmod_poly_add(s[i], s[i], t0);
+		nmod_poly_mulmod(t0, s[i - 1], m[i], *commit_poly());
+		nmod_poly_sub(s[i], s[i], t0);
 		nmod_poly_invmod(t0, _m[i], *commit_poly());
-		nmod_poly_mulmod(s[i + 1], s[i + 1], t0, *commit_poly());
+		nmod_poly_mulmod(s[i], s[i], t0, *commit_poly());
 	}
 
 	for (int l = 0; l < MSGS; l++) {
 		if (l < MSGS - 1) {
-			nmod_poly_mulmod(t0, s[l + 1], _m[l], *commit_poly());
+			nmod_poly_mulmod(t0, s[l], _m[l], *commit_poly());
 		} else {
-			nmod_poly_mulmod(t0, s[0], _m[l], *commit_poly());
+			nmod_poly_mulmod(t0, beta, _m[l], *commit_poly());
 		}
 
-		lin_prover(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l], key, s[l], t0, r[l], _r[l], l);
+		if (l == 0) {
+			lin_prover(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l], key, beta, t0, r[l], _r[l], l);
+		} else {
+			lin_prover(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l], key, s[l - 1], t0, r[l], _r[l], l);
+		}
 	}
 
 	nmod_poly_clear(t0);
 	nmod_poly_clear(t1);
+	nmod_poly_clear(beta);
 	for (int i = 0; i < MSGS; i++) {
 		nmod_poly_clear(theta[i]);
 		for (int k = 0; k < 2; k++) {
@@ -370,12 +376,16 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2], nmod_poly_t _y[MSGS][
 	/* Now verify each \Prod_LIN instance, one for each commitment. */
 	for (int l = 0; l < MSGS; l++) {
 		if (l < MSGS - 1) {
-			nmod_poly_mulmod(t0, s[l + 1], _m[l], *commit_poly());
+			nmod_poly_mulmod(t0, s[l], _m[l], *commit_poly());
 		} else {
 			nmod_poly_mulmod(t0, beta, _m[l], *commit_poly());
 		}
 
-		result &= lin_verifier(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l], key, s[l], t0, l);
+		if (l == 0) {
+			result &= lin_verifier(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l], key, beta, t0, l);
+		} else {
+			result &= lin_verifier(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l], key, s[l - 1], t0, l);
+		}
 	}
 
 	nmod_poly_clear(t0);
