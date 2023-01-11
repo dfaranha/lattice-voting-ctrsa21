@@ -19,6 +19,7 @@ void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS]) {
 	flint_rand_t rand;
 	SHA256Context sha;
 	uint8_t hash[SHA256HashSize];
+	uint64_t seed0, seed1;
 
 	SHA256Reset(&sha);
 
@@ -34,7 +35,9 @@ void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS]) {
 	SHA256Result(&sha, hash);
 
 	flint_randinit(rand);
-	flint_randseed(rand, hash[0], hash[1]);
+	memcpy(&seed0, hash, sizeof(uint64_t));
+	memcpy(&seed1, hash + SHA256HashSize/2, sizeof(uint64_t));
+	flint_randseed(rand, seed0, seed1);
 	commit_sample_rand(beta, rand);
 	flint_randclear(rand);
 }
