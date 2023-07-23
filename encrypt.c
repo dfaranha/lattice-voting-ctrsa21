@@ -77,7 +77,7 @@ void encrypt_sample_short(fmpz_mod_poly_t r, fmpz_mod_ctx_t ctx) {
 			if ((buf >> j) & 1) {
 				fmpz_neg(coeff, coeff);
 			}
-			fmpz_mod_poly_set_coeff_fmpz(r, (i+j/2) % DEGREE, coeff, ctx);
+			fmpz_mod_poly_set_coeff_fmpz(r, (i + j / 2) % DEGREE, coeff, ctx);
 		}
 	}
 
@@ -221,7 +221,8 @@ void encrypt_keygen(publickey_t *pk, privatekey_t *sk, flint_rand_t rand) {
 	for (int i = 0; i < DIM; i++) {
 		for (int j = 0; j < DIM; j++) {
 			for (int k = 0; k < 2; k++) {
-				fmpz_mod_poly_mulmod(t, pk->A[i][j][k], sk->s1[j][k], irred[k], ctx_q);
+				fmpz_mod_poly_mulmod(t, pk->A[i][j][k], sk->s1[j][k], irred[k],
+						ctx_q);
 				fmpz_mod_poly_add(pk->t[i][k], pk->t[i][k], t, ctx_q);
 			}
 		}
@@ -247,7 +248,7 @@ void encrypt_keyfree(publickey_t *pk, privatekey_t *sk) {
 
 // Internal encryption function.
 void encrypt_make(ciphertext_t *c, qcrt_poly_t r[DIM], qcrt_poly_t e[DIM],
-	qcrt_poly_t e_, fmpz_mod_poly_t m, publickey_t *pk) {
+		qcrt_poly_t e_, fmpz_mod_poly_t m, publickey_t *pk) {
 	fmpz_poly_t s;
 	fmpz_mod_poly_t _m, t;
 	fmpz_t coeff, p2;
@@ -269,7 +270,8 @@ void encrypt_make(ciphertext_t *c, qcrt_poly_t r[DIM], qcrt_poly_t e[DIM],
 	for (int i = 0; i < DIM; i++) {
 		for (int j = 0; j < DIM; j++) {
 			for (int k = 0; k < 2; k++) {
-				fmpz_mod_poly_mulmod(t, pk->A[j][i][k], r[j][k], irred[k], ctx_q);
+				fmpz_mod_poly_mulmod(t, pk->A[j][i][k], r[j][k], irred[k],
+						ctx_q);
 				fmpz_mod_poly_add(c->v[i][k], c->v[i][k], t, ctx_q);
 			}
 		}
@@ -308,7 +310,8 @@ void encrypt_make(ciphertext_t *c, qcrt_poly_t r[DIM], qcrt_poly_t e[DIM],
 }
 
 // Encrypt a message under a public key.
-void encrypt_doit(ciphertext_t *c, fmpz_mod_poly_t m, publickey_t *pk, flint_rand_t rand) {
+void encrypt_doit(ciphertext_t *c, fmpz_mod_poly_t m, publickey_t *pk,
+		flint_rand_t rand) {
 	qcrt_poly_t r[DIM], e[DIM], e_;
 
 	for (int i = 0; i < DIM; i++) {
@@ -334,7 +337,8 @@ void encrypt_doit(ciphertext_t *c, fmpz_mod_poly_t m, publickey_t *pk, flint_ran
 }
 
 // Decrypt ciphertext to the original plaintext message.
-int encrypt_undo(fmpz_mod_poly_t m, fmpz_mod_poly_t chall, ciphertext_t *c, privatekey_t *sk) {
+int encrypt_undo(fmpz_mod_poly_t m, fmpz_mod_poly_t chall, ciphertext_t *c,
+		privatekey_t *sk) {
 	fmpz_poly_t s;
 	fmpz_mod_poly_t t, u[2];
 	int result = 1;
@@ -381,7 +385,7 @@ int encrypt_undo(fmpz_mod_poly_t m, fmpz_mod_poly_t chall, ciphertext_t *c, priv
 			if (fmpz_cmp(coeff, q2) >= 0) {
 				result = 0;
 			}
-		}		
+		}
 	}
 
 	fmpz_clear(coeff);
@@ -437,7 +441,7 @@ static void test(flint_rand_t rand) {
 		TEST_ASSERT(encrypt_undo(_m, NULL, &c, &sk) == 1, end);
 		TEST_ASSERT(fmpz_mod_poly_equal(m, _m, ctx_p) == 1, end);
 	} TEST_END;
-end:
+  end:
 	fmpz_mod_poly_clear(w[0], ctx_q);
 	fmpz_mod_poly_clear(w[1], ctx_q);
 	fmpz_mod_poly_clear(m, ctx_p);

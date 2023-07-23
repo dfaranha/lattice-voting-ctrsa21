@@ -46,7 +46,7 @@ static int test_norm(nmod_poly_t r) {
 	sigma_sqr *= sigma_sqr * DEGREE * WIDTH;
 
 	// Compare to (4 * sigma * sqrt(N))^2 = 16 * sigma^2 * N.
-	return norm <= (uint64_t)16 * sigma_sqr * DEGREE;
+	return norm <= (uint64_t) 16 *sigma_sqr * DEGREE;
 }
 
 /*============================================================================*/
@@ -111,7 +111,8 @@ uint64_t commit_norm2_sqr(nmod_poly_t r) {
 	/* Compute norm^2. */
 	for (int i = 0; i < DEGREE; i++) {
 		coeff = nmod_poly_get_coeff_ui(r, i);
-		if (coeff > MODP / 2) coeff -= MODP;
+		if (coeff > MODP / 2)
+			coeff -= MODP;
 		norm += coeff * coeff;
 	}
 	return norm;
@@ -125,8 +126,10 @@ uint64_t commit_norm_inf(nmod_poly_t r) {
 	/* Compute norm_\infty = max absolute coefficient. */
 	for (int i = 0; i < DEGREE; i++) {
 		coeff = nmod_poly_get_coeff_ui(r, i);
-		if (coeff > MODP / 2) coeff = MODP - coeff;
-		if (coeff > norm) norm = coeff;
+		if (coeff > MODP / 2)
+			coeff = MODP - coeff;
+		if (coeff > norm)
+			norm = coeff;
 	}
 	return norm;
 }
@@ -195,12 +198,12 @@ void commit_sample_short(nmod_poly_t r) {
 	j = s;
 
 	do {
-		if(j == s) {
+		if (j == s) {
 			getrandom(&buf, sizeof(buf), 0);
 			j = 0;
 		}
 
-		if (((buf >> j) & 1) & ((buf >> (j+1)) & 1)){
+		if (((buf >> j) & 1) & ((buf >> (j + 1)) & 1)) {
 			j += 2;
 		} else {
 			coeff = MODP - 1 + ((buf >> j) & 3);
@@ -208,7 +211,7 @@ void commit_sample_short(nmod_poly_t r) {
 			i++;
 			j += 2;
 		}
-	} while(i < DEGREE);
+	} while (i < DEGREE);
 }
 
 // Sample a short polynomial in CRT representation.
@@ -230,7 +233,7 @@ void commit_sample_rand(nmod_poly_t r, flint_rand_t rand, int degree) {
 		r->coeffs[i] = n_randtest(rand) % MODP;
 	}
 	r->length = degree;
-    _nmod_poly_normalise(r);
+	_nmod_poly_normalise(r);
 }
 
 // Sample a random polynomial in CRT representation.
@@ -284,9 +287,10 @@ void commit_sample_chall_crt(pcrt_poly_t f) {
 // Sample a polynomial according to a Gaussian distribution.
 void commit_sample_gauss(nmod_poly_t r) {
 	int32_t coeff;
-	for (int i = 0; i < DEGREE; i ++) {
+	for (int i = 0; i < DEGREE; i++) {
 		coeff = discrete_gaussian(0.0);
-		if (coeff < 0) coeff += MODP;
+		if (coeff < 0)
+			coeff += MODP;
 		nmod_poly_set_coeff_ui(r, i, coeff);
 	}
 }
@@ -304,7 +308,8 @@ void commit_sample_gauss_crt(nmod_poly_t r[2]) {
 }
 
 // Commit to a message.
-void commit_doit(commit_t *com, nmod_poly_t m, commitkey_t *key, pcrt_poly_t r[WIDTH]) {
+void commit_doit(commit_t *com, nmod_poly_t m, commitkey_t *key,
+		pcrt_poly_t r[WIDTH]) {
 	nmod_poly_t t;
 
 	nmod_poly_init(t, MODP);
@@ -339,7 +344,8 @@ void commit_doit(commit_t *com, nmod_poly_t m, commitkey_t *key, pcrt_poly_t r[W
 }
 
 // Open a commitment on a message, randomness, factor.
-int commit_open(commit_t *com, nmod_poly_t m, commitkey_t *key,  pcrt_poly_t r[WIDTH], pcrt_poly_t f) {
+int commit_open(commit_t *com, nmod_poly_t m, commitkey_t *key,
+		pcrt_poly_t r[WIDTH], pcrt_poly_t f) {
 	nmod_poly_t t;
 	pcrt_poly_t c1, c2, _c1, _c2;
 	int result = 0;
@@ -386,8 +392,10 @@ int commit_open(commit_t *com, nmod_poly_t m, commitkey_t *key,  pcrt_poly_t r[W
 		if (test_norm(t)) {
 			pcrt_poly_rec(t, r[2]);
 			if (test_norm(t)) {
-				if (nmod_poly_equal(_c1[0], c1[0]) && nmod_poly_equal(_c2[0], c2[0])) {
-					if (nmod_poly_equal(_c1[1], c1[1]) && nmod_poly_equal(_c2[1], c2[1])) {
+				if (nmod_poly_equal(_c1[0], c1[0]) &&
+						nmod_poly_equal(_c2[0], c2[0])) {
+					if (nmod_poly_equal(_c1[1], c1[1]) &&
+							nmod_poly_equal(_c2[1], c2[1])) {
 						result = 1;
 					}
 				}
@@ -471,7 +479,7 @@ static void test(flint_rand_t rand) {
 		TEST_ASSERT(commit_open(&com, m, &key, s, f) == 1, end);
 	} TEST_END;
 
-end:
+  end:
 	commit_keyfree(&key);
 	commit_free(&com);
 	nmod_poly_clear(m);
@@ -563,16 +571,16 @@ static void microbench(flint_rand_t rand) {
 
 	BENCH_BEGIN("Polynomial mult in CRT form") {
 		BENCH_ADD(nmod_poly_mulmod(t[0], t[0], u[0], irred[0]));
-	}}
-	bench_compute(BENCH * (BENCH >> 1));
-	bench_print();
+}}
+bench_compute(BENCH * (BENCH >> 1));
+bench_print();
 
-	nmod_poly_clear(alpha);
-	nmod_poly_clear(beta);
-	for (int i = 0; i < 2; i++) {
-		nmod_poly_clear(t[i]);
-		nmod_poly_clear(u[i]);
-	}
+nmod_poly_clear(alpha);
+nmod_poly_clear(beta);
+for (int i = 0; i < 2; i++) {
+	nmod_poly_clear(t[i]);
+	nmod_poly_clear(u[i]);
+}
 }
 
 int main(int argc, char *arv[]) {

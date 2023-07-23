@@ -74,7 +74,7 @@ static void cache_default_color(void) {
  * Changes font to test failure mode.
  */
 static void fail_font(void) {
-    cache_default_color();
+	cache_default_color();
 #ifdef COLOR
 #ifdef _MSC_VER
 	HANDLE m_hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -89,7 +89,7 @@ static void fail_font(void) {
  * Changes font to test pass mode.
  */
 static void pass_font(void) {
-    cache_default_color();
+	cache_default_color();
 #ifdef COLOR
 #ifdef _MSC_VER
 	HANDLE m_hConsole = GetStdHandle(STD_OUTPUT_HANDLE);

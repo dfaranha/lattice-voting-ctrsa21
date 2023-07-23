@@ -10,7 +10,7 @@
 /**
  * Number of times each benchmark is ran.
  */
-#define BENCH 	100
+#define BENCH 	10
 
 /**
  * Runs a new benchmark once.

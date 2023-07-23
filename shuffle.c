@@ -16,14 +16,14 @@
 #define MSGS        25
 
 int rej_sampling(nmod_poly_t z[WIDTH][2], nmod_poly_t v[WIDTH][2], double s2) {
-    double r, M = 3;
+	double r, M = 3;
 	int64_t seed, dot;
 	uint64_t norm;
 	mpf_t u;
 	uint32_t c0, c1;
 	nmod_poly_t t0, t1;
 	uint8_t buf[8];
-    gmp_randstate_t state;
+	gmp_randstate_t state;
 	int result;
 
 	mpf_init(u);
@@ -42,9 +42,11 @@ int rej_sampling(nmod_poly_t z[WIDTH][2], nmod_poly_t v[WIDTH][2], double s2) {
 		pcrt_poly_rec(t1, v[i]);
 		for (int j = 0; j < DEGREE; j++) {
 			c0 = nmod_poly_get_coeff_ui(t0, j);
-			if (c0 > MODP / 2) c0 -= MODP;
+			if (c0 > MODP / 2)
+				c0 -= MODP;
 			c1 = nmod_poly_get_coeff_ui(t1, j);
-			if (c1 > MODP / 2) c1 -= MODP;
+			if (c1 > MODP / 2)
+				c1 -= MODP;
 			dot += c0 * c1;
 		}
 		norm += commit_norm2_sqr(t1);
@@ -75,27 +77,38 @@ void lin_hash(nmod_poly_t d[2], commitkey_t *key, commit_t x, commit_t y,
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < WIDTH; j++) {
 			for (int k = 0; k < 2; k++) {
-				SHA256Input(&sha, (const uint8_t*)key->B1[i][j][k]->coeffs, key->B1[i][j][k]->alloc * sizeof(uint64_t));
+				SHA256Input(&sha, (const uint8_t *)key->B1[i][j][k]->coeffs,
+						key->B1[i][j][k]->alloc * sizeof(uint64_t));
 				if (i == 0) {
-					SHA256Input(&sha, (const uint8_t*)key->b2[j][k]->coeffs, key->b2[j][k]->alloc * sizeof(uint64_t));
+					SHA256Input(&sha, (const uint8_t *)key->b2[j][k]->coeffs,
+							key->b2[j][k]->alloc * sizeof(uint64_t));
 				}
 			}
 		}
 	}
 
 	/* Hash alpha, beta from linear relation. */
-	SHA256Input(&sha, (const uint8_t*)alpha->coeffs, alpha->alloc * sizeof(uint64_t));
-	SHA256Input(&sha, (const uint8_t*)beta->coeffs, beta->alloc * sizeof(uint64_t));
+	SHA256Input(&sha, (const uint8_t *)alpha->coeffs,
+			alpha->alloc * sizeof(uint64_t));
+	SHA256Input(&sha, (const uint8_t *)beta->coeffs,
+			beta->alloc * sizeof(uint64_t));
 
 	/* Hash [x], [x'], t, t' in CRT representation. */
 	for (int i = 0; i < 2; i++) {
-		SHA256Input(&sha, (const uint8_t*)x.c1[i]->coeffs, x.c1[i]->alloc * sizeof(uint64_t));
-		SHA256Input(&sha, (const uint8_t*)x.c2[i]->coeffs, x.c2[i]->alloc * sizeof(uint64_t));
-		SHA256Input(&sha, (const uint8_t*)y.c1[i]->coeffs, y.c1[i]->alloc * sizeof(uint64_t));
-		SHA256Input(&sha, (const uint8_t*)y.c2[i]->coeffs, y.c2[i]->alloc * sizeof(uint64_t));
-		SHA256Input(&sha, (const uint8_t*)u[i]->coeffs, u[i]->alloc * sizeof(uint64_t));
-		SHA256Input(&sha, (const uint8_t*)t[i]->coeffs, t[i]->alloc * sizeof(uint64_t));
-		SHA256Input(&sha, (const uint8_t*)_t[i]->coeffs, _t[i]->alloc * sizeof(uint64_t));
+		SHA256Input(&sha, (const uint8_t *)x.c1[i]->coeffs,
+				x.c1[i]->alloc * sizeof(uint64_t));
+		SHA256Input(&sha, (const uint8_t *)x.c2[i]->coeffs,
+				x.c2[i]->alloc * sizeof(uint64_t));
+		SHA256Input(&sha, (const uint8_t *)y.c1[i]->coeffs,
+				y.c1[i]->alloc * sizeof(uint64_t));
+		SHA256Input(&sha, (const uint8_t *)y.c2[i]->coeffs,
+				y.c2[i]->alloc * sizeof(uint64_t));
+		SHA256Input(&sha, (const uint8_t *)u[i]->coeffs,
+				u[i]->alloc * sizeof(uint64_t));
+		SHA256Input(&sha, (const uint8_t *)t[i]->coeffs,
+				t[i]->alloc * sizeof(uint64_t));
+		SHA256Input(&sha, (const uint8_t *)_t[i]->coeffs,
+				_t[i]->alloc * sizeof(uint64_t));
 	}
 
 	SHA256Result(&sha, hash);
@@ -155,9 +168,11 @@ static void lin_prover(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
 		for (int i = 0; i < HEIGHT; i++) {
 			for (int j = 0; j < WIDTH; j++) {
 				for (int k = 0; k < 2; k++) {
-					nmod_poly_mulmod(tmp, key->B1[i][j][k], y[j][k], *commit_irred(k));
+					nmod_poly_mulmod(tmp, key->B1[i][j][k], y[j][k],
+							*commit_irred(k));
 					nmod_poly_add(t[k], t[k], tmp);
-					nmod_poly_mulmod(tmp, key->B1[i][j][k], _y[j][k], *commit_irred(k));
+					nmod_poly_mulmod(tmp, key->B1[i][j][k], _y[j][k],
+							*commit_irred(k));
 					nmod_poly_add(_t[k], _t[k], tmp);
 				}
 			}
@@ -168,7 +183,8 @@ static void lin_prover(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
 				nmod_poly_mulmod(tmp, key->b2[i][j], y[i][j], *commit_irred(j));
 				nmod_poly_mulmod(tmp, tmp, alpha, *commit_irred(j));
 				nmod_poly_add(u[j], u[j], tmp);
-				nmod_poly_mulmod(tmp, key->b2[i][j], _y[i][j], *commit_irred(j));
+				nmod_poly_mulmod(tmp, key->b2[i][j], _y[i][j],
+						*commit_irred(j));
 				nmod_poly_sub(u[j], u[j], tmp);
 			}
 		}
@@ -228,16 +244,20 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
 	for (int i = 0; i < WIDTH; i++) {
 		pcrt_poly_rec(z[i], y[i]);
 		pcrt_poly_rec(_z[i], _y[i]);
-		assert(commit_norm2_sqr(z[i]) <= (uint64_t)4 * DEGREE * SIGMA_C * SIGMA_C);
-		assert(commit_norm2_sqr(_z[i]) <= (uint64_t)4 * DEGREE * SIGMA_C * SIGMA_C);
+		assert(commit_norm2_sqr(z[i]) <=
+				(uint64_t) 4 * DEGREE * SIGMA_C * SIGMA_C);
+		assert(commit_norm2_sqr(_z[i]) <=
+				(uint64_t) 4 * DEGREE * SIGMA_C * SIGMA_C);
 	}
 	/* Verifier computes B1z and B1z'. */
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < WIDTH; j++) {
 			for (int k = 0; k < 2; k++) {
-				nmod_poly_mulmod(tmp, key->B1[i][j][k], y[j][k], *commit_irred(k));
+				nmod_poly_mulmod(tmp, key->B1[i][j][k], y[j][k],
+						*commit_irred(k));
 				nmod_poly_add(v[k], v[k], tmp);
-				nmod_poly_mulmod(tmp, key->B1[i][j][k], _y[j][k], *commit_irred(k));
+				nmod_poly_mulmod(tmp, key->B1[i][j][k], _y[j][k],
+						*commit_irred(k));
 				nmod_poly_add(_v[k], _v[k], tmp);
 			}
 		}
@@ -323,15 +343,21 @@ void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS],
 	SHA256Reset(&sha);
 
 	for (int i = 0; i < MSGS; i++) {
-		SHA256Input(&sha, (const uint8_t*)_m[i]->coeffs, _m[i]->alloc * sizeof(uint64_t));
+		SHA256Input(&sha, (const uint8_t *)_m[i]->coeffs,
+				_m[i]->alloc * sizeof(uint64_t));
 		for (int j = 0; j < 2; j++) {
-			SHA256Input(&sha, (const uint8_t*)c[i].c1[j]->coeffs, c[i].c1[j]->alloc * sizeof(uint64_t));
-			SHA256Input(&sha, (const uint8_t*)c[i].c2[j]->coeffs, c[i].c2[j]->alloc * sizeof(uint64_t));
-			SHA256Input(&sha, (const uint8_t*)d[i].c1[j]->coeffs, d[i].c1[j]->alloc * sizeof(uint64_t));
-			SHA256Input(&sha, (const uint8_t*)d[i].c2[j]->coeffs, d[i].c2[j]->alloc * sizeof(uint64_t));
+			SHA256Input(&sha, (const uint8_t *)c[i].c1[j]->coeffs,
+					c[i].c1[j]->alloc * sizeof(uint64_t));
+			SHA256Input(&sha, (const uint8_t *)c[i].c2[j]->coeffs,
+					c[i].c2[j]->alloc * sizeof(uint64_t));
+			SHA256Input(&sha, (const uint8_t *)d[i].c1[j]->coeffs,
+					d[i].c1[j]->alloc * sizeof(uint64_t));
+			SHA256Input(&sha, (const uint8_t *)d[i].c2[j]->coeffs,
+					d[i].c2[j]->alloc * sizeof(uint64_t));
 		}
 	}
-	SHA256Input(&sha, (const uint8_t*)rho->coeffs, rho->alloc * sizeof(uint64_t));
+	SHA256Input(&sha, (const uint8_t *)rho->coeffs,
+			rho->alloc * sizeof(uint64_t));
 	SHA256Result(&sha, hash);
 
 	flint_randinit(rand);
@@ -346,11 +372,12 @@ void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS],
 	flint_randclear(rand);
 }
 
-static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2], nmod_poly_t _y[MSGS][WIDTH][2],
-		nmod_poly_t t[MSGS][2], nmod_poly_t _t[MSGS][2], nmod_poly_t u[MSGS][2],
-		commit_t d[MSGS], nmod_poly_t s[MSGS], commit_t com[MSGS],
-		nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS], nmod_poly_t r[MSGS][WIDTH][2],
-		nmod_poly_t rho, commitkey_t *key, flint_rand_t rng) {
+static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
+		nmod_poly_t _y[MSGS][WIDTH][2], nmod_poly_t t[MSGS][2],
+		nmod_poly_t _t[MSGS][2], nmod_poly_t u[MSGS][2], commit_t d[MSGS],
+		nmod_poly_t s[MSGS], commit_t com[MSGS], nmod_poly_t m[MSGS],
+		nmod_poly_t _m[MSGS], nmod_poly_t r[MSGS][WIDTH][2], nmod_poly_t rho,
+		commitkey_t *key, flint_rand_t rng) {
 	nmod_poly_t beta, t0, t1, theta[MSGS], _r[MSGS][WIDTH][2];
 
 	nmod_poly_init(t0, MODP);
@@ -418,9 +445,11 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2], nmod_poly_t _y[MSGS][W
 		}
 
 		if (l == 0) {
-			lin_prover(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l], key, beta, t0, r[l], _r[l], l);
+			lin_prover(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l], key, beta,
+					t0, r[l], _r[l], l);
 		} else {
-			lin_prover(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l], key, s[l - 1], t0, r[l], _r[l], l);
+			lin_prover(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l], key,
+					s[l - 1], t0, r[l], _r[l], l);
 		}
 	}
 
@@ -437,10 +466,11 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2], nmod_poly_t _y[MSGS][W
 	}
 }
 
-static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2], nmod_poly_t _y[MSGS][WIDTH][2],
-		nmod_poly_t t[MSGS][2], nmod_poly_t _t[MSGS][2], nmod_poly_t u[MSGS][2],
-		commit_t d[MSGS], nmod_poly_t s[MSGS], commit_t com[MSGS],
-		nmod_poly_t _m[MSGS], nmod_poly_t rho, commitkey_t *key) {
+static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
+		nmod_poly_t _y[MSGS][WIDTH][2], nmod_poly_t t[MSGS][2],
+		nmod_poly_t _t[MSGS][2], nmod_poly_t u[MSGS][2], commit_t d[MSGS],
+		nmod_poly_t s[MSGS], commit_t com[MSGS], nmod_poly_t _m[MSGS],
+		nmod_poly_t rho, commitkey_t *key) {
 	int result = 1;
 	nmod_poly_t beta, t0;
 
@@ -457,9 +487,13 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2], nmod_poly_t _y[MSGS][
 		}
 
 		if (l == 0) {
-			result &= lin_verifier(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l], key, beta, t0, l);
+			result &=
+					lin_verifier(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l],
+					key, beta, t0, l);
 		} else {
-			result &= lin_verifier(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l], key, s[l - 1], t0, l);
+			result &=
+					lin_verifier(y[l], _y[l], t[l], _t[l], u[l], com[l], d[l],
+					key, s[l - 1], t0, l);
 		}
 	}
 
@@ -569,7 +603,7 @@ static void test(flint_rand_t rand) {
 		TEST_ASSERT(run(com, m, _m, r, &key, rand) == 1, end);
 	} TEST_END;
 
-end:
+  end:
 	commit_finish();
 
 	for (int i = 0; i < MSGS; i++) {
@@ -598,7 +632,8 @@ static void bench(flint_rand_t rand) {
 	for (int i = 0; i < MSGS; i++) {
 		nmod_poly_init(m[i], MODP);
 		nmod_poly_init(_m[i], MODP);
-		if (i != MSGS - 1) nmod_poly_init(s[i], MODP);
+		if (i != MSGS - 1)
+			nmod_poly_init(s[i], MODP);
 		for (int j = 0; j < WIDTH; j++) {
 			for (int k = 0; k < 2; k++) {
 				nmod_poly_init(r[i][j][k], MODP);
@@ -649,12 +684,14 @@ static void bench(flint_rand_t rand) {
 	commit_sample_rand(beta, rand, DEGREE);
 	commit_sample_rand(alpha, rand, DEGREE);
 
-	BENCH_BEGIN("linear-proof") {
-		BENCH_ADD(lin_prover(y, _y, t, _t, u, com[0], com[1], &key, alpha, beta, r[0], r[0], 0));
+	BENCH_BEGIN("linear proof") {
+		BENCH_ADD(lin_prover(y, _y, t, _t, u, com[0], com[1], &key, alpha, beta,
+						r[0], r[0], 0));
 	} BENCH_END;
 
-	BENCH_BEGIN("verifier proof") {
-		BENCH_ADD(lin_verifier(y, _y, t, _t, u, com[0], com[1], &key, alpha, beta, 0));
+	BENCH_BEGIN("linear verifier") {
+		BENCH_ADD(lin_verifier(y, _y, t, _t, u, com[0], com[1], &key, alpha,
+						beta, 0));
 	} BENCH_END;
 
 	commit_finish();
