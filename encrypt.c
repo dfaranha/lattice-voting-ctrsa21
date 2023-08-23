@@ -346,10 +346,10 @@ int encrypt_undo(fmpz_mod_poly_t m, fmpz_mod_poly_t chall, ciphertext_t *c,
 	fmpz_poly_init(s);
 	fmpz_mod_poly_init(t, ctx_q);
 
-	for (int i = 0; i < DIM; i++) {
+	for (int i = 0; i < 2; i++) {
 		fmpz_mod_poly_init(u[i], ctx_q);
 		fmpz_mod_poly_zero(u[i], ctx_q);
-		for (int j = 0; j < 2; j++) {
+		for (int j = 0; j < DIM; j++) {
 			fmpz_mod_poly_mulmod(t, c->v[j][i], sk->s1[j][i], irred[i], ctx_q);
 			fmpz_mod_poly_add(u[i], u[i], t, ctx_q);
 		}
