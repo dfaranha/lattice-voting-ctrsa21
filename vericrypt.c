@@ -414,10 +414,10 @@ int vericrypt_verify(veritext_t *in, fmpz_mod_poly_t t[VECTOR],
 	return (result == 1);
 }
 
-#include <assert.h>
 int vericrypt_undo(fmpz_mod_poly_t m[VECTOR], fmpz_mod_poly_t c,
 		veritext_t *in, fmpz_mod_poly_t t[VECTOR], fmpz_mod_poly_t u,
 		publickey_t *pk, privatekey_t *sk) {
+	int result = 1;
 
 	if (vericrypt_verify(in, t, u, pk) == 0) {
 		return 0;
@@ -427,10 +427,10 @@ int vericrypt_undo(fmpz_mod_poly_t m[VECTOR], fmpz_mod_poly_t c,
 	fmpz_mod_poly_sub(c, in->c, c, *encrypt_modulus_ctx());
 
 	for (int i = 0; i < VECTOR; i++) {
-		assert(encrypt_undo(m[i], c, &in->cipher[i], sk) == 1);
+		result &= encrypt_undo(m[i], c, &in->cipher[i], sk);
 	}
 
-	return 1;
+	return result;
 }
 
 #ifdef MAIN
