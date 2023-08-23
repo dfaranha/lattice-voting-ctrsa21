@@ -480,13 +480,9 @@ static void test(flint_rand_t rand) {
 					*encrypt_modulus_ctx());
 			fmpz_mod_poly_add(v, v, tmp, *encrypt_modulus_ctx());
 		}
-		fmpz_mod_poly_mulmod(tmp, u, c, *encrypt_poly(),
-				*encrypt_modulus_ctx());
+		fmpz_mod_poly_mulmod(u, u, c, *encrypt_poly(), *encrypt_modulus_ctx());
 
-		for (int i = 0; i < VECTOR; i++) {
-			TEST_ASSERT(fmpz_mod_poly_equal(v, tmp,
-							*encrypt_modulus_ctx()) == 1, end);
-		}
+		TEST_ASSERT(fmpz_mod_poly_equal(u, v, *encrypt_modulus_ctx()) == 1, end);
 	} TEST_END;
 
   end:

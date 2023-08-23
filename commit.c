@@ -105,8 +105,7 @@ void pcrt_poly_rec(nmod_poly_t c, pcrt_poly_t a) {
 
 // Compute squared l2-norm.
 uint64_t commit_norm2_sqr(nmod_poly_t r) {
-	int64_t norm = 0;
-	uint32_t coeff;
+	int64_t coeff, norm = 0;
 
 	/* Compute norm^2. */
 	for (int i = 0; i < DEGREE; i++) {
@@ -114,22 +113,6 @@ uint64_t commit_norm2_sqr(nmod_poly_t r) {
 		if (coeff > MODP / 2)
 			coeff -= MODP;
 		norm += coeff * coeff;
-	}
-	return norm;
-}
-
-// Compute squared l\infty-norm.
-uint64_t commit_norm_inf(nmod_poly_t r) {
-	int64_t norm = 0;
-	uint32_t coeff;
-
-	/* Compute norm_\infty = max absolute coefficient. */
-	for (int i = 0; i < DEGREE; i++) {
-		coeff = nmod_poly_get_coeff_ui(r, i);
-		if (coeff > MODP / 2)
-			coeff = MODP - coeff;
-		if (coeff > norm)
-			norm = coeff;
 	}
 	return norm;
 }
@@ -286,7 +269,7 @@ void commit_sample_chall_crt(pcrt_poly_t f) {
 
 // Sample a polynomial according to a Gaussian distribution.
 void commit_sample_gauss(nmod_poly_t r) {
-	int32_t coeff;
+	int64_t coeff;
 	for (int i = 0; i < DEGREE; i++) {
 		coeff = discrete_gaussian(0.0);
 		if (coeff < 0)
