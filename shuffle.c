@@ -15,12 +15,11 @@
 
 #define MSGS        25
 
-int rej_sampling(nmod_poly_t z[WIDTH][2], nmod_poly_t v[WIDTH][2], double s2) {
-	double r, M = 3;
-	int64_t seed, dot;
-	uint64_t norm;
+int rej_sampling(nmod_poly_t z[WIDTH][2], nmod_poly_t v[WIDTH][2], uint64_t s2) {
+	double r, M = 1.75;
+	int64_t seed, dot, norm;
 	mpf_t u;
-	uint32_t c0, c1;
+	int64_t c0, c1;
 	nmod_poly_t t0, t1;
 	uint8_t buf[8];
 	gmp_randstate_t state;
@@ -42,22 +41,22 @@ int rej_sampling(nmod_poly_t z[WIDTH][2], nmod_poly_t v[WIDTH][2], double s2) {
 		pcrt_poly_rec(t1, v[i]);
 		for (int j = 0; j < DEGREE; j++) {
 			c0 = nmod_poly_get_coeff_ui(t0, j);
+			c1 = nmod_poly_get_coeff_ui(t1, j);
 			if (c0 > MODP / 2)
 				c0 -= MODP;
-			c1 = nmod_poly_get_coeff_ui(t1, j);
 			if (c1 > MODP / 2)
 				c1 -= MODP;
 			dot += c0 * c1;
+			norm += c1 * c1;
 		}
-		norm += commit_norm2_sqr(t1);
 	}
 
-	//TODO check bounds below
 	r = -2.0 * dot + norm;
-	r = r / (2 * s2);
+	r = r / (2.0 * s2);
 	r = exp(r) / M;
 
-	result = mpf_get_d(u) > 0.5;
+	result = mpf_get_d(u) > r;
+
 	mpf_clear(u);
 	nmod_poly_clear(t0);
 	nmod_poly_clear(t1);
