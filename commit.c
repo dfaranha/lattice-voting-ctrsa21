@@ -555,7 +555,7 @@ static void microbench(flint_rand_t rand) {
 	BENCH_BEGIN("Polynomial mult in CRT form") {
 		BENCH_ADD(nmod_poly_mulmod(t[0], t[0], u[0], irred[0]));
 		BENCH_ADD(nmod_poly_mulmod(t[1], t[1], u[1], irred[1]));
-	} BENCH_ENDM
+	} BENCH_END;
 
 nmod_poly_clear(alpha);
 nmod_poly_clear(beta);
