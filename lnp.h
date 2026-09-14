@@ -152,4 +152,42 @@ void lnp_quad_prover(lnpproof_t *pi, lnpcom_t *com, pcrt_poly_t m[3],
  */
 int lnp_quad_verifier(lnpproof_t *pi, lnpcom_t *com, lnpkey_t *key);
 
+/**
+ * Return the polynomial 1 + X + ... + X^(DEGREE-1) in CRT representation.
+ *
+ * The binary constraint on the coefficients of s is <s, s - ones> = 0, so this
+ * is the vector of all ones seen as a ring element.
+ */
+void lnp_ones(pcrt_poly_t out);
+
+/**
+ * Prove that slot 1 of the commitment holds sigma_{-1}(s) * (s - ones), where
+ * s is slot 0. Slots 2 and 3 carry the garbage terms and are filled in.
+ *
+ * The constant coefficient of that product is the sum over j of s_j (s_j - 1),
+ * which vanishes exactly when every coefficient of s is 0 or 1, provided the
+ * sum does not wrap modulo p. This routine proves the product relation; it
+ * does NOT prove that the constant coefficient is zero, which is the step
+ * still missing. See LNP-PARAMS.md.
+ *
+ * @param[out] pi			- the resulting proof.
+ * @param[in,out] com		- the commitment, whose garbage slots are filled in.
+ * @param[in] s				- the witness, in CRT representation.
+ * @param[in] f				- the claimed product, in CRT representation.
+ * @param[in] key			- the commitment key.
+ * @param[in] r				- the commitment randomness, in CRT representation.
+ */
+void lnp_isbin_prover(lnpproof_t *pi, lnpcom_t *com, pcrt_poly_t s,
+		pcrt_poly_t f, lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]);
+
+/**
+ * Verify the proof produced by lnp_isbin_prover.
+ *
+ * @param[in] pi			- the proof.
+ * @param[in] com			- the commitment.
+ * @param[in] key			- the commitment key.
+ * @return 1 if the proof is accepted, 0 otherwise.
+ */
+int lnp_isbin_verifier(lnpproof_t *pi, lnpcom_t *com, lnpkey_t *key);
+
 #endif /* LNP_H */
