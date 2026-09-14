@@ -27,11 +27,10 @@
 /* Polynomial defining the cyclotomic ring. */
 static nmod_poly_t cyclo_poly;
 
-/* Pair of irreducible polynomials for CRT representation. */
-static pcrt_poly_t irred;
-
-/* Inverses of the irreducible polynomials for CRT reconstruction. */
-static pcrt_poly_t inv;
+/* Pair of irreducible polynomials that (x^N + 1) splits into. They are kept so
+ * that commit_irred still describes the ring, but this build does not use them
+ * for arithmetic. */
+static nmod_poly_t irred[NCRT];
 
 /* Scratch space for the multiplication routines. Like the rest of this module,
  * they are not reentrant. */
@@ -105,7 +104,6 @@ void commit_setup() {
 	nmod_poly_init(mul_tmp, MODP);
 	for (int i = 0; i < NCRT; i++) {
 		nmod_poly_init(irred[i], MODP);
-		nmod_poly_init(inv[i], MODP);
 	}
 
 	// Initialize polynomial as x^N + 1. */
@@ -118,16 +116,12 @@ void commit_setup() {
 	nmod_poly_set_coeff_ui(irred[1], DEGCRT, 1);
 	nmod_poly_set_coeff_ui(irred[1], 0, 752843710);
 
-	nmod_poly_invmod(inv[0], irred[0], irred[1]);
-	nmod_poly_invmod(inv[1], irred[1], irred[0]);
-	nmod_poly_mul(inv[1], inv[1], irred[1]);
 }
 
 // Finalize commitment scheme.
 void commit_finish() {
 	for (int i = 0; i < NCRT; i++) {
 		nmod_poly_clear(irred[i]);
-		nmod_poly_clear(inv[i]);
 	}
 	nmod_poly_clear(cyclo_poly);
 	nmod_poly_clear(mul_tmp);
@@ -143,12 +137,6 @@ nmod_poly_t *commit_irred(int i) {
 	return &irred[i];
 }
 
-// Multiply two polynomials modulo the i-th CRT factor.
-void pcrt_poly_mulmod(nmod_poly_t c, const nmod_poly_t a, const nmod_poly_t b,
-		int i) {
-	nmod_poly_mul(mul_tmp, a, b);
-	fold_mod(c, mul_tmp, DEGCRT, nmod_poly_get_coeff_ui(irred[i], 0));
-}
 
 // Multiply two polynomials in Rp.
 void commit_poly_mulmod(nmod_poly_t c, const nmod_poly_t a,
@@ -157,19 +145,7 @@ void commit_poly_mulmod(nmod_poly_t c, const nmod_poly_t a,
 	fold_mod(c, mul_tmp, DEGREE, 1);
 }
 
-// Reduce a polynomial into the i-th CRT component.
-void pcrt_poly_reduce(nmod_poly_t c, const nmod_poly_t a, int i) {
-	fold_mod(c, a, DEGCRT, nmod_poly_get_coeff_ui(irred[i], 0));
-}
 
-// Recover polynomial from CRT representation.
-void pcrt_poly_rec(nmod_poly_t c, pcrt_poly_t a) {
-	nmod_poly_sub(c, a[0], a[1]);
-	nmod_poly_mul(mul_tmp, c, inv[1]);
-	/* a[1] is already reduced, so it can be added after the fold. */
-	fold_mod(c, mul_tmp, DEGREE, 1);
-	nmod_poly_add(c, c, a[1]);
-}
 
 // Compute squared l2-norm.
 /* Only meaningful for short polynomials: the accumulator overflows for
@@ -237,15 +213,11 @@ int commit_norm2_leq(nmod_poly_t r, uint64_t bound) {
 void commit_keyinit(commitkey_t *key) {
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				nmod_poly_init(key->B1[i][j][k], MODP);
-			}
+			nmod_poly_init(key->B1[i][j], MODP);
 		}
 	}
 	for (int i = 0; i < WIDTH; i++) {
-		for (int j = 0; j < NCRT; j++) {
-			nmod_poly_init(key->b2[i][j], MODP);
-		}
+		nmod_poly_init(key->b2[i], MODP);
 	}
 }
 
@@ -253,31 +225,27 @@ void commit_keyinit(commitkey_t *key) {
 void commit_keygen(commitkey_t *key, flint_rand_t rand) {
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				nmod_poly_zero(key->B1[i][j][k]);
-				if (i == j) {
-					nmod_poly_set_coeff_ui(key->B1[i][j][k], 0, 1);
-				}
+			nmod_poly_zero(key->B1[i][j]);
+			if (i == j) {
+				nmod_poly_set_coeff_ui(key->B1[i][j], 0, 1);
 			}
 		}
 	}
 
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = HEIGHT; j < WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				commit_sample_rand(key->B1[i][j][k], rand, DEGCRT);
-			}
+			/* A uniform ring element spans the whole degree here; the CRT
+			 * build drew DEGCRT coefficients for each of its components. */
+			commit_sample_rand(key->B1[i][j], rand, DEGREE);
 		}
 	}
 	for (int i = 0; i < WIDTH; i++) {
-		for (int j = 0; j < NCRT; j++) {
-			nmod_poly_zero(key->b2[i][j]);
-			if (i == HEIGHT) {
-				nmod_poly_set_coeff_ui(key->b2[i][j], 0, 1);
-			}
-			if (i > HEIGHT) {
-				commit_sample_rand(key->b2[i][j], rand, DEGCRT);
-			}
+		nmod_poly_zero(key->b2[i]);
+		if (i == HEIGHT) {
+			nmod_poly_set_coeff_ui(key->b2[i], 0, 1);
+		}
+		if (i > HEIGHT) {
+			commit_sample_rand(key->b2[i], rand, DEGREE);
 		}
 	}
 }
@@ -286,15 +254,11 @@ void commit_keygen(commitkey_t *key, flint_rand_t rand) {
 void commit_keyfree(commitkey_t *key) {
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				nmod_poly_clear(key->B1[i][j][k]);
-			}
+			nmod_poly_clear(key->B1[i][j]);
 		}
 	}
 	for (int i = 0; i < WIDTH; i++) {
-		for (int j = 0; j < NCRT; j++) {
-			nmod_poly_clear(key->b2[i][j]);
-		}
+		nmod_poly_clear(key->b2[i]);
 	}
 }
 
@@ -327,17 +291,6 @@ void commit_sample_short(nmod_poly_t r) {
 	} while (i < DEGREE);
 }
 
-// Sample a short polynomial in CRT representation.
-void commit_sample_short_crt(pcrt_poly_t r) {
-	nmod_poly_t t;
-
-	nmod_poly_init(t, MODP);
-	commit_sample_short(t);
-	for (int j = 0; j < NCRT; j++) {
-		pcrt_poly_reduce(r[j], t, j);
-	}
-	nmod_poly_clear(t);
-}
 
 // Sample a random polynomial.
 void commit_sample_rand(nmod_poly_t r, flint_rand_t rand, int degree) {
@@ -349,17 +302,6 @@ void commit_sample_rand(nmod_poly_t r, flint_rand_t rand, int degree) {
 	_nmod_poly_normalise(r);
 }
 
-// Sample a random polynomial in CRT representation.
-void commit_sample_rand_crt(pcrt_poly_t r, flint_rand_t rand) {
-	nmod_poly_t t;
-
-	nmod_poly_init(t, MODP);
-	commit_sample_rand(t, rand, DEGREE);
-	for (int i = 0; i < NCRT; i++) {
-		pcrt_poly_reduce(r[i], t, i);
-	}
-	nmod_poly_clear(t);
-}
 
 // Sample a challenge.
 void commit_sample_chall(nmod_poly_t f) {
@@ -388,17 +330,6 @@ void commit_sample_chall(nmod_poly_t f) {
 	nmod_poly_clear(c[1]);
 }
 
-// Sample a challenge in CRT representation.
-void commit_sample_chall_crt(pcrt_poly_t f) {
-	nmod_poly_t t;
-
-	nmod_poly_init(t, MODP);
-	commit_sample_chall(t);
-	for (int i = 0; i < NCRT; i++) {
-		pcrt_poly_reduce(f[i], t, i);
-	}
-	nmod_poly_clear(t);
-}
 
 // Sample a polynomial according to a Gaussian distribution.
 void commit_sample_gauss(nmod_poly_t r) {
@@ -411,137 +342,91 @@ void commit_sample_gauss(nmod_poly_t r) {
 	}
 }
 
-// Sample a polynomial according to a Gaussian distribution in CRT rep.
-void commit_sample_gauss_crt(nmod_poly_t r[2]) {
-	nmod_poly_t t;
-
-	nmod_poly_init(t, MODP);
-	commit_sample_gauss(t);
-	for (int i = 0; i < NCRT; i++) {
-		pcrt_poly_reduce(r[i], t, i);
-	}
-
-	nmod_poly_clear(t);
-}
 
 // Initialise a commitment.
 void commit_init(commit_t *com) {
-	for (int i = 0; i < NCRT; i++) {
-		nmod_poly_init(com->c1[i], MODP);
-		nmod_poly_init(com->c2[i], MODP);
-	}
+	nmod_poly_init(com->c1, MODP);
+	nmod_poly_init(com->c2, MODP);
 }
 
 // Commit to a message.
 void commit_doit(commit_t *com, nmod_poly_t m, commitkey_t *key,
-		pcrt_poly_t r[WIDTH]) {
+		nmod_poly_t r[WIDTH]) {
 	nmod_poly_t t;
 
 	nmod_poly_init(t, MODP);
-	for (int i = 0; i < NCRT; i++) {
-		nmod_poly_zero(com->c1[i]);
-		nmod_poly_zero(com->c2[i]);
-	}
+	nmod_poly_zero(com->c1);
+	nmod_poly_zero(com->c2);
 
 	// Compute B = [ B1 b2 ]^t * r_m.
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				pcrt_poly_mulmod(t, key->B1[i][j][k], r[j][k], k);
-				nmod_poly_add(com->c1[k], com->c1[k], t);
-				if (i == 0) {
-					pcrt_poly_mulmod(t, key->b2[j][k], r[j][k], k);
-					nmod_poly_add(com->c2[k], com->c2[k], t);
-				}
+			commit_poly_mulmod(t, key->B1[i][j], r[j]);
+			nmod_poly_add(com->c1, com->c1, t);
+			if (i == 0) {
+				commit_poly_mulmod(t, key->b2[j], r[j]);
+				nmod_poly_add(com->c2, com->c2, t);
 			}
 		}
 	}
 
-	// Convert m to CRT representation and accumulate.
-	for (int i = 0; i < NCRT; i++) {
-		pcrt_poly_reduce(t, m, i);
-		nmod_poly_add(com->c2[i], com->c2[i], t);
-	}
+	nmod_poly_add(com->c2, com->c2, m);
 
 	nmod_poly_clear(t);
 }
 
 // Open a commitment on a message, randomness, factor.
 int commit_open(commit_t *com, nmod_poly_t m, commitkey_t *key,
-		pcrt_poly_t r[WIDTH], pcrt_poly_t f) {
-	nmod_poly_t t;
-	pcrt_poly_t c1, c2, _c1, _c2;
+		nmod_poly_t r[WIDTH], nmod_poly_t f) {
+	nmod_poly_t t, c1, c2, _c1, _c2;
 	int result = 0;
 
 	nmod_poly_init(t, MODP);
-	for (int i = 0; i < NCRT; i++) {
-		nmod_poly_init(c1[i], MODP);
-		nmod_poly_init(c2[i], MODP);
-		nmod_poly_init(_c1[i], MODP);
-		nmod_poly_init(_c2[i], MODP);
-		nmod_poly_zero(c1[i]);
-		nmod_poly_zero(c2[i]);
-	}
+	nmod_poly_init(c1, MODP);
+	nmod_poly_init(c2, MODP);
+	nmod_poly_init(_c1, MODP);
+	nmod_poly_init(_c2, MODP);
+	nmod_poly_zero(c1);
+	nmod_poly_zero(c2);
 
 	// Compute B = [ B1 b2 ]^t * r_m.
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				pcrt_poly_mulmod(t, key->B1[i][j][k], r[j][k], k);
-				nmod_poly_add(c1[k], c1[k], t);
-				if (i == 0) {
-					pcrt_poly_mulmod(t, key->b2[j][k], r[j][k], k);
-					nmod_poly_add(c2[k], c2[k], t);
-				}
+			commit_poly_mulmod(t, key->B1[i][j], r[j]);
+			nmod_poly_add(c1, c1, t);
+			if (i == 0) {
+				commit_poly_mulmod(t, key->b2[j], r[j]);
+				nmod_poly_add(c2, c2, t);
 			}
 		}
 	}
 
-	// Convert m to CRT representation before multiplication.
-	for (int i = 0; i < NCRT; i++) {
-		pcrt_poly_reduce(t, m, i);
-		pcrt_poly_mulmod(t, t, f[i], i);
-		nmod_poly_add(c2[i], c2[i], t);
-	}
+	commit_poly_mulmod(t, m, f);
+	nmod_poly_add(c2, c2, t);
 
-	for (int i = 0; i < NCRT; i++) {
-		pcrt_poly_mulmod(_c1[i], com->c1[i], f[i], i);
-		pcrt_poly_mulmod(_c2[i], com->c2[i], f[i], i);
-	}
+	commit_poly_mulmod(_c1, com->c1, f);
+	commit_poly_mulmod(_c2, com->c2, f);
 
-	pcrt_poly_rec(t, r[0]);
-	if (test_norm(t)) {
-		pcrt_poly_rec(t, r[1]);
-		if (test_norm(t)) {
-			pcrt_poly_rec(t, r[2]);
-			if (test_norm(t)) {
-				if (nmod_poly_equal(_c1[0], c1[0]) &&
-						nmod_poly_equal(_c2[0], c2[0])) {
-					if (nmod_poly_equal(_c1[1], c1[1]) &&
-							nmod_poly_equal(_c2[1], c2[1])) {
-						result = 1;
-					}
-				}
-			}
+	/* The randomness is already a ring element, so there is nothing to
+	 * reconstruct before checking its norm. */
+	if (test_norm(r[0]) && test_norm(r[1]) && test_norm(r[2])) {
+		if (nmod_poly_equal(_c1, c1) && nmod_poly_equal(_c2, c2)) {
+			result = 1;
 		}
 	}
 
 	nmod_poly_clear(t);
-	for (int i = 0; i < NCRT; i++) {
-		nmod_poly_clear(c1[i]);
-		nmod_poly_clear(c2[i]);
-		nmod_poly_clear(_c1[i]);
-		nmod_poly_clear(_c2[i]);
-	}
+	nmod_poly_clear(c1);
+	nmod_poly_clear(c2);
+	nmod_poly_clear(_c1);
+	nmod_poly_clear(_c2);
 	return result;
 }
 
 // Free a commitment.
 void commit_free(commit_t *com) {
-	for (int i = 0; i < NCRT; i++) {
-		nmod_poly_clear(com->c1[i]);
-		nmod_poly_clear(com->c2[i]);
-	}
+	nmod_poly_clear(com->c1);
+	nmod_poly_clear(com->c2);
 }
 
 #ifdef MAIN
@@ -550,17 +435,14 @@ static void test(flint_rand_t rand) {
 	commitkey_t key;
 	commit_t com, _com;
 	nmod_poly_t m, rho;
-	pcrt_poly_t r[WIDTH], s[WIDTH], f;
+	nmod_poly_t r[WIDTH], s[WIDTH], f;
 
 	nmod_poly_init(m, MODP);
 	nmod_poly_init(rho, MODP);
-	nmod_poly_init(f[0], MODP);
-	nmod_poly_init(f[1], MODP);
+	nmod_poly_init(f, MODP);
 	for (int i = 0; i < WIDTH; i++) {
-		for (int j = 0; j < NCRT; j++) {
-			nmod_poly_init(r[i][j], MODP);
-			nmod_poly_init(s[i][j], MODP);
-		}
+		nmod_poly_init(r[i], MODP);
+		nmod_poly_init(s[i], MODP);
 	}
 
 	/* Generate a random message. */
@@ -572,19 +454,17 @@ static void test(flint_rand_t rand) {
 	commit_init(&com);
 	commit_init(&_com);
 	for (int i = 0; i < WIDTH; i++) {
-		commit_sample_short_crt(r[i]);
+		commit_sample_short(r[i]);
 	}
 
 	TEST_BEGIN("commitment can be generated and opened") {
 		commit_doit(&com, m, &key, r);
 
-		commit_sample_chall_crt(f);
+		commit_sample_chall(f);
 		commit_sample_chall(rho);
 
 		for (int i = 0; i < WIDTH; i++) {
-			for (int j = 0; j < NCRT; j++) {
-				pcrt_poly_mulmod(s[i][j], r[i][j], f[j], j);
-			}
+			commit_poly_mulmod(s[i], r[i], f);
 		}
 
 		TEST_ASSERT(commit_open(&com, m, &key, s, f) == 1, end);
@@ -593,15 +473,11 @@ static void test(flint_rand_t rand) {
 	TEST_BEGIN("commitments are linearly homomorphic") {
 		/* Test linearity. */
 		for (int i = 0; i < WIDTH; i++) {
-			for (int j = 0; j < NCRT; j++) {
-				nmod_poly_zero(r[i][j]);
-			}
+			nmod_poly_zero(r[i]);
 		}
 		commit_doit(&_com, rho, &key, r);
-		for (int i = 0; i < NCRT; i++) {
-			nmod_poly_sub(com.c1[i], com.c1[i], _com.c1[i]);
-			nmod_poly_sub(com.c2[i], com.c2[i], _com.c2[i]);
-		}
+		nmod_poly_sub(com.c1, com.c1, _com.c1);
+		nmod_poly_sub(com.c2, com.c2, _com.c2);
 		nmod_poly_sub(m, m, rho);
 		TEST_ASSERT(commit_open(&com, m, &key, s, f) == 1, end);
 	} TEST_END;
@@ -612,13 +488,10 @@ static void test(flint_rand_t rand) {
 	commit_free(&_com);
 	nmod_poly_clear(m);
 	nmod_poly_clear(rho);
-	nmod_poly_clear(f[0]);
-	nmod_poly_clear(f[1]);
+	nmod_poly_clear(f);
 	for (int i = 0; i < WIDTH; i++) {
-		for (int j = 0; j < NCRT; j++) {
-			nmod_poly_clear(r[i][j]);
-			nmod_poly_clear(s[i][j]);
-		}
+		nmod_poly_clear(r[i]);
+		nmod_poly_clear(s[i]);
 	}
 }
 
@@ -626,16 +499,13 @@ static void bench(flint_rand_t rand) {
 	commitkey_t key;
 	commit_t com;
 	nmod_poly_t m;
-	pcrt_poly_t f, r[WIDTH], s[WIDTH];
+	nmod_poly_t f, r[WIDTH], s[WIDTH];
 
 	nmod_poly_init(m, MODP);
-	nmod_poly_init(f[0], MODP);
-	nmod_poly_init(f[1], MODP);
+	nmod_poly_init(f, MODP);
 	for (int i = 0; i < WIDTH; i++) {
-		for (int j = 0; j < NCRT; j++) {
-			nmod_poly_init(r[i][j], MODP);
-			nmod_poly_init(s[i][j], MODP);
-		}
+		nmod_poly_init(r[i], MODP);
+		nmod_poly_init(s[i], MODP);
 	}
 
 	commit_keyinit(&key);
@@ -644,11 +514,11 @@ static void bench(flint_rand_t rand) {
 	nmod_poly_randtest(m, rand, DEGREE);
 
 	for (int i = 0; i < WIDTH; i++) {
-		commit_sample_short_crt(r[i]);
+		commit_sample_short(r[i]);
 	}
 
 	BENCH_BEGIN("commit_sample") {
-		BENCH_ADD(commit_sample_short_crt(r[0]));
+		BENCH_ADD(commit_sample_short(r[0]));
 	} BENCH_END;
 
 	BENCH_BEGIN("commit_doit") {
@@ -656,7 +526,7 @@ static void bench(flint_rand_t rand) {
 	} BENCH_END;
 
 	BENCH_BEGIN("commit_open") {
-		commit_sample_chall_crt(f);
+		commit_sample_chall(f);
 		commit_doit(&com, m, &key, r);
 		BENCH_ADD(commit_open(&com, m, &key, r, f));
 	} BENCH_END;
@@ -664,25 +534,18 @@ static void bench(flint_rand_t rand) {
 	commit_keyfree(&key);
 	commit_free(&com);
 	nmod_poly_clear(m);
-	nmod_poly_clear(f[0]);
-	nmod_poly_clear(f[1]);
+	nmod_poly_clear(f);
 	for (int i = 0; i < WIDTH; i++) {
-		for (int j = 0; j < NCRT; j++) {
-			nmod_poly_clear(r[i][j]);
-			nmod_poly_clear(s[i][j]);
-		}
+		nmod_poly_clear(r[i]);
+		nmod_poly_clear(s[i]);
 	}
 }
 
 static void microbench(flint_rand_t rand) {
-	nmod_poly_t alpha, beta, t[2], u[2];
+	nmod_poly_t alpha, beta;
 
 	nmod_poly_init(alpha, MODP);
 	nmod_poly_init(beta, MODP);
-	for (int i = 0; i < NCRT; i++) {
-		nmod_poly_init(t[i], MODP);
-		nmod_poly_init(u[i], MODP);
-	}
 
 	commit_sample_rand(beta, rand, DEGREE);
 	commit_sample_rand(alpha, rand, DEGREE);
@@ -691,24 +554,14 @@ static void microbench(flint_rand_t rand) {
 		BENCH_ADD(nmod_poly_add(alpha, alpha, beta));
 	} BENCH_END;
 
+	/* This build multiplies directly in Rp; there is no CRT form to compare
+	 * against here. See the crt branch for the split representation. */
 	BENCH_BEGIN("Polynomial multiplication") {
 		BENCH_ADD(commit_poly_mulmod(alpha, alpha, beta));
 	} BENCH_END;
 
-	commit_sample_rand_crt(t, rand);
-	commit_sample_rand_crt(u, rand);
-
-	BENCH_BEGIN("Polynomial mult in CRT form") {
-		BENCH_ADD(pcrt_poly_mulmod(t[0], t[0], u[0], 0));
-		BENCH_ADD(pcrt_poly_mulmod(t[1], t[1], u[1], 1));
-	} BENCH_END;
-
 	nmod_poly_clear(alpha);
 	nmod_poly_clear(beta);
-	for (int i = 0; i < NCRT; i++) {
-		nmod_poly_clear(t[i]);
-		nmod_poly_clear(u[i]);
-	}
 }
 
 /* Select which phases to run: "test", "bench", or neither for both. Keeping

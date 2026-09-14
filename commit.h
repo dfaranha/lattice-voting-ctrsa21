@@ -31,18 +31,17 @@
 /* Type definitions                                                           */
 /*============================================================================*/
 
-/* Type that represents a polynomial in CRT representation. */
-typedef nmod_poly_t pcrt_poly_t[NCRT];
-
-/* Type that represents a commitment key pair. */
+/* Type that represents a commitment key pair. Ring elements are kept in
+ * coefficient representation: this build does not exploit the CRT splitting of
+ * the ring for arithmetic. */
 typedef struct _key_t {
-	pcrt_poly_t B1[HEIGHT][WIDTH];
-	pcrt_poly_t b2[WIDTH];
+	nmod_poly_t B1[HEIGHT][WIDTH];
+	nmod_poly_t b2[WIDTH];
 } commitkey_t;
 
-/* Type that represents a commitment in CRT representation. */
+/* Type that represents a commitment. */
 typedef struct _com_t {
-	pcrt_poly_t c1, c2;
+	nmod_poly_t c1, c2;
 } commit_t;
 
 /*============================================================================*/
@@ -74,16 +73,6 @@ nmod_poly_t *commit_poly();
  */
 nmod_poly_t *commit_irred(int i);
 
-/* Multiply two polynomials modulo the i-th CRT factor.
- *
- * @param[out] c		- the resulting polynomial.
- * @param[in] a			- the first polynomial.
- * @param[in] b			- the second polynomial.
- * @param[in] i			- the index of the CRT factor.
- */
-void pcrt_poly_mulmod(nmod_poly_t c, const nmod_poly_t a, const nmod_poly_t b,
-		int i);
-
 /* Multiply two polynomials in the cyclotomic ring Rp.
  *
  * @param[out] c		- the resulting polynomial.
@@ -92,23 +81,6 @@ void pcrt_poly_mulmod(nmod_poly_t c, const nmod_poly_t a, const nmod_poly_t b,
  */
 void commit_poly_mulmod(nmod_poly_t c, const nmod_poly_t a,
 		const nmod_poly_t b);
-
-/* Reduce a polynomial into the i-th CRT component.
- *
- * The output may alias the input.
- *
- * @param[out] c		- the reduced polynomial.
- * @param[in] a			- the polynomial to reduce.
- * @param[in] i			- the index of the CRT factor.
- */
-void pcrt_poly_reduce(nmod_poly_t c, const nmod_poly_t a, int i);
-
-/* Recover polynomial from CRT representation.
- *
- * @param[in] c 		- the resulting polynomial.
- * @param[in] a 		- the polynomial in CRT representation.
- */
-void pcrt_poly_rec(nmod_poly_t c, pcrt_poly_t a);
 
 /* Compute the squared l2-norm of a polynomial.
  *
@@ -167,25 +139,11 @@ void commit_keyfree(commitkey_t *key);
 void commit_sample_short(nmod_poly_t r);
 
 /**
- * Sample a short polynomial in CRT representation.
- *
- * @param[out] r		- the polynomial to sample.
- */
-void commit_sample_short_crt(pcrt_poly_t r);
-
-/**
  * Sample a random polynomial.
  *
  * @param[out] r		- the polynomial to sample.
  */
 void commit_sample_rand(nmod_poly_t r, flint_rand_t rand, int degree);
-
-/**
- * Sample a random polynomial in CRT representation.
- *
- * @param[out] r		- the polynomial to sample.
- */
-void commit_sample_rand_crt(pcrt_poly_t r, flint_rand_t rand);
 
 /**
  * Sample a random challenge.
@@ -195,26 +153,11 @@ void commit_sample_rand_crt(pcrt_poly_t r, flint_rand_t rand);
 void commit_sample_chall(nmod_poly_t f);
 
 /**
- * Sample a random challenge in CRT representation.
- *
- * @param[out] r		- the polynomial to sample.
- */
-void commit_sample_chall_crt(pcrt_poly_t f);
-
-/**
  * Sample a random polynomial following a Gaussian distribution.
  *
  * @param[out] r		- the polynomial to sample.
  */
 void commit_sample_gauss(nmod_poly_t r);
-
-/**
- * Sample a random polynomial following a Gaussian distribution in CRT
- * representation.
- *
- * @param[out] r		- the polynomial to sample.
- */
-void commit_sample_gauss_crt(pcrt_poly_t r);
 
 /**
  * Initialize a commitment. Must be called before commit_doit, and released
@@ -235,7 +178,7 @@ void commit_init(commit_t *com);
  * @param[in] r 		- the commitment randomness.
  */
 void commit_doit(commit_t *com, nmod_poly_t m, commitkey_t *key,
-		pcrt_poly_t r[WIDTH]);
+		nmod_poly_t r[WIDTH]);
 
 /**
  * Open a commitment on a certain message.
@@ -246,7 +189,7 @@ void commit_doit(commit_t *com, nmod_poly_t m, commitkey_t *key,
  * @param[in] f			- the opening challenge.
  */
 int commit_open(commit_t *com, nmod_poly_t m, commitkey_t *key,
-		pcrt_poly_t r[WIDTH], pcrt_poly_t f);
+		nmod_poly_t r[WIDTH], nmod_poly_t f);
 
 /**
  * Free a commitment.
