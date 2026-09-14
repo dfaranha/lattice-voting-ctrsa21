@@ -124,20 +124,64 @@ This is also why the construction wants to be used on many claims at once: the
 coefficients are being proven zero, so proving `is_bin` for all `MSGS`
 permutation elements together costs the same four masks as proving it for one.
 
-## 4. What is still missing
+## 4. B5, and why it does not pay at this modulus
 
-`is_bin` holds here for a committed witness **given that the witness is short**.
-That hypothesis is not proven, and supplying it is B5, the approximate range
-proof. Without it a prover can commit a witness with large coefficients whose
-`sum_j s_j (s_j - 1)` wraps modulo `p` back to zero. The bound needed is
-`\|\|s\|\|_inf <= 1953`, against 1 for an honest witness, so it is a mild
-statement, but it is a real gap and the test suite cannot see it: every test
-here builds its witness honestly.
+`is_bin` as built holds for a committed witness **given that the witness is
+short**. Supplying that hypothesis is B5, the approximate range proof. Working
+out what B5 could actually certify here is what the rest of this section is,
+and the answer is that it should not be built at the current modulus.
 
-Also absent, as in the original plan: B4, the Ajtai part of ABDLOP, which is
-what would let the commitment carry a norm bound on its message at all, and
-B6, wiring into the shuffle. Until B6, nothing here replaces the relaxed norm
-proof in `shuffle.c`; the two are independent.
+The argument needs `sum_j s_j (s_j - 1)` not to wrap, which in the 2-norm means
+`||s|| <= sqrt(p/2) = 44195`, against about 22.6 for an honest binary witness.
+That looks like enormous slack. It is not, once the proof has to hide `s`.
+
+Two routes were costed.
+
+**The opening bound on its own.** Put the witness in the Ajtai part of an
+ABDLOP commitment, which is B4, and take the bound from the verifier's norm
+check on the response. The mask has to hide `c * s`, so its width is
+`tau * ||c||_1 * ||s||`, and extraction doubles the verifier's bound twice
+over. That certifies about `2^22`, and needs `p > 2^53.5`.
+
+**The JL projection, which is B5 proper.** Project onto `PROJ` coordinates with
+a public sign matrix, publish the projection masked, and bound `||s||` from the
+bound on the projection. The mask width is now driven by `||R s||`, which grows
+as `sqrt(PROJ)`, and the published vector has `PROJ` entries, so the certified
+bound grows linearly in `PROJ`:
+
+| PROJ | tau | certifies `\|\|s\|\|` | needs |
+| --- | --- | --- | --- |
+| 64 | 6 | 69511 | `p > 2^33.2` |
+| 128 | 6 | 139023 | `p > 2^35.2` |
+| 256 | 6 | 278046 | `p > 2^37.2` |
+| 256 | 12 | 556091 | `p > 2^39.2` |
+
+`PROJ = 256` is what gives the projection lemma its `2^-128`, and `tau = 6`
+already costs about seven rejection-sampling repetitions, so the honest target
+is the third row: **`p` of about `2^37.2`**, against `2^31.86` now.
+
+The comparison that settles it is not against the ceiling but against what the
+branch already has. The relaxed norm proof in `shuffle.c` bounds the extracted
+`||(d - d') sigma||` by `2 * 2 sqrt(n) SIGMA_S = 32768`, comfortably inside the
+Lemma 1 ceiling of 44195. At this modulus B5 would certify 278046. **The range
+proof would be about eight times weaker than the proof it is meant to
+replace**, so building it here would not close the gap; it would widen it.
+
+The factor of 2 used for the projection lemma is rough, and the exact constant
+from LNP would move these numbers by a bit or so. It would not move them by the
+three to four bits that separate `2^33.2` from `2^37.2`, nor by the six that
+separate the certified bound from the ceiling.
+
+So B5 is not blocked on code. It is blocked on a modulus of roughly `2^37` to
+`2^39`. At `2^40` the other constraints stay comfortable: hiding at rank 2 is
+140 bits, MSIS improves as `p` grows, the scalar aggregation improves to
+`2^-160`, and the Lemma 1 floor on `SIGMA_S` relaxes. What it costs is the
+cascade the original plan predicted, into the CRT constants and, through
+`q > 2p(2 l N^2 + N + 1)`, into the ciphertexts.
+
+B4 and B6 remain unbuilt as well, but neither is on the critical path until the
+modulus question is settled: B4 only matters for the route that was costed at
+`p > 2^53.5`, and B6 has nothing to wire in until B5 exists.
 
 Finally, none of this is a soundness proof. The extraction argument for the
 product relation divides by `(c - c')(sigma(c) - sigma(c'))` and yields a
@@ -160,7 +204,16 @@ under the plan's figure for the whole of Track B, and the piece that looked
 hardest turned out to have a short answer once the reason it was hard was
 clear.
 
-What is left is B4 and B5, which are the parts the plan sized at 700 lines and
-which are the parts that carry the norm bound. They are also the parts LaZer
-would supply directly. The Track A against Track B decision is now a decision
-about those two stages alone, rather than about the proof system as a whole.
+What is left is B4 and B5, and section 4 turns that from a coding question into
+a parameter one. B5 needs `p` of about `2^37` to `2^39`; below that it
+certifies a weaker bound than the relaxed proof it would replace. So the Track
+A against Track B decision is now downstream of a modulus decision, and the
+same modulus decision would be forced on Track A, since LaZer's range proof
+obeys the same arithmetic.
+
+That also means the honest comparison is no longer is_bin against nothing. It
+is is_bin at a larger modulus, with the cascade that implies, against the
+relaxed norm proof that already closes the gap at the modulus in use. The
+first buys fidelity to Protocol 1 as published and removes the need to review
+the restatement in SOUNDNESS.md. Whether that is worth a modulus change is a
+judgement about the artifact, not about the cryptography.
