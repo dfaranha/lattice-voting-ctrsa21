@@ -8,7 +8,7 @@ LIBS = -lflint -lgmp
 
 .PHONY: all test bench clean
 
-all: commit encrypt vericrypt shuffle
+all: commit encrypt vericrypt shuffle lnp
 
 # Run only the test phase of each binary. The benchmarks dominate the runtime,
 # so keeping them out of a test run is what makes this usable in CI. TESTS,
@@ -19,12 +19,14 @@ test: all
 	./encrypt test
 	./vericrypt test
 	./shuffle test
+	./lnp test
 
 bench: all
 	./commit bench
 	./encrypt bench
 	./vericrypt bench
 	./shuffle bench
+	./lnp bench
 
 # The discrete Gaussian sampler bakes its standard deviation in at compile
 # time, so each width needs its own object file. Sharing a single gaussian.o
@@ -58,5 +60,8 @@ vericrypt: vericrypt.c encrypt.o ${TEST} ${BENCH} ${INCLUDES} gaussian_e.o
 shuffle: shuffle.c commit.c commit.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
 	${CPP} ${CFLAGS} commit.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
+lnp: lnp.c lnp.h commit.c commit.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
+	${CPP} ${CFLAGS} commit.c lnp.c sha224-256.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
+
 clean:
-	rm -f *.o commit encrypt vericrypt shuffle
+	rm -f *.o commit encrypt vericrypt shuffle lnp

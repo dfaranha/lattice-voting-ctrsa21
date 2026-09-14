@@ -9,7 +9,11 @@
  * @ingroup commit
  */
 
+#ifndef COMMIT_H
+#define COMMIT_H
+
 #include <flint/flint.h>
+#include <flint/nmod.h>
 #include <flint/nmod_poly.h>
 
 #include "param.h"
@@ -263,3 +267,5 @@ int commit_open(commit_t *com, nmod_poly_t m, commitkey_t *key,
  * @param[out] com 		- the commitment to free.
  */
 void commit_free(commit_t *com);
+
+#endif /* COMMIT_H */
