@@ -13,7 +13,11 @@
 /* Private definitions                                                        */
 /*============================================================================*/
 
+/* Number of messages to shuffle. Override at build time with -DMSGS=<n>; it
+ * sizes stack arrays, so it cannot be a runtime parameter as things stand. */
+#ifndef MSGS
 #define MSGS        25
+#endif
 
 /**
  * Sample a uniformly random double in [0, 1) with 53 bits of precision.
@@ -366,16 +370,16 @@ void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS],
 			rho->alloc * sizeof(uint64_t));
 	SHA256Result(&sha, hash);
 
-	flint_randinit(rand);
+	flint_rand_init(rand);
 	memcpy(&seed0, hash, sizeof(uint64_t));
 	memcpy(&seed1, hash + sizeof(uint64_t), sizeof(uint64_t));
 	memcpy(&seed2, hash + 2 * sizeof(uint64_t), sizeof(uint64_t));
 	memcpy(&seed3, hash + 3 * sizeof(uint64_t), sizeof(uint64_t));
 	seed0 ^= seed2;
 	seed1 ^= seed3;
-	flint_randseed(rand, seed0, seed1);
+	flint_rand_set_seed(rand, seed0, seed1);
 	commit_sample_rand(beta, rand, DEGREE);
-	flint_randclear(rand);
+	flint_rand_clear(rand);
 }
 
 static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
@@ -745,7 +749,7 @@ static int phase_selected(int argc, char *argv[], const char *phase) {
 int main(int argc, char *argv[]) {
 	flint_rand_t rand;
 
-	flint_randinit(rand);
+	flint_rand_init(rand);
 
 	if (phase_selected(argc, argv, "test")) {
 		printf("\n** Tests for lattice-based shuffle proof:\n\n");
@@ -757,5 +761,5 @@ int main(int argc, char *argv[]) {
 		bench(rand);
 	}
 
-	flint_randclear(rand);
+	flint_rand_clear(rand);
 }

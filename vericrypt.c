@@ -613,7 +613,7 @@ static int phase_selected(int argc, char *argv[], const char *phase) {
 int main(int argc, char *argv[]) {
 	flint_rand_t rand;
 
-	flint_randinit(rand);
+	flint_rand_init(rand);
 	encrypt_setup();
 
 	if (phase_selected(argc, argv, "test")) {

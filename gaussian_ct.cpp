@@ -144,7 +144,10 @@ static inline int64_t comp(const unsigned char *r, const uint64_t res)
 	res_mantissa = (res & EXP_MANTISSA_MASK) | (1LL << EXP_MANTISSA_PRECISION);
 	res_exponent = R_EXPONENT_L - 1023 + 1 + (res >> EXP_MANTISSA_PRECISION); 
 	
-	r1 = *((uint64_t *)r);
+	/* r walks the buffer in COMP_ENTRY_SIZE (9 byte) strides, so this load is
+	 * generally misaligned. Reading it through memcpy avoids the undefined
+	 * behaviour; compilers fold an 8-byte memcpy into a single load. */
+	memcpy(&r1, r, sizeof(r1));
 	r2 = (uint64_t)(r[8]);
 	
 	r_mantissa = r1 & R_MANTISSA_MASK;

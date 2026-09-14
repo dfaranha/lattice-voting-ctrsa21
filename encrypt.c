@@ -641,7 +641,7 @@ int main(int argc, char *argv[]) {
 
 	encrypt_setup();
 
-	flint_randinit(rand);
+	flint_rand_init(rand);
 
 	if (phase_selected(argc, argv, "test")) {
 		printf("\n** Tests for lattice-based encryption:\n\n");

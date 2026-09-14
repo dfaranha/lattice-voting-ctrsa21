@@ -723,8 +723,8 @@ int main(int argc, char *arv[]) {
 	uint64_t buf[2];
 
 	getrandom(buf, sizeof(buf), GRND_RANDOM);
-	flint_randinit(rand);
-	flint_randseed(rand, buf[0], buf[1]);
+	flint_rand_init(rand);
+	flint_rand_set_seed(rand, buf[0], buf[1]);
 
 	commit_setup();
 
@@ -742,6 +742,6 @@ int main(int argc, char *arv[]) {
 	}
 
 	commit_finish();
-	flint_randclear(rand);
+	flint_rand_clear(rand);
 }
 #endif

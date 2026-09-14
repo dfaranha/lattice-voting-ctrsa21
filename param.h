@@ -18,6 +18,15 @@
 #include <flint/fmpz_mod_poly.h>
 #include <string.h>
 
+/* FLINT 3 renamed these, deprecating the old spellings. Map the new names onto
+ * the old ones when building against an earlier release, so that the sources
+ * can use the current API either way. */
+#if !defined(__FLINT_RELEASE) || __FLINT_RELEASE < 30000
+#define flint_rand_init 	flint_randinit
+#define flint_rand_clear 	flint_randclear
+#define flint_rand_set_seed 	flint_randseed
+#endif
+
 /*============================================================================*/
 /* Constant definitions                                                       */
 /*============================================================================*/
