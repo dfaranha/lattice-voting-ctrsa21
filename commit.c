@@ -557,12 +557,12 @@ static void microbench(flint_rand_t rand) {
 		BENCH_ADD(nmod_poly_mulmod(t[1], t[1], u[1], irred[1]));
 	} BENCH_END;
 
-nmod_poly_clear(alpha);
-nmod_poly_clear(beta);
-for (int i = 0; i < 2; i++) {
-	nmod_poly_clear(t[i]);
-	nmod_poly_clear(u[i]);
-}
+	nmod_poly_clear(alpha);
+	nmod_poly_clear(beta);
+	for (int i = 0; i < 2; i++) {
+		nmod_poly_clear(t[i]);
+		nmod_poly_clear(u[i]);
+	}
 }
 
 int main(int argc, char *arv[]) {
