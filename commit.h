@@ -98,7 +98,8 @@ uint64_t commit_norm_inf(nmod_poly_t r);
 
 /* Test whether the squared l2-norm of a polynomial is at most a bound.
  *
- * Unlike commit_norm2_sqr this cannot overflow, so it is safe on input chosen
+ * Unlike commit_norm2_sqr this cannot overflow for any modulus, so it is safe
+ * on input chosen
  * by a malicious party.
  *
  * @param[in] r			- the polynomial to test.
