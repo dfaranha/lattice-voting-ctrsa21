@@ -257,6 +257,48 @@ only the mask needs to be fresh.
 For scale, the paper reports 33 ms per vote. The parameter change alone
 accounts for a factor of about three of the gap, and `is_bin` for the rest.
 
+## 5a. Measured against fix-pkc
+
+Time is wall clock on one machine, median of three runs of three full proofs at
+`MSGS = 25`. Size is counted from the transmitted structures, since nothing in
+this repository serialises a proof; a uniform ring element is `DEGREE` times
+`ceil(log2 p)` bits and a Gaussian one `DEGREE` times `ceil(log2 12 sigma)`.
+
+| | fix-pkc | lnp |
+| --- | --- | --- |
+| modulus, WIDTH | `2^31.86`, 3 | `2^40`, 4 |
+| prover, per proof | 2.15 s | 17.55 s |
+| prover, per message | 0.086 s | 0.702 s |
+| proof, per message | 65.5 KB | 338.0 KB |
+| proof, 25 messages | 1.64 MB | 8.45 MB |
+
+**8.2 times slower and 5.2 times larger.** The time splits cleanly: measuring
+the branch after the parameter change but before B6 gives 2.37 s, so the
+parameters account for 1.10x and `is_bin` for 7.4x.
+
+Where the 338 KB goes, per message:
+
+| | |
+| --- | --- |
+| sigma commitment, one Ajtai part and nine message slots | 52.5 KB |
+| the four masked openings | 143.8 KB |
+| first messages and aggregated values | 89.0 KB |
+| product commitment, partial product, projection | 16.3 KB |
+
+The largest single item is not the range proof, which is nearly free at 0.5 KB
+for the published projection. It is that **the same commitment is opened four
+times**: once by the linear proof and once by each of the three sub-proofs,
+each costing an Ajtai first message plus `LNP_WIDTH` Gaussian ring elements, or
+36.0 KB. They all open the same randomness. Deriving a single shared challenge
+and sending one opening would save about 108 KB, which is 32 per cent of the
+proof, and would cut the prover similarly since three of the four rejection
+sampling loops would go with it.
+
+That is the first thing to do if these numbers ever need to be defensible.
+Neither the prover nor the proof has been optimised at all: the range proof
+also re-runs the product proof on every rejection, when only its mask needs to
+be fresh.
+
 ## 6. What this changes about the decision
 
 Track B is complete: B1, B2, B3, B5 and B6 are built and tested, and B4 is not
