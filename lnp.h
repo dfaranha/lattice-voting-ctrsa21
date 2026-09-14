@@ -28,6 +28,16 @@
  * four: the witness, the constant-coefficient mask, and two garbage terms. */
 #define SLOTS 	4
 
+/* Rank of the MLWE instance that hides the commitment, which is the number of
+ * randomness components beyond those consumed by the Ajtai part and by the
+ * message slots. Rank 1 is only about 72 bits; see LNP-PARAMS.md. */
+#define LNP_RANK 	2
+
+/* Width of the LNP commitment randomness. Unlike commit.h, which carries a
+ * single message slot, a BDLOP key with SLOTS message rows in Hermite normal
+ * form needs one randomness component per row on top of the Ajtai part. */
+#define LNP_WIDTH 	(HEIGHT + SLOTS + LNP_RANK)
+
 /*============================================================================*/
 /* Type definitions                                                           */
 /*============================================================================*/
@@ -35,8 +45,8 @@
 /* A commitment key with SLOTS message rows instead of the single row that
  * commit.h provides. The Ajtai part B1 is shared. */
 typedef struct _lnpkey_t {
-	pcrt_poly_t B1[HEIGHT][WIDTH];
-	pcrt_poly_t b2[SLOTS][WIDTH];
+	pcrt_poly_t B1[HEIGHT][LNP_WIDTH];
+	pcrt_poly_t b2[SLOTS][LNP_WIDTH];
 } lnpkey_t;
 
 /* A commitment to SLOTS messages under one randomness vector. */
@@ -44,6 +54,15 @@ typedef struct _lnpcom_t {
 	pcrt_poly_t c1[HEIGHT];
 	pcrt_poly_t c2[SLOTS];
 } lnpcom_t;
+
+/* A proof that the committed messages satisfy a quadratic relation. The
+ * garbage slots of the commitment are part of the proof rather than of the
+ * statement, because they depend on the masking. */
+typedef struct _lnpproof_t {
+	pcrt_poly_t w[HEIGHT];			/* Ajtai part of the first message. */
+	pcrt_poly_t t;					/* The masked challenge-free term. */
+	pcrt_poly_t z[LNP_WIDTH];		/* The masked opening. */
+} lnpproof_t;
 
 /*============================================================================*/
 /* Function prototypes                                                        */
@@ -80,5 +99,57 @@ void lnp_auto_crt(pcrt_poly_t c, pcrt_poly_t a, slong k);
  * @return 1 if the components are exchanged, 0 if they are fixed.
  */
 int lnp_auto_swaps(slong k);
+
+/**
+ * Initialise, generate and free a multi-slot commitment key.
+ */
+void lnp_keyinit(lnpkey_t *key);
+void lnp_keygen(lnpkey_t *key, flint_rand_t rand);
+void lnp_keyfree(lnpkey_t *key);
+
+/**
+ * Initialise and free a commitment and a proof.
+ */
+void lnp_com_init(lnpcom_t *com);
+void lnp_com_free(lnpcom_t *com);
+void lnp_proof_init(lnpproof_t *pi);
+void lnp_proof_free(lnpproof_t *pi);
+
+/**
+ * Commit to SLOTS messages under one randomness vector.
+ *
+ * @param[out] com			- the resulting commitment.
+ * @param[in] m				- the messages, in CRT representation.
+ * @param[in] key			- the commitment key.
+ * @param[in] r				- the randomness, in CRT representation.
+ */
+void lnp_commit(lnpcom_t *com, pcrt_poly_t m[SLOTS], lnpkey_t *key,
+		pcrt_poly_t r[LNP_WIDTH]);
+
+/**
+ * Prove that the committed messages satisfy m[0] * m[1] = m[2].
+ *
+ * Slot 3 carries the garbage term, so the caller supplies its randomness but
+ * not its message: the prover computes it. The commitment passed in must
+ * already hold slots 0 to 2.
+ *
+ * @param[out] pi			- the resulting proof.
+ * @param[in,out] com		- the commitment, whose garbage slot is filled in.
+ * @param[in] m				- the three messages, in CRT representation.
+ * @param[in] key			- the commitment key.
+ * @param[in] r				- the commitment randomness, in CRT representation.
+ */
+void lnp_quad_prover(lnpproof_t *pi, lnpcom_t *com, pcrt_poly_t m[3],
+		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]);
+
+/**
+ * Verify a proof that the committed messages satisfy m[0] * m[1] = m[2].
+ *
+ * @param[in] pi			- the proof.
+ * @param[in] com			- the commitment.
+ * @param[in] key			- the commitment key.
+ * @return 1 if the proof is accepted, 0 otherwise.
+ */
+int lnp_quad_verifier(lnpproof_t *pi, lnpcom_t *com, lnpkey_t *key);
 
 #endif /* LNP_H */

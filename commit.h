@@ -268,4 +268,28 @@ int commit_open(commit_t *com, nmod_poly_t m, commitkey_t *key,
  */
 void commit_free(commit_t *com);
 
+/**
+ * Sample a uniformly random double in [0, 1) with 53 bits of precision.
+ *
+ * Rejection sampling must not reuse the Fiat-Shamir stream, so this draws from
+ * the operating system rather than from fastrandombytes.
+ *
+ * @return the sampled value.
+ */
+double commit_uniform_double(void);
+
+/**
+ * Decide whether a masked response must be rejected, following Fiat-Shamir
+ * with aborts. Shared by the shuffle proof and the LNP machinery so that this
+ * security-critical step exists only once.
+ *
+ * @param[in] z				- the masked responses, in CRT representation.
+ * @param[in] v				- the terms they mask, in CRT representation.
+ * @param[in] s2			- the square of the standard deviation.
+ * @param[in] width			- the number of responses.
+ * @return 1 if the transcript must be rejected, 0 if it may be emitted.
+ */
+int commit_rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
+		int width);
+
 #endif /* COMMIT_H */

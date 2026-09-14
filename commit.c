@@ -6,6 +6,7 @@
  * @ingroup commit
  */
 
+#include <math.h>
 #include <flint/nmod.h>
 
 #include "param.h"
@@ -98,6 +99,62 @@ static int test_norm(nmod_poly_t r) {
 /*============================================================================*/
 /* Public definitions                                                         */
 /*============================================================================*/
+
+/**
+ * Sample a uniformly random double in [0, 1) with 53 bits of precision.
+ *
+ * Rejection sampling must not reuse the Fiat-Shamir stream, so this draws from
+ * the operating system rather than from fastrandombytes.
+ *
+ * @return the sampled value.
+ */
+double commit_uniform_double(void) {
+	uint64_t bits;
+
+	getrandom(&bits, sizeof(bits), 0);
+	/* Keep the top 53 bits, the precision of the mantissa of a double. */
+	return (double)(bits >> 11) * 0x1.0p-53;
+}
+
+int commit_rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
+		int width) {
+	double r, u, M = 1.75;
+	int64_t dot, norm;
+	int64_t c0, c1;
+	nmod_poly_t t0, t1;
+	int result;
+
+	nmod_poly_init(t0, MODP);
+	nmod_poly_init(t1, MODP);
+
+	u = commit_uniform_double();
+
+	norm = dot = 0;
+	for (int i = 0; i < width; i++) {
+		pcrt_poly_rec(t0, z[i]);
+		pcrt_poly_rec(t1, v[i]);
+		for (int j = 0; j < DEGREE; j++) {
+			c0 = nmod_poly_get_coeff_ui(t0, j);
+			c1 = nmod_poly_get_coeff_ui(t1, j);
+			if (c0 > MODP / 2)
+				c0 -= MODP;
+			if (c1 > MODP / 2)
+				c1 -= MODP;
+			dot += c0 * c1;
+			norm += c1 * c1;
+		}
+	}
+
+	r = -2.0 * dot + norm;
+	r = r / (2.0 * s2);
+	r = exp(r) / M;
+
+	result = u > r;
+
+	nmod_poly_clear(t0);
+	nmod_poly_clear(t1);
+	return result;
+}
 
 // Initialize commitment scheme.
 void commit_setup() {
