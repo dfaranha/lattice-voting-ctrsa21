@@ -12,6 +12,8 @@
 #include <flint/flint.h>
 #include <flint/nmod_poly.h>
 
+#include "param.h"
+
 /*============================================================================*/
 /* Constant definitions                                                       */
 /*============================================================================*/
@@ -30,7 +32,7 @@
 /*============================================================================*/
 
 /* Type that represents a polynomial in CRT representation. */
-typedef nmod_poly_t pcrt_poly_t[2];
+typedef nmod_poly_t pcrt_poly_t[NCRT];
 
 /* Type that represents a commitment key pair. */
 typedef struct _key_t {
@@ -72,6 +74,35 @@ nmod_poly_t *commit_poly();
  */
 nmod_poly_t *commit_irred(int i);
 
+/* Multiply two polynomials modulo the i-th CRT factor.
+ *
+ * @param[out] c		- the resulting polynomial.
+ * @param[in] a			- the first polynomial.
+ * @param[in] b			- the second polynomial.
+ * @param[in] i			- the index of the CRT factor.
+ */
+void pcrt_poly_mulmod(nmod_poly_t c, const nmod_poly_t a, const nmod_poly_t b,
+		int i);
+
+/* Multiply two polynomials in the cyclotomic ring Rp.
+ *
+ * @param[out] c		- the resulting polynomial.
+ * @param[in] a			- the first polynomial.
+ * @param[in] b			- the second polynomial.
+ */
+void commit_poly_mulmod(nmod_poly_t c, const nmod_poly_t a,
+		const nmod_poly_t b);
+
+/* Reduce a polynomial into the i-th CRT component.
+ *
+ * The output may alias the input.
+ *
+ * @param[out] c		- the reduced polynomial.
+ * @param[in] a			- the polynomial to reduce.
+ * @param[in] i			- the index of the CRT factor.
+ */
+void pcrt_poly_reduce(nmod_poly_t c, const nmod_poly_t a, int i);
+
 /* Recover polynomial from CRT representation.
  *
  * @param[in] c 		- the resulting polynomial.
@@ -92,6 +123,25 @@ uint64_t commit_norm2_sqr(nmod_poly_t r);
  * @return The l\infty-norm.
  */
 uint64_t commit_norm_inf(nmod_poly_t r);
+
+/* Test whether the squared l2-norm of a polynomial is at most a bound.
+ *
+ * Unlike commit_norm2_sqr this cannot overflow, so it is safe on input chosen
+ * by a malicious party.
+ *
+ * @param[in] r			- the polynomial to test.
+ * @param[in] bound		- the bound on the squared l2-norm.
+ * @return 1 if the squared l2-norm is at most the bound, 0 otherwise.
+ */
+int commit_norm2_leq(nmod_poly_t r, uint64_t bound);
+
+/**
+ * Initialize a key pair for the commitment scheme. Must be called before
+ * commit_keygen, and released with commit_keyfree.
+ *
+ * @param[out] key 		- the key pair to initialize.
+ */
+void commit_keyinit(commitkey_t *key);
 
 /**
  * Generate a key pair for the commitment scheme using a PRNG.
@@ -167,6 +217,15 @@ void commit_sample_gauss(nmod_poly_t r);
 void commit_sample_gauss_crt(pcrt_poly_t r);
 
 /**
+ * Initialize a commitment. Must be called before commit_doit, and released
+ * with commit_free. Separating this from commit_doit is what allows the same
+ * commitment to be recomputed in a loop without leaking.
+ *
+ * @param[out] com 		- the commitment to initialize.
+ */
+void commit_init(commit_t *com);
+
+/**
  * Sample a random polynomial following a narrow Gaussian distribution of
  * standard deviation SIGMA_S, in CRT representation. Used to mask committed
  * messages that must be proven short.
@@ -177,6 +236,8 @@ void commit_sample_gauss_small_crt(pcrt_poly_t r);
 
 /**
  * Commit to a message and randomness using a key pair.
+ *
+ * The commitment must already be initialized with commit_init.
  *
  * @param[out] com 		- the resulting commitment.
  * @param[in] m 		- the message to commit.

@@ -10,7 +10,11 @@
 /**
  * Number of times each benchmark is ran.
  */
+/* Number of iterations per benchmark, squared by the nesting of BENCH_BEGIN
+ * and BENCH_ADD. Override at build time with -DBENCH=<n>. */
+#ifndef BENCH
 #define BENCH 	10
+#endif
 
 /**
  * Runs a new benchmark once.

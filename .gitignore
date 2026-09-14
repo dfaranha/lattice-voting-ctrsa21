@@ -1,0 +1,6 @@
+# Build artifacts
+*.o
+commit
+encrypt
+vericrypt
+shuffle

@@ -22,9 +22,12 @@
 /*============================================================================*/
 
 /**
- * Number of times a test is executed.
+ * Number of times a test is executed. Override at build time with
+ * -DTESTS=<n>, which is how CI runs a faster configuration.
  */
+#ifndef TESTS
 #define TESTS 		100
+#endif
 
 /**
  * Runs a new benchmark once.

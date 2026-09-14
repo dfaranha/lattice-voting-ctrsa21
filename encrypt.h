@@ -15,6 +15,8 @@
 #include <flint/fmpz_poly.h>
 #include <flint/fmpz_mod_poly.h>
 
+#include "param.h"
+
 /*============================================================================*/
 /* Constant definitions                                                       */
 /*============================================================================*/
@@ -29,7 +31,7 @@
 /*============================================================================*/
 
 /* Type that represents a polynomial in CRT representation. */
-typedef fmpz_mod_poly_t qcrt_poly_t[2];
+typedef fmpz_mod_poly_t qcrt_poly_t[NCRT];
 
 /* Type that represents a public key for the encryption scheme. */
 typedef struct _publickey_t {
@@ -55,6 +57,39 @@ typedef struct _ciphertext_t {
  * @param[in] a 		- the polynomial in CRT representation.
  */
 void qcrt_poly_rec(fmpz_mod_poly_t c, qcrt_poly_t a);
+
+/* Multiply two polynomials modulo the i-th CRT factor.
+ *
+ * @param[out] c		- the resulting polynomial.
+ * @param[in] a			- the first polynomial.
+ * @param[in] b			- the second polynomial.
+ * @param[in] i			- the index of the CRT factor.
+ * @param[in] ctx		- the context for modular arithmetic.
+ */
+void qcrt_poly_mulmod(fmpz_mod_poly_t c, const fmpz_mod_poly_t a,
+		const fmpz_mod_poly_t b, int i, const fmpz_mod_ctx_t ctx);
+
+/* Reduce a polynomial into the i-th CRT component.
+ *
+ * The output may alias the input.
+ *
+ * @param[out] c		- the reduced polynomial.
+ * @param[in] a			- the polynomial to reduce.
+ * @param[in] i			- the index of the CRT factor.
+ * @param[in] ctx		- the context for modular arithmetic.
+ */
+void qcrt_poly_reduce(fmpz_mod_poly_t c, const fmpz_mod_poly_t a, int i,
+		const fmpz_mod_ctx_t ctx);
+
+/* Multiply two polynomials in the cyclotomic ring (x^DEGREE + 1).
+ *
+ * @param[out] c		- the resulting polynomial.
+ * @param[in] a			- the first polynomial.
+ * @param[in] b			- the second polynomial.
+ * @param[in] ctx		- the context for modular arithmetic.
+ */
+void encrypt_poly_mulmod(fmpz_mod_poly_t c, const fmpz_mod_poly_t a,
+		const fmpz_mod_poly_t b, const fmpz_mod_ctx_t ctx);
 
 /**
  * Initialize the commitment module.
@@ -187,3 +222,21 @@ int encrypt_undo(fmpz_mod_poly_t m, fmpz_mod_poly_t chall, ciphertext_t *c, priv
  * @param[in] c			- the ciphertext to free.
  */
 void encrypt_free(ciphertext_t *c);
+
+/**
+ * Initialize a ciphertext. Must be called before encrypt_doit or encrypt_make,
+ * and released with encrypt_free. Separating this from the computation is what
+ * allows the same ciphertext to be recomputed in a loop without leaking.
+ *
+ * @param[out] c 		- the ciphertext to initialize.
+ */
+void encrypt_cipher_init(ciphertext_t *c);
+
+/**
+ * Initialize a key pair. Must be called before encrypt_keygen, and released
+ * with encrypt_keyfree.
+ *
+ * @param[out] pk 		- the public key to initialize.
+ * @param[out] sk 		- the private key to initialize.
+ */
+void encrypt_keyinit(publickey_t *pk, privatekey_t *sk);
