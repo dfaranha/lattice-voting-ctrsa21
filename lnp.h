@@ -96,16 +96,18 @@ typedef struct _lnpproof_t {
 } lnpproof_t;
 
 
-/* A proof that the witness is short. The projection z is published as PROJ
- * residues; the rest is the same shape as the constant-coefficient proof,
- * whose machinery ties z back to the commitment. */
-typedef struct _lnprangeproof_t {
+/* The whole is_bin argument in one proof: the product relation, the constant
+ * coefficient and the norm bound. All three speak about one commitment under
+ * one randomness, so they share a single mask, a single challenge and a single
+ * masked opening z, instead of carrying one each. */
+typedef struct _lnpbinproof_t {
 	pcrt_poly_t w[HEIGHT];			/* Ajtai part of the first message. */
-	ulong z[PROJ];					/* The masked projection. */
+	pcrt_poly_t t;					/* Product relation's masked term. */
+	ulong zp[PROJ];					/* The masked projection. */
 	pcrt_poly_t h[LNP_LAMBDA];		/* The aggregated values. */
 	pcrt_poly_t v[LNP_LAMBDA];		/* The masked openings of the relations. */
-	pcrt_poly_t zo[LNP_WIDTH];		/* The masked opening. */
-} lnprangeproof_t;
+	pcrt_poly_t z[LNP_WIDTH];		/* The single masked opening. */
+} lnpbinproof_t;
 
 /*============================================================================*/
 /* Function prototypes                                                        */
@@ -213,35 +215,6 @@ void lnp_ones(pcrt_poly_t out);
  */
 void lnp_isbin_product(pcrt_poly_t f, pcrt_poly_t s);
 
-/**
- * Prove that slot 1 of the commitment holds sigma_{-1}(s) * (s - ones), where
- * s is slot 0. Slots 2 and 3 carry the garbage terms and are filled in.
- *
- * The constant coefficient of that product is the sum over j of s_j (s_j - 1),
- * which vanishes exactly when every coefficient of s is 0 or 1, provided the
- * sum does not wrap modulo p. This routine proves the product relation; it
- * does NOT prove that the constant coefficient is zero, which is the step
- * still missing. See LNP-PARAMS.md.
- *
- * @param[out] pi			- the resulting proof.
- * @param[in,out] com		- the commitment, whose garbage slots are filled in.
- * @param[in] s				- the witness, in CRT representation.
- * @param[in] f				- the claimed product, in CRT representation.
- * @param[in] key			- the commitment key.
- * @param[in] r				- the commitment randomness, in CRT representation.
- */
-void lnp_isbin_prover(lnpproof_t *pi, lnpcom_t *com, pcrt_poly_t s,
-		pcrt_poly_t f, lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]);
-
-/**
- * Verify the proof produced by lnp_isbin_prover.
- *
- * @param[in] pi			- the proof.
- * @param[in] com			- the commitment.
- * @param[in] key			- the commitment key.
- * @return 1 if the proof is accepted, 0 otherwise.
- */
-int lnp_isbin_verifier(lnpproof_t *pi, lnpcom_t *com, lnpkey_t *key);
 
 /**
  * Sample a polynomial uniformly at random subject to its constant coefficient
@@ -264,40 +237,6 @@ void lnp_sample_ct_zero(pcrt_poly_t g, flint_rand_t rand);
  */
 void lnp_sample_proj_mask(pcrt_poly_t w, nmod_poly_t raw);
 
-/**
- * Prove, in one proof, that the constant coefficient of slot SLOT_F is zero and
- * that the witness in slot SLOT_S is short.
- *
- * These were two proofs. Merging them is not only cheaper: run separately they
- * were given the same masks, and publishing both sets of aggregated values
- * then cancelled the mask and revealed a linear function of the witness.
- *
- * This certifies a bound weaker than the honest norm by a constant factor,
- * which is what an approximate range proof does. It is the hypothesis that the
- * is_bin argument is conditional on.
- *
- * @param[out] pi			- the resulting proof.
- * @param[in] com			- the commitment.
- * @param[in] s				- the witness, in CRT representation.
- * @param[in] w				- the projection mask, in coefficient form.
- * @param[in] g				- the constant-coefficient masks.
- * @param[in] key			- the commitment key.
- * @param[in] r				- the commitment randomness.
- * @return 1 if a transcript was produced, 0 if rejection sampling gave up.
- */
-int lnp_ct_range_prover(lnprangeproof_t *pi, lnpcom_t *com, pcrt_poly_t s,
-		pcrt_poly_t f, nmod_poly_t w, pcrt_poly_t g[LNP_LAMBDA],
-		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]);
-
-/**
- * Verify the proof produced by lnp_range_prover.
- *
- * @param[in] pi			- the proof.
- * @param[in] com			- the commitment.
- * @param[in] key			- the commitment key.
- * @return 1 if the proof is accepted, 0 otherwise.
- */
-int lnp_ct_range_verifier(lnprangeproof_t *pi, lnpcom_t *com, lnpkey_t *key);
 
 /**
  * Expose the aggregation scalars, for tests that play the part of a prover
@@ -306,7 +245,39 @@ int lnp_ct_range_verifier(lnprangeproof_t *pi, lnpcom_t *com, lnpkey_t *key);
 void lnp_scalars_for_test(ulong nu[LNP_LAMBDA], lnpkey_t *key, lnpcom_t *com,
 		ulong z[PROJ]);
 
-void lnp_rangeproof_init(lnprangeproof_t *pi);
-void lnp_rangeproof_free(lnprangeproof_t *pi);
+/**
+ * Initialise and free the combined is_bin proof.
+ */
+void lnp_binproof_init(lnpbinproof_t *pi);
+void lnp_binproof_free(lnpbinproof_t *pi);
+
+/**
+ * Prove the whole is_bin argument in one proof: that slot SLOT_F holds
+ * sigma_{-1}(s) * (s - ones) for the witness s in slot SLOT_S, that its
+ * constant coefficient is zero, and that s is short.
+ *
+ * All three speak about one commitment under one randomness, so they share a
+ * single mask, a single challenge and a single masked opening rather than
+ * carrying one each.
+ *
+ * @param[out] pi			- the resulting proof.
+ * @param[in,out] com		- the commitment, whose garbage slots are filled in.
+ * @param[in] s				- the witness, in CRT representation.
+ * @param[in] f				- the claimed product, in CRT representation.
+ * @param[in] w				- the projection mask, in coefficient form.
+ * @param[in] g				- the constant-coefficient masks.
+ * @param[in] key			- the commitment key.
+ * @param[in] r				- the commitment randomness.
+ * @return 1 if a transcript was produced, 0 if the projection was rejected.
+ */
+int lnp_bin_prover(lnpbinproof_t *pi, lnpcom_t *com, pcrt_poly_t s,
+		pcrt_poly_t f, nmod_poly_t w, pcrt_poly_t g[LNP_LAMBDA],
+		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]);
+
+/**
+ * Verify the proof produced by lnp_bin_prover.
+ */
+int lnp_bin_verifier(lnpbinproof_t *pi, lnpcom_t *com, lnpkey_t *key);
+
 
 #endif /* LNP_H */

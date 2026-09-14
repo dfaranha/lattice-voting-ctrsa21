@@ -607,8 +607,7 @@ static void shuffle_coeffs(nmod_poly_t alpha, nmod_poly_t gamma,
  * together say that the committed permutation element is binary, which is the
  * set D that Lemma 5 needs. */
 typedef struct _isbin_t {
-	lnpproof_t prod;
-	lnprangeproof_t rng;
+	lnpbinproof_t all;
 } isbin_t;
 
 static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
@@ -755,9 +754,7 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 					}
 				}
 				lnp_commit(&p[l], msg, lkey, pr[l]);
-				lnp_isbin_prover(&ib[l].prod, &p[l], msg[SLOT_S],
-						msg[SLOT_F], lkey, pr[l]);
-				if (lnp_ct_range_prover(&ib[l].rng, &p[l], msg[SLOT_S],
+				if (lnp_bin_prover(&ib[l].all, &p[l], msg[SLOT_S],
 						msg[SLOT_F], wraw, g, lkey, pr[l])) {
 					break;
 				}
@@ -825,8 +822,7 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 		 * are needed: the product relation and the constant coefficient
 		 * together say binary, and the range proof supplies the norm bound
 		 * that keeps the coefficient sum from wrapping. */
-		result &= lnp_isbin_verifier(&ib[l].prod, &p[l], lkey);
-		result &= lnp_ct_range_verifier(&ib[l].rng, &p[l], lkey);
+		result &= lnp_bin_verifier(&ib[l].all, &p[l], lkey);
 	}
 
 	nmod_poly_clear(beta);
@@ -876,8 +872,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	for (int i = 0; i < MSGS; i++) {
 		commit_init(&d[i]);
 		lnp_com_init(&p[i]);
-		lnp_proof_init(&ib[i].prod);
-		lnp_rangeproof_init(&ib[i].rng);
+		lnp_binproof_init(&ib[i].all);
 		nmod_poly_init(s[i], MODP);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(t[i][k], MODP);
@@ -933,8 +928,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	for (int i = 0; i < MSGS; i++) {
 		commit_free(&d[i]);
 		lnp_com_free(&p[i]);
-		lnp_proof_free(&ib[i].prod);
-		lnp_rangeproof_free(&ib[i].rng);
+		lnp_binproof_free(&ib[i].all);
 		nmod_poly_clear(s[i]);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(t[i][k]);
