@@ -1,0 +1,55 @@
+name: Setup FLINT
+description: Build and install FLINT
+
+inputs:
+  version:
+    description: FLINT version
+    required: false
+    default: v3.6.0
+
+runs:
+  using: composite
+  steps:
+    - name: Install FLINT dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          autoconf \
+          automake \
+          libtool \
+          libgmp-dev
+
+    - name: Restore FLINT cache
+      id: cache-flint
+      uses: actions/cache@v4
+      with:
+        path: /tmp/flint-install
+        key: flint-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}-r1
+
+    - name: Build FLINT
+      if: steps.cache-flint.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        git clone --depth 1 --branch "${{ inputs.version }}" \
+          https://github.com/flintlib/flint.git /tmp/flint
+
+        cd /tmp/flint
+
+        ./configure \
+          --prefix=/tmp/flint-install
+
+        make -j"$(nproc)"
+        make install
+
+    - name: Install FLINT
+      shell: bash
+      run: |
+        sudo cp -a /tmp/flint-install/include/. /usr/local/include/
+        sudo cp -a /tmp/flint-install/lib/. /usr/local/lib/
+        sudo ldconfig
+
+    - name: Check FLINT
+      shell: bash
+      run: |
+        /usr/local/bin/flint-config --version
