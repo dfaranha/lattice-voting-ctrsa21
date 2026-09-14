@@ -6,9 +6,8 @@ statement, and enough of B7 to see whether the parameters close. This is the
 report of that spike, and of the constant-coefficient proof that it identified
 as the one piece with real design content, which was then built as well.
 
-`is_bin` now holds end to end for a committed witness, on the hypothesis that
-the witness is short. Supplying that hypothesis is B5, which is not built;
-section 4 says what else is missing.
+`is_bin` now holds end to end, and is wired into the shuffle, where it replaces
+the relaxed norm proof. Sections 4 and 5 record what that cost.
 
 ## 1. What is implemented
 
@@ -200,36 +199,88 @@ Neither was reachable while `MODP` stayed under `2^32`, and both are now fixed.
   `2^64` and wrap. A malicious response with coefficients around `2^32` would
   have passed the norm check. It now compares by dividing instead.
 
-## 5. What this changes about the decision
+## 5. B6: wiring into the shuffle
 
-The plan's section 7 framed the choice as fidelity to Protocol 1 against
-1500-2000 lines of new proof-system code. Three things have moved.
+The permutation elements now live in the LNP commitment rather than in a
+separate BDLOP one. That is the decision that shaped the rest: sharing a single
+commitment between the linear proof and `is_bin` means the two speak about the
+same object, so no linking proof between two commitments is needed. The linear
+proof's `p` argument became an `lnpcom_t`, its randomness LNP_WIDTH wide, and
+its message row `b2[SLOT_S]`.
 
-The parameter risk is gone: the modulus does not have to change, so the
-cascade the plan worried about, into the CRT constants and the ciphertext
-sizes, does not happen. The one new coupling is `LNP_LAMBDA` against the
-modulus, and it is cheap.
+The `SIGMA_S` machinery is gone. `lin_prover` and `lin_verifier` no longer
+carry `ys`, `vs` or `sig`, and the check that tied a narrow `z_sigma` to the
+committed message is deleted. Membership in the set `D` that Lemma 5 needs is
+now established by `is_bin` against the same commitment, with `D` the binary
+ring elements. The monomials `g(i) = X^i` are themselves binary, so the
+encoding did not have to change.
 
-The cost estimate came down. B1, B2 and B3 together are about 900 lines, well
-under the plan's figure for the whole of Track B, and the piece that looked
-hardest turned out to have a short answer once the reason it was hard was
-clear.
+Two orderings are load-bearing. The shuffle hash absorbs only the Ajtai part of
+the commitment and slot `SLOT_S`, which leaves the garbage and mask slots free
+to be rewritten; without that, the range proof's rejection sampling would
+change `beta` on every retry. And within the prover the product proof runs
+first, since it fills the garbage slots, then the range proof, then the
+constant-coefficient proof, because the last two derive their challenges from
+the finished commitment.
 
-B1, B2, B3 and B5 are built. What is left is B4, which the JL route does not
-need, since the range proof bounds a BDLOP-committed witness directly, and B6,
-the wiring into the shuffle. Until B6, nothing here replaces the relaxed norm
-proof in `shuffle.c`; the two are independent.
+### It rejects for the right reason
 
-The cost is no longer the 1500-2000 lines the plan estimated. It is the
-modulus, and everything the modulus drags with it: `WIDTH`, `DIM`, `q`, the CRT
-constants, and the two 32-bit assumptions that had been sitting unreachable in
-the arithmetic. Track A would have paid the same price, since LaZer's range
-proof obeys the same arithmetic.
+The attack tests pass, but passing is not the same as passing for the right
+reason, so the verifier was instrumented to report each check separately:
+
+| | lin | isbin | ct | range |
+| --- | --- | --- | --- | --- |
+| honest witness | 1 | 1 | 1 | 1 |
+| CRT-mixed sigma | **1** | **1** | **0** | **0** |
+
+`lin = 1` on the attack confirms the old `SIGMA_S` guard really is gone rather
+than still firing by accident. `isbin = 1` is correct: the product relation
+holds, because the prover computed it honestly; what fails is that the constant
+coefficient of that product is not zero, which is `ct`. The mixed element is
+also far too large, which `range` catches independently.
+
+### What it costs
+
+Measured on the same machine, three full proofs at `MSGS = 25`:
+
+| | per proof | per message |
+| --- | --- | --- |
+| before B6 | 2.37 s | 0.095 s |
+| after B6 | 17.1 s | 0.68 s |
+
+**7.2 times slower.** Three sub-proofs per message, and the range proof's
+rejection sampling retries about 3.8 times, each retry recommitting and
+re-running the product proof. Nothing here has been optimised; the obvious
+first move is to stop re-running the product proof on a range rejection, since
+only the mask needs to be fresh.
+
+For scale, the paper reports 33 ms per vote. The parameter change alone
+accounts for a factor of about three of the gap, and `is_bin` for the rest.
+
+## 6. What this changes about the decision
+
+Track B is complete: B1, B2, B3, B5 and B6 are built and tested, and B4 is not
+needed on this route because the projection bounds a BDLOP-committed witness
+directly.
+
+The plan sized Track B at 1500-2000 lines and framed the choice as fidelity to
+Protocol 1 against that. Both halves of that framing moved. The code came to
+roughly 1400 lines, and the piece that looked hardest, the constant
+coefficient, had a short answer once the reason it was hard was clear. But the
+real price was never the code. It was the modulus, and what the modulus drags
+with it: `WIDTH`, `DIM`, `q` against its 64-bit ceiling, the CRT constants, two
+latent 32-bit assumptions in arithmetic that had been correct for years, and a
+prover seven times slower. Track A would have paid the same price, since
+LaZer's range proof obeys the same arithmetic.
+
+So the decision is no longer Track A against Track B. It is whether fidelity to
+Protocol 1 as published, and not having to review the restatement of Lemma 5 in
+SOUNDNESS.md, is worth a modulus change and a 7x prover. That is a judgement
+about what the artifact is for.
 
 Finally, none of this is a soundness proof. The extraction argument for the
 product relation divides by `(c - c')(sigma(c) - sigma(c'))` and yields a
 relaxed opening, and what that relaxation does to the binding bound has not
-been worked out. The projection lemma is used with a rough constant of 2; the
-exact one would move the 1.78x margin by a little. The tests establish
-completeness and that specific cheating strategies fail. They do not establish
-that no strategy succeeds.
+been worked out. The projection lemma is used with a rough constant of 2. The
+tests establish completeness, and that two specific attacks fail, by the checks
+that should catch them. They do not establish that no attack succeeds.

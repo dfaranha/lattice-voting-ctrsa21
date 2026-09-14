@@ -18,9 +18,17 @@
 #include "sha.h"
 #include "gaussian.h"
 
+
 /*============================================================================*/
 /* Private definitions                                                        */
 /*============================================================================*/
+
+/* Forward declarations for the static helpers, so that the public routines can
+ * appear in the order the proof system is built up rather than in strict
+ * definition order. */
+static void ct_scalars(ulong mu[LNP_LAMBDA], lnpkey_t *key, lnpcom_t *com);
+static void ct_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
+		lnpctproof_t *pi);
 
 /* The automorphism sigma_k maps X^i to X^(k*i). Exponents live modulo 2*DEGREE
  * because X^DEGREE = -1, so an exponent that lands in [DEGREE, 2*DEGREE) comes
@@ -1068,25 +1076,28 @@ int lnp_range_verifier(lnprangeproof_t *pi, lnpcom_t *com, lnpkey_t *key) {
 	return result;
 }
 
-/*============================================================================*/
-/* Tests                                                                      */
-/*============================================================================*/
+/* The value an honest prover puts in slot SLOT_F: sigma_{-1}(s) * (s - ones),
+ * whose constant coefficient is the sum over j of s_j (s_j - 1). */
+void lnp_isbin_product(pcrt_poly_t f, pcrt_poly_t s) {
+	pcrt_poly_t one, ss;
+	nmod_poly_t tmp;
 
-/* sigma_{-1} in coefficient representation, written out directly from the
- * definition as an independent check on the general routine. */
-static void auto_inverse_ref(nmod_poly_t c, nmod_poly_t a) {
-	nmod_poly_t t;
-
-	nmod_poly_init(t, MODP);
-	nmod_poly_fit_length(t, DEGREE);
-	nmod_poly_set_coeff_ui(t, 0, nmod_poly_get_coeff_ui(a, 0));
-	for (slong i = 1; i < DEGREE; i++) {
-		/* X^-i = -X^(DEGREE-i) because X^DEGREE = -1. */
-		nmod_poly_set_coeff_ui(t, DEGREE - i,
-				nmod_neg(nmod_poly_get_coeff_ui(a, i), a->mod));
+	nmod_poly_init(tmp, MODP);
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_init(one[k], MODP);
+		nmod_poly_init(ss[k], MODP);
 	}
-	nmod_poly_set(c, t);
-	nmod_poly_clear(t);
+	lnp_ones(one);
+	lnp_auto_crt(ss, s, 2 * DEGREE - 1);
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_sub(tmp, s[k], one[k]);
+		pcrt_poly_mulmod(f[k], ss[k], tmp, k);
+	}
+	nmod_poly_clear(tmp);
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_clear(one[k]);
+		nmod_poly_clear(ss[k]);
+	}
 }
 
 void lnp_ones(pcrt_poly_t out) {
@@ -1312,96 +1323,11 @@ int lnp_isbin_verifier(lnpproof_t *pi, lnpcom_t *com, lnpkey_t *key) {
 	return result;
 }
 
-/* Derive the LNP_LAMBDA aggregation scalars from the commitment alone. They
- * must not depend on anything chosen after the masks are committed, which is
- * what rules out a prover that picks a mask cancelling a non-zero constant
- * coefficient. */
-static void ct_scalars(ulong mu[LNP_LAMBDA], lnpkey_t *key, lnpcom_t *com);
-
 /* Exposed so that a test can play the part of a prover that reads the scalars
  * and then tries to adapt its masks to them. */
 void lnp_ct_scalars_for_test(ulong mu[LNP_LAMBDA], lnpkey_t *key,
 		lnpcom_t *com) {
 	ct_scalars(mu, key, com);
-}
-
-static void ct_scalars(ulong mu[LNP_LAMBDA], lnpkey_t *key, lnpcom_t *com) {
-	SHA256Context sha;
-	uint8_t hash[SHA256HashSize];
-	uint64_t buf;
-
-	SHA256Reset(&sha);
-	for (int i = 0; i < HEIGHT; i++) {
-		for (int j = 0; j < LNP_WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->B1[i][j][k]);
-			}
-		}
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int j = 0; j < LNP_WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->b2[i][j][k]);
-			}
-		}
-	}
-	for (int k = 0; k < NCRT; k++) {
-		for (int i = 0; i < HEIGHT; i++) {
-			hash_poly(&sha, com->c1[i][k]);
-		}
-		for (int i = 0; i < SLOTS; i++) {
-			hash_poly(&sha, com->c2[i][k]);
-		}
-	}
-	SHA256Result(&sha, hash);
-
-	fastrandombytes_setseed(hash);
-	for (int i = 0; i < LNP_LAMBDA; i++) {
-		fastrandombytes((unsigned char *)&buf, sizeof(buf));
-		mu[i] = buf % MODP;
-	}
-}
-
-/* Derive the opening challenge. It absorbs the aggregated values h and the
- * first messages, so h is fixed before it. */
-static void ct_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
-		lnpctproof_t *pi) {
-	SHA256Context sha;
-	uint8_t hash[SHA256HashSize];
-	uint32_t buf;
-	nmod_poly_t c;
-
-	SHA256Reset(&sha);
-	for (int k = 0; k < NCRT; k++) {
-		for (int i = 0; i < HEIGHT; i++) {
-			hash_poly(&sha, com->c1[i][k]);
-			hash_poly(&sha, pi->w[i][k]);
-		}
-		for (int i = 0; i < SLOTS; i++) {
-			hash_poly(&sha, com->c2[i][k]);
-		}
-		for (int i = 0; i < LNP_LAMBDA; i++) {
-			hash_poly(&sha, pi->h[i][k]);
-			hash_poly(&sha, pi->v[i][k]);
-		}
-	}
-	SHA256Result(&sha, hash);
-
-	nmod_poly_init(c, MODP);
-	fastrandombytes_setseed(hash);
-	nmod_poly_fit_length(c, DEGREE);
-	for (int i = 0; i < NONZERO; i++) {
-		fastrandombytes((unsigned char *)&buf, sizeof(buf));
-		buf = buf % DEGREE;
-		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
-			buf = buf % DEGREE;
-		}
-		nmod_poly_set_coeff_ui(c, buf, 1);
-	}
-	pcrt_poly_reduce(d[0], c, 0);
-	pcrt_poly_reduce(d[1], c, 1);
-	nmod_poly_clear(c);
 }
 
 void lnp_ctproof_init(lnpctproof_t *pi) {
@@ -1630,6 +1556,233 @@ int lnp_ct_verifier(lnpctproof_t *pi, lnpcom_t *com, lnpkey_t *key) {
 	return result;
 }
 
+/* Derive the LNP_LAMBDA aggregation scalars from the commitment alone. They
+ * must not depend on anything chosen after the masks are committed, which is
+ * what rules out a prover that picks a mask cancelling a non-zero constant
+ * coefficient. */
+static void ct_scalars(ulong mu[LNP_LAMBDA], lnpkey_t *key, lnpcom_t *com);
+
+
+static void ct_scalars(ulong mu[LNP_LAMBDA], lnpkey_t *key, lnpcom_t *com) {
+	SHA256Context sha;
+	uint8_t hash[SHA256HashSize];
+	uint64_t buf;
+
+	SHA256Reset(&sha);
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int j = 0; j < LNP_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				hash_poly(&sha, key->B1[i][j][k]);
+			}
+		}
+	}
+	for (int i = 0; i < SLOTS; i++) {
+		for (int j = 0; j < LNP_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				hash_poly(&sha, key->b2[i][j][k]);
+			}
+		}
+	}
+	for (int k = 0; k < NCRT; k++) {
+		for (int i = 0; i < HEIGHT; i++) {
+			hash_poly(&sha, com->c1[i][k]);
+		}
+		for (int i = 0; i < SLOTS; i++) {
+			hash_poly(&sha, com->c2[i][k]);
+		}
+	}
+	SHA256Result(&sha, hash);
+
+	fastrandombytes_setseed(hash);
+	for (int i = 0; i < LNP_LAMBDA; i++) {
+		fastrandombytes((unsigned char *)&buf, sizeof(buf));
+		mu[i] = buf % MODP;
+	}
+}
+
+/* Derive the opening challenge. It absorbs the aggregated values h and the
+ * first messages, so h is fixed before it. */
+static void ct_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
+		lnpctproof_t *pi) {
+	SHA256Context sha;
+	uint8_t hash[SHA256HashSize];
+	uint32_t buf;
+	nmod_poly_t c;
+
+	SHA256Reset(&sha);
+	for (int k = 0; k < NCRT; k++) {
+		for (int i = 0; i < HEIGHT; i++) {
+			hash_poly(&sha, com->c1[i][k]);
+			hash_poly(&sha, pi->w[i][k]);
+		}
+		for (int i = 0; i < SLOTS; i++) {
+			hash_poly(&sha, com->c2[i][k]);
+		}
+		for (int i = 0; i < LNP_LAMBDA; i++) {
+			hash_poly(&sha, pi->h[i][k]);
+			hash_poly(&sha, pi->v[i][k]);
+		}
+	}
+	SHA256Result(&sha, hash);
+
+	nmod_poly_init(c, MODP);
+	fastrandombytes_setseed(hash);
+	nmod_poly_fit_length(c, DEGREE);
+	for (int i = 0; i < NONZERO; i++) {
+		fastrandombytes((unsigned char *)&buf, sizeof(buf));
+		buf = buf % DEGREE;
+		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
+			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			buf = buf % DEGREE;
+		}
+		nmod_poly_set_coeff_ui(c, buf, 1);
+	}
+	pcrt_poly_reduce(d[0], c, 0);
+	pcrt_poly_reduce(d[1], c, 1);
+	nmod_poly_clear(c);
+}
+
+/*============================================================================*/
+/* Tests                                                                      */
+/*============================================================================*/
+
+#ifdef LNP_MAIN
+
+/* sigma_{-1} in coefficient representation, written out directly from the
+ * definition as an independent check on the general routine. */
+static void auto_inverse_ref(nmod_poly_t c, nmod_poly_t a) {
+	nmod_poly_t t;
+
+	nmod_poly_init(t, MODP);
+	nmod_poly_fit_length(t, DEGREE);
+	nmod_poly_set_coeff_ui(t, 0, nmod_poly_get_coeff_ui(a, 0));
+	for (slong i = 1; i < DEGREE; i++) {
+		/* X^-i = -X^(DEGREE-i) because X^DEGREE = -1. */
+		nmod_poly_set_coeff_ui(t, DEGREE - i,
+				nmod_neg(nmod_poly_get_coeff_ui(a, i), a->mod));
+	}
+	nmod_poly_set(c, t);
+	nmod_poly_clear(t);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* Reconstruct the constant coefficient of a CRT-represented polynomial. */
+static ulong const_coeff(pcrt_poly_t a) {
+	nmod_poly_t t;
+	ulong r;
+
+	nmod_poly_init(t, MODP);
+	pcrt_poly_rec(t, a);
+	r = nmod_poly_get_coeff_ui(t, 0);
+	nmod_poly_clear(t);
+	return r;
+}
+
+
+
+/* Build a random polynomial whose constant coefficient is a chosen value. */
+static void set_ct(pcrt_poly_t out, flint_rand_t rng, ulong c0) {
+	nmod_poly_t t;
+
+	nmod_poly_init(t, MODP);
+	commit_sample_rand(t, rng, DEGREE);
+	nmod_poly_set_coeff_ui(t, 0, c0);
+	pcrt_poly_reduce(out[0], t, 0);
+	pcrt_poly_reduce(out[1], t, 1);
+	nmod_poly_clear(t);
+}
+
+
+/* The two halves composed: the product relation says slot 1 holds
+ * sigma_{-1}(s) (s - ones), and the constant-coefficient proof says its
+ * constant coefficient is zero. Together they say that every coefficient of s
+ * is 0 or 1, given the norm bound that B5 would supply. */
+static int isbin_full(lnpkey_t *key, flint_rand_t rng, nmod_poly_t s) {
+	lnpcom_t com;
+	lnpproof_t pi;
+	lnpctproof_t pc;
+	pcrt_poly_t r[LNP_WIDTH], m[SLOTS], g[LNP_LAMBDA];
+	int result;
+
+	lnp_com_init(&com);
+	lnp_proof_init(&pi);
+	lnp_ctproof_init(&pc);
+	for (int i = 0; i < LNP_WIDTH; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(r[i][k], MODP);
+		}
+		commit_sample_short_crt(r[i]);
+	}
+	for (int i = 0; i < SLOTS; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(m[i][k], MODP);
+			nmod_poly_zero(m[i][k]);
+		}
+	}
+	for (int i = 0; i < LNP_LAMBDA; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(g[i][k], MODP);
+		}
+		lnp_sample_ct_zero(g[i], rng);
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_set(m[SLOT_G + i][k], g[i][k]);
+		}
+	}
+	pcrt_poly_reduce(m[0][0], s, 0);
+	pcrt_poly_reduce(m[0][1], s, 1);
+	lnp_isbin_product(m[SLOT_F], m[0]);
+	lnp_commit(&com, m, key, r);
+
+	/* The product proof fills the garbage slots, so it must run first: the
+	 * aggregation scalars are derived from the whole commitment. */
+	lnp_isbin_prover(&pi, &com, m[0], m[SLOT_F], key, r);
+	lnp_ct_prover(&pc, &com, m[SLOT_F], g, key, r);
+	result = lnp_isbin_verifier(&pi, &com, key) &&
+			lnp_ct_verifier(&pc, &com, key);
+
+	for (int i = 0; i < LNP_WIDTH; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(r[i][k]);
+		}
+	}
+	for (int i = 0; i < SLOTS; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(m[i][k]);
+		}
+	}
+	for (int i = 0; i < LNP_LAMBDA; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(g[i][k]);
+		}
+	}
+	lnp_com_free(&com);
+	lnp_proof_free(&pi);
+	lnp_ctproof_free(&pc);
+	return result;
+}
+
+
+
+/* Select which phases to run: "test", "bench", or neither for both. Same
+ * helper as in commit.c and shuffle.c; it stays local to each binary so that
+ * the test harness does not have to be shared between them. */
+static int phase_selected(int argc, char *argv[], const char *phase) {
+	return argc < 2 || strcmp(argv[1], phase) == 0;
+}
+
 
 static void test_auto(flint_rand_t rng) {
 	nmod_poly_t a, b, d, e;
@@ -1820,41 +1973,6 @@ static void test_quad(flint_rand_t rng) {
 	lnp_proof_free(&pi);
 }
 
-/* Reconstruct the constant coefficient of a CRT-represented polynomial. */
-static ulong const_coeff(pcrt_poly_t a) {
-	nmod_poly_t t;
-	ulong r;
-
-	nmod_poly_init(t, MODP);
-	pcrt_poly_rec(t, a);
-	r = nmod_poly_get_coeff_ui(t, 0);
-	nmod_poly_clear(t);
-	return r;
-}
-
-/* Build sigma_{-1}(s) * (s - ones) honestly, in CRT representation. */
-static void isbin_product(pcrt_poly_t f, pcrt_poly_t s) {
-	pcrt_poly_t one, ss;
-	nmod_poly_t tmp;
-
-	nmod_poly_init(tmp, MODP);
-	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_init(one[k], MODP);
-		nmod_poly_init(ss[k], MODP);
-	}
-	lnp_ones(one);
-	lnp_auto_crt(ss, s, 2 * DEGREE - 1);
-	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_sub(tmp, s[k], one[k]);
-		pcrt_poly_mulmod(f[k], ss[k], tmp, k);
-	}
-	nmod_poly_clear(tmp);
-	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_clear(one[k]);
-		nmod_poly_clear(ss[k]);
-	}
-}
-
 static void test_isbin(flint_rand_t rng) {
 	lnpkey_t key;
 	lnpcom_t com;
@@ -1890,7 +2008,7 @@ static void test_isbin(flint_rand_t rng) {
 		}
 		pcrt_poly_reduce(m[0][0], s, 0);
 		pcrt_poly_reduce(m[0][1], s, 1);
-		isbin_product(m[1], m[0]);
+		lnp_isbin_product(m[1], m[0]);
 		TEST_ASSERT(const_coeff(m[1]) == 0, end);
 	} TEST_END;
 
@@ -1908,7 +2026,7 @@ static void test_isbin(flint_rand_t rng) {
 		nmod_poly_set_coeff_ui(s, 7, 2);
 		pcrt_poly_reduce(m[0][0], s, 0);
 		pcrt_poly_reduce(m[0][1], s, 1);
-		isbin_product(m[1], m[0]);
+		lnp_isbin_product(m[1], m[0]);
 		TEST_ASSERT(const_coeff(m[1]) != 0, end);
 	} TEST_END;
 
@@ -1917,7 +2035,7 @@ static void test_isbin(flint_rand_t rng) {
 			commit_sample_short_crt(r[i]);
 		}
 		commit_sample_rand_crt(m[0], rng);
-		isbin_product(m[1], m[0]);
+		lnp_isbin_product(m[1], m[0]);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_zero(m[2][k]);
 			nmod_poly_zero(m[3][k]);
@@ -1932,7 +2050,7 @@ static void test_isbin(flint_rand_t rng) {
 			commit_sample_short_crt(r[i]);
 		}
 		commit_sample_rand_crt(m[0], rng);
-		isbin_product(m[1], m[0]);
+		lnp_isbin_product(m[1], m[0]);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_set_coeff_ui(m[1][k], 0,
 					nmod_add(nmod_poly_get_coeff_ui(m[1][k], 0), 1,
@@ -1960,18 +2078,6 @@ static void test_isbin(flint_rand_t rng) {
 	lnp_keyfree(&key);
 	lnp_com_free(&com);
 	lnp_proof_free(&pi);
-}
-
-/* Build a random polynomial whose constant coefficient is a chosen value. */
-static void set_ct(pcrt_poly_t out, flint_rand_t rng, ulong c0) {
-	nmod_poly_t t;
-
-	nmod_poly_init(t, MODP);
-	commit_sample_rand(t, rng, DEGREE);
-	nmod_poly_set_coeff_ui(t, 0, c0);
-	pcrt_poly_reduce(out[0], t, 0);
-	pcrt_poly_reduce(out[1], t, 1);
-	nmod_poly_clear(t);
 }
 
 static void test_ct(flint_rand_t rng) {
@@ -2104,74 +2210,6 @@ static void test_ct(flint_rand_t rng) {
 	lnp_keyfree(&key);
 	lnp_com_free(&com);
 	lnp_ctproof_free(&pi);
-}
-
-/* The two halves composed: the product relation says slot 1 holds
- * sigma_{-1}(s) (s - ones), and the constant-coefficient proof says its
- * constant coefficient is zero. Together they say that every coefficient of s
- * is 0 or 1, given the norm bound that B5 would supply. */
-static int isbin_full(lnpkey_t *key, flint_rand_t rng, nmod_poly_t s) {
-	lnpcom_t com;
-	lnpproof_t pi;
-	lnpctproof_t pc;
-	pcrt_poly_t r[LNP_WIDTH], m[SLOTS], g[LNP_LAMBDA];
-	int result;
-
-	lnp_com_init(&com);
-	lnp_proof_init(&pi);
-	lnp_ctproof_init(&pc);
-	for (int i = 0; i < LNP_WIDTH; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(r[i][k], MODP);
-		}
-		commit_sample_short_crt(r[i]);
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(m[i][k], MODP);
-			nmod_poly_zero(m[i][k]);
-		}
-	}
-	for (int i = 0; i < LNP_LAMBDA; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(g[i][k], MODP);
-		}
-		lnp_sample_ct_zero(g[i], rng);
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_set(m[SLOT_G + i][k], g[i][k]);
-		}
-	}
-	pcrt_poly_reduce(m[0][0], s, 0);
-	pcrt_poly_reduce(m[0][1], s, 1);
-	isbin_product(m[SLOT_F], m[0]);
-	lnp_commit(&com, m, key, r);
-
-	/* The product proof fills the garbage slots, so it must run first: the
-	 * aggregation scalars are derived from the whole commitment. */
-	lnp_isbin_prover(&pi, &com, m[0], m[SLOT_F], key, r);
-	lnp_ct_prover(&pc, &com, m[SLOT_F], g, key, r);
-	result = lnp_isbin_verifier(&pi, &com, key) &&
-			lnp_ct_verifier(&pc, &com, key);
-
-	for (int i = 0; i < LNP_WIDTH; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(r[i][k]);
-		}
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(m[i][k]);
-		}
-	}
-	for (int i = 0; i < LNP_LAMBDA; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(g[i][k]);
-		}
-	}
-	lnp_com_free(&com);
-	lnp_proof_free(&pi);
-	lnp_ctproof_free(&pc);
-	return result;
 }
 
 static void test_isbin_full(flint_rand_t rng) {
@@ -2394,13 +2432,6 @@ static void test_range(flint_rand_t rng) {
 	lnp_rangeproof_free(&pi);
 }
 
-/* Select which phases to run: "test", "bench", or neither for both. Same
- * helper as in commit.c and shuffle.c; it stays local to each binary so that
- * the test harness does not have to be shared between them. */
-static int phase_selected(int argc, char *argv[], const char *phase) {
-	return argc < 2 || strcmp(argv[1], phase) == 0;
-}
-
 int main(int argc, char *argv[]) {
 	flint_rand_t rand;
 
@@ -2421,3 +2452,5 @@ int main(int argc, char *argv[]) {
 	flint_rand_clear(rand);
 	return 0;
 }
+
+#endif /* LNP_MAIN */

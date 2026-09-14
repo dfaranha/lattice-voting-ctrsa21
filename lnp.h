@@ -217,6 +217,16 @@ int lnp_quad_verifier(lnpproof_t *pi, lnpcom_t *com, lnpkey_t *key);
 void lnp_ones(pcrt_poly_t out);
 
 /**
+ * Compute the value an honest prover commits in slot SLOT_F, namely
+ * sigma_{-1}(s) * (s - ones), whose constant coefficient is the sum over j of
+ * s_j (s_j - 1).
+ *
+ * @param[out] f			- the product, in CRT representation.
+ * @param[in] s				- the witness, in CRT representation.
+ */
+void lnp_isbin_product(pcrt_poly_t f, pcrt_poly_t s);
+
+/**
  * Prove that slot 1 of the commitment holds sigma_{-1}(s) * (s - ones), where
  * s is slot 0. Slots 2 and 3 carry the garbage terms and are filled in.
  *
