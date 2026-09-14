@@ -224,6 +224,12 @@ void commit_sample_gauss(nmod_poly_t r);
 void commit_sample_gauss_crt(pcrt_poly_t r);
 
 /**
+ * Sample a masking polynomial at the batch width SIGMA_B, for a proof whose
+ * rejection test spans every message at once.
+ */
+void commit_sample_gauss_batch_crt(pcrt_poly_t r);
+
+/**
  * Initialize a commitment. Must be called before commit_doit, and released
  * with commit_free. Separating this from commit_doit is what allows the same
  * commitment to be recomputed in a loop without leaking.
@@ -294,5 +300,25 @@ double commit_uniform_double(void);
  */
 int commit_rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
 		int width);
+
+/**
+ * Accumulate the two quantities the rejection test needs, so that one decision
+ * can span responses held in several separate arrays. A proof that shares a
+ * challenge across many statements has to test their concatenation, not each
+ * piece: testing them separately would multiply the abort probabilities.
+ *
+ * @param[in,out] dot		- running inner product of the responses and the
+ *							  terms they mask.
+ * @param[in,out] norm		- running squared norm of the masked terms.
+ */
+void commit_rej_accumulate(int64_t *dot, int64_t *norm, nmod_poly_t z[][2],
+		nmod_poly_t v[][2], int width);
+
+/**
+ * Decide from accumulated quantities.
+ *
+ * @return 1 if the transcript must be rejected, 0 if it may be emitted.
+ */
+int commit_rej_decide(int64_t dot, int64_t norm, uint64_t s2);
 
 #endif /* COMMIT_H */

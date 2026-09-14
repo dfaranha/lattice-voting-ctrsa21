@@ -350,7 +350,7 @@ void lnp_quad_prover(lnpproof_t *pi, lnpcom_t *com, pcrt_poly_t m[3],
 	/* sigma_C = 11 * nu * beta * sqrt(k * N), as in the shuffle proof. */
 	uint64_t sigma_sqr = 11 * NONZERO * BETA;
 
-	sigma_sqr *= sigma_sqr * DEGREE * LNP_WIDTH;
+	sigma_sqr = (uint64_t) SIGMA_B * SIGMA_B;
 
 	nmod_poly_init(tmp, MODP);
 	for (int i = 0; i < LNP_WIDTH; i++) {
@@ -371,7 +371,7 @@ void lnp_quad_prover(lnpproof_t *pi, lnpcom_t *com, pcrt_poly_t m[3],
 
 	do {
 		for (int i = 0; i < LNP_WIDTH; i++) {
-			commit_sample_gauss_crt(y[i]);
+			commit_sample_gauss_batch_crt(y[i]);
 		}
 		for (int i = 0; i < HEIGHT; i++) {
 			inner(pi->w[i], key->B1[i], y, LNP_WIDTH);
@@ -454,7 +454,7 @@ int lnp_quad_verifier(lnpproof_t *pi, lnpcom_t *com, lnpkey_t *key) {
 	for (int i = 0; i < LNP_WIDTH; i++) {
 		pcrt_poly_rec(rec, pi->z[i]);
 		result &= commit_norm2_leq(rec,
-				(uint64_t) 4 * DEGREE * SIGMA_C * SIGMA_C);
+				(uint64_t) 4 * DEGREE * SIGMA_B * SIGMA_B);
 	}
 
 	/* B1 * z = w + c * c1. */
@@ -1338,7 +1338,7 @@ static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 	int rej, ok;
 	uint64_t sigma_sqr = 11 * NONZERO * BETA;
 
-	sigma_sqr *= sigma_sqr * DEGREE * LNP_WIDTH;
+	sigma_sqr = (uint64_t) SIGMA_B * SIGMA_B;
 	if (!tst_ready) {
 		for (int i = 0; i < LNP_WIDTH; i++) {
 			for (int k = 0; k < NCRT; k++) {
@@ -1365,7 +1365,7 @@ static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 	ok = lnp_bin_setup(pi, ctx, com, s, f, w, g, key);
 	do {
 		for (int i = 0; i < LNP_WIDTH; i++) {
-			commit_sample_gauss_crt(y[i]);
+			commit_sample_gauss_batch_crt(y[i]);
 		}
 		lnp_bin_first(pi, ctx, com, s, key, r, y);
 		for (int i = 0; i < HEIGHT; i++) {
@@ -1408,7 +1408,7 @@ static int bin_verify_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 	for (int i = 0; i < LNP_WIDTH; i++) {
 		pcrt_poly_rec(rec, tst_z[i]);
 		result &= commit_norm2_leq(rec,
-				(uint64_t) 4 * DEGREE * SIGMA_C * SIGMA_C);
+				(uint64_t) 4 * DEGREE * SIGMA_B * SIGMA_B);
 	}
 	for (int i = 0; i < HEIGHT; i++) {
 		pcrt_poly_t lhs, rhs;

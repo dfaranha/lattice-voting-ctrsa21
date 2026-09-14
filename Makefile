@@ -51,6 +51,12 @@ gaussian_p.o: gaussian_ct.cpp ${INCLUDES}
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_P \
 		-Ddiscrete_gaussian=discrete_gaussian_proj -c gaussian_ct.cpp -o $@
 
+# The batched proof shares one challenge across all messages, so its masks are
+# wider; see SIGMA_B in param.h.
+gaussian_b.o: gaussian_ct.cpp ${INCLUDES}
+	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_B \
+		-Ddiscrete_gaussian=discrete_gaussian_batch -c gaussian_ct.cpp -o $@
+
 encrypt.o: encrypt.c encrypt.h ${INCLUDES}
 	${CPP} ${CFLAGS} -c encrypt.c -o $@
 
@@ -63,11 +69,11 @@ encrypt: encrypt.c encrypt.h ${TEST} ${BENCH} ${INCLUDES}
 vericrypt: vericrypt.c encrypt.o ${TEST} ${BENCH} ${INCLUDES} gaussian_e.o
 	${CPP} ${CFLAGS} -DMAIN vericrypt.c encrypt.o sha224-256.c gaussian_e.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
-shuffle: shuffle.c commit.c commit.h lnp.c lnp.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_p.o
-	${CPP} ${CFLAGS} commit.c lnp.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o gaussian_p.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
+shuffle: shuffle.c commit.c commit.h lnp.c lnp.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o
+	${CPP} ${CFLAGS} commit.c lnp.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
-lnp: lnp.c lnp.h commit.c commit.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_p.o
-	${CPP} ${CFLAGS} -DLNP_MAIN commit.c lnp.c sha224-256.c gaussian_c.o gaussian_s.o gaussian_p.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
+lnp: lnp.c lnp.h commit.c commit.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o
+	${CPP} ${CFLAGS} -DLNP_MAIN commit.c lnp.c sha224-256.c gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
 clean:
 	rm -f *.o commit encrypt vericrypt shuffle lnp

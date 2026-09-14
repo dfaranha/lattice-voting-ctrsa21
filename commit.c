@@ -116,20 +116,13 @@ double commit_uniform_double(void) {
 	return (double)(bits >> 11) * 0x1.0p-53;
 }
 
-int commit_rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
-		int width) {
-	double r, u, M = 1.75;
-	int64_t dot, norm;
+void commit_rej_accumulate(int64_t *dot, int64_t *norm, nmod_poly_t z[][2],
+		nmod_poly_t v[][2], int width) {
 	int64_t c0, c1;
 	nmod_poly_t t0, t1;
-	int result;
 
 	nmod_poly_init(t0, MODP);
 	nmod_poly_init(t1, MODP);
-
-	u = commit_uniform_double();
-
-	norm = dot = 0;
 	for (int i = 0; i < width; i++) {
 		pcrt_poly_rec(t0, z[i]);
 		pcrt_poly_rec(t1, v[i]);
@@ -140,20 +133,26 @@ int commit_rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
 				c0 -= MODP;
 			if (c1 > MODP / 2)
 				c1 -= MODP;
-			dot += c0 * c1;
-			norm += c1 * c1;
+			*dot += c0 * c1;
+			*norm += c1 * c1;
 		}
 	}
-
-	r = -2.0 * dot + norm;
-	r = r / (2.0 * s2);
-	r = exp(r) / M;
-
-	result = u > r;
-
 	nmod_poly_clear(t0);
 	nmod_poly_clear(t1);
-	return result;
+}
+
+int commit_rej_decide(int64_t dot, int64_t norm, uint64_t s2) {
+	double r = (-2.0 * (double) dot + (double) norm) / (2.0 * (double) s2);
+
+	return commit_uniform_double() > exp(r) / 1.75;
+}
+
+int commit_rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
+		int width) {
+	int64_t dot = 0, norm = 0;
+
+	commit_rej_accumulate(&dot, &norm, z, v, width);
+	return commit_rej_decide(dot, norm, s2);
 }
 
 // Initialize commitment scheme.
@@ -487,6 +486,23 @@ void commit_sample_gauss_crt(nmod_poly_t r[2]) {
 		pcrt_poly_reduce(r[i], t, i);
 	}
 
+	nmod_poly_clear(t);
+}
+
+void commit_sample_gauss_batch_crt(nmod_poly_t r[2]) {
+	nmod_poly_t t;
+	int64_t coeff;
+
+	nmod_poly_init(t, MODP);
+	nmod_poly_fit_length(t, DEGREE);
+	for (int i = 0; i < DEGREE; i++) {
+		coeff = discrete_gaussian_batch(0.0);
+		nmod_poly_set_coeff_ui(t, i,
+				(coeff < 0) ? MODP - ((-coeff) % MODP) : (ulong)(coeff % MODP));
+	}
+	for (int i = 0; i < NCRT; i++) {
+		pcrt_poly_reduce(r[i], t, i);
+	}
 	nmod_poly_clear(t);
 }
 

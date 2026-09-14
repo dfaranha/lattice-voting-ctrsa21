@@ -59,6 +59,11 @@
  * remains below sqrt(MODP) ~ 62501, the bound under which Lemma 1 guarantees
  * invertibility. */
 #define SIGMA_S 256
+/* Standard deviation for the masks of the batched proof. One challenge shared
+ * across MSGS statements means one rejection test over their concatenation, so
+ * the term being masked is sqrt(MSGS) times longer than for a single statement
+ * and the mask has to widen to match. */
+#define SIGMA_B 270000
 /* Standard deviation of the projection mask in the approximate range proof:
  * TAU_PROJ * sqrt(PROJ * DEGREE / 2), the width needed to hide a projection of
  * an honest binary witness. */
