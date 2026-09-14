@@ -227,8 +227,8 @@ void vericrypt_sample_gauss_crt(fmpz_mod_poly_t r[2], fmpz_mod_ctx_t *ctx) {
 
 	fmpz_mod_poly_init(t, *ctx);
 	vericrypt_sample_gauss(t, ctx);
-	fmpz_mod_poly_rem(r[0], t, *encrypt_irred(0), *ctx);
-	fmpz_mod_poly_rem(r[1], t, *encrypt_irred(1), *ctx);
+	qcrt_poly_reduce(r[0], t, 0, *ctx);
+	qcrt_poly_reduce(r[1], t, 1, *ctx);
 
 	fmpz_mod_poly_clear(t, *encrypt_large_modulus_ctx());
 }
@@ -294,26 +294,24 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 
 		fmpz_mod_poly_init(_u, *ctx_p);
 		for (int i = 0; i < VECTOR; i++) {
-			fmpz_mod_poly_mulmod(tmp, t[i], y_mu[i], *encrypt_poly(), *ctx_p);
+			encrypt_poly_mulmod(tmp, t[i], y_mu[i], *ctx_p);
 			fmpz_mod_poly_add(_u, _u, tmp, *ctx_p);
 		}
 
 		/* Hash and convert result to challenge space. */
 		vericrypt_hash(hash, pk, t, u, out, y, _u);
 		vericrypt_sample_chall(out->c, hash, SHA256HashSize, ctx_p);
-		fmpz_mod_poly_rem(c[0], out->c, *encrypt_irred(0), *ctx_q);
-		fmpz_mod_poly_rem(c[1], out->c, *encrypt_irred(1), *ctx_q);
+		qcrt_poly_reduce(c[0], out->c, 0, *ctx_q);
+		qcrt_poly_reduce(c[1], out->c, 1, *ctx_q);
 
 		// Compute z = [r e e' mu]^T c + y.
 		for (int i = 0; i < VECTOR; i++) {
 			for (int j = 0; j < DIM; j++) {
 				for (int k = 0; k < 2; k++) {
-					fmpz_mod_poly_mulmod(out->r[i][j][k], out->r[i][j][k], c[k],
-							*encrypt_irred(k), *ctx_q);
+					qcrt_poly_mulmod(out->r[i][j][k], out->r[i][j][k], c[k], k, *ctx_q);
 					fmpz_mod_poly_add(out->r[i][j][k], out->r[i][j][k],
 							y_r[i][j][k], *ctx_q);
-					fmpz_mod_poly_mulmod(out->e[i][j][k], out->e[i][j][k], c[k],
-							*encrypt_irred(k), *ctx_q);
+					qcrt_poly_mulmod(out->e[i][j][k], out->e[i][j][k], c[k], k, *ctx_q);
 					fmpz_mod_poly_add(out->e[i][j][k], out->e[i][j][k],
 							y_e[i][j][k], *ctx_q);
 				}
@@ -321,13 +319,11 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 		}
 		for (int i = 0; i < VECTOR; i++) {
 			for (int k = 0; k < 2; k++) {
-				fmpz_mod_poly_mulmod(out->e_[i][k], out->e_[i][k], c[k],
-						*encrypt_irred(k), *ctx_q);
+				qcrt_poly_mulmod(out->e_[i][k], out->e_[i][k], c[k], k, *ctx_q);
 				fmpz_mod_poly_add(out->e_[i][k], out->e_[i][k], y_e_[i][k],
 						*ctx_q);
 			}
-			fmpz_mod_poly_mulmod(out->u[i], m[i], out->c, *encrypt_poly(),
-					*ctx_p);
+			encrypt_poly_mulmod(out->u[i], m[i], out->c, *ctx_p);
 			fmpz_mod_poly_add(out->u[i], out->u[i], y_mu[i], *ctx_p);
 		}
 
@@ -373,28 +369,26 @@ int vericrypt_verify(veritext_t *in, fmpz_mod_poly_t t[VECTOR],
 		for (int i = 0; i < VECTOR; i++) {
 			encrypt_make(&y[i], in->r[i], in->e[i], in->e_[i], in->u[i], pk);
 		}
-		fmpz_mod_poly_rem(_c[0], in->c, *encrypt_irred(0), *ctx_q);
-		fmpz_mod_poly_rem(_c[1], in->c, *encrypt_irred(1), *ctx_q);
+		qcrt_poly_reduce(_c[0], in->c, 0, *ctx_q);
+		qcrt_poly_reduce(_c[1], in->c, 1, *ctx_q);
 
 		fmpz_mod_poly_zero(_u, *ctx_p);
 		for (int i = 0; i < VECTOR; i++) {
-			fmpz_mod_poly_mulmod(tp, t[i], in->u[i], *encrypt_poly(), *ctx_p);
+			encrypt_poly_mulmod(tp, t[i], in->u[i], *ctx_p);
 			fmpz_mod_poly_add(_u, _u, tp, *ctx_p);
 		}
-		fmpz_mod_poly_mulmod(tp, in->c, u, *encrypt_poly(), *ctx_p);
+		encrypt_poly_mulmod(tp, in->c, u, *ctx_p);
 		fmpz_mod_poly_sub(_u, _u, tp, *ctx_p);
 
 		for (int i = 0; i < VECTOR; i++) {
 			for (int j = 0; j < DIM; j++) {
 				for (int k = 0; k < 2; k++) {
-					fmpz_mod_poly_mulmod(tq, _c[k], in->cipher[i].v[j][k],
-							*encrypt_irred(k), *ctx_q);
+					qcrt_poly_mulmod(tq, _c[k], in->cipher[i].v[j][k], k, *ctx_q);
 					fmpz_mod_poly_sub(y[i].v[j][k], y[i].v[j][k], tq, *ctx_q);
 				}
 			}
 			for (int k = 0; k < 2; k++) {
-				fmpz_mod_poly_mulmod(tq, _c[k], in->cipher[i].w[k],
-						*encrypt_irred(k), *ctx_q);
+				qcrt_poly_mulmod(tq, _c[k], in->cipher[i].w[k], k, *ctx_q);
 				fmpz_mod_poly_sub(y[i].w[k], y[i].w[k], tq, *ctx_q);
 			}
 		}
@@ -465,8 +459,7 @@ static void test(flint_rand_t rand) {
 		fmpz_mod_poly_zero(u, *encrypt_modulus_ctx());
 		for (int i = 0; i < VECTOR; i++) {
 			fmpz_mod_poly_randtest(t[i], rand, DEGREE, *encrypt_modulus_ctx());
-			fmpz_mod_poly_mulmod(tmp, t[i], m[i], *encrypt_poly(),
-					*encrypt_modulus_ctx());
+			encrypt_poly_mulmod(tmp, t[i], m[i], *encrypt_modulus_ctx());
 			fmpz_mod_poly_add(u, u, tmp, *encrypt_modulus_ctx());
 		}
 
@@ -476,11 +469,10 @@ static void test(flint_rand_t rand) {
 
 		fmpz_mod_poly_zero(v, *encrypt_modulus_ctx());
 		for (int i = 0; i < VECTOR; i++) {
-			fmpz_mod_poly_mulmod(tmp, t[i], _m[i], *encrypt_poly(),
-					*encrypt_modulus_ctx());
+			encrypt_poly_mulmod(tmp, t[i], _m[i], *encrypt_modulus_ctx());
 			fmpz_mod_poly_add(v, v, tmp, *encrypt_modulus_ctx());
 		}
-		fmpz_mod_poly_mulmod(u, u, c, *encrypt_poly(), *encrypt_modulus_ctx());
+		encrypt_poly_mulmod(u, u, c, *encrypt_modulus_ctx());
 
 		TEST_ASSERT(fmpz_mod_poly_equal(u, v, *encrypt_modulus_ctx()) == 1, end);
 	} TEST_END;
@@ -525,8 +517,7 @@ static void bench(flint_rand_t rand) {
 	fmpz_mod_poly_zero(u, *encrypt_modulus_ctx());
 	for (int i = 0; i < VECTOR; i++) {
 		fmpz_mod_poly_randtest(t[i], rand, DEGREE, *encrypt_modulus_ctx());
-		fmpz_mod_poly_mulmod(tmp, t[i], m[i], *encrypt_poly(),
-				*encrypt_modulus_ctx());
+		encrypt_poly_mulmod(tmp, t[i], m[i], *encrypt_modulus_ctx());
 		fmpz_mod_poly_add(u, u, tmp, *encrypt_modulus_ctx());
 	}
 

@@ -56,6 +56,39 @@ typedef struct _ciphertext_t {
  */
 void qcrt_poly_rec(fmpz_mod_poly_t c, qcrt_poly_t a);
 
+/* Multiply two polynomials modulo the i-th CRT factor.
+ *
+ * @param[out] c		- the resulting polynomial.
+ * @param[in] a			- the first polynomial.
+ * @param[in] b			- the second polynomial.
+ * @param[in] i			- the index of the CRT factor.
+ * @param[in] ctx		- the context for modular arithmetic.
+ */
+void qcrt_poly_mulmod(fmpz_mod_poly_t c, const fmpz_mod_poly_t a,
+		const fmpz_mod_poly_t b, int i, const fmpz_mod_ctx_t ctx);
+
+/* Reduce a polynomial into the i-th CRT component.
+ *
+ * The output may alias the input.
+ *
+ * @param[out] c		- the reduced polynomial.
+ * @param[in] a			- the polynomial to reduce.
+ * @param[in] i			- the index of the CRT factor.
+ * @param[in] ctx		- the context for modular arithmetic.
+ */
+void qcrt_poly_reduce(fmpz_mod_poly_t c, const fmpz_mod_poly_t a, int i,
+		const fmpz_mod_ctx_t ctx);
+
+/* Multiply two polynomials in the cyclotomic ring (x^DEGREE + 1).
+ *
+ * @param[out] c		- the resulting polynomial.
+ * @param[in] a			- the first polynomial.
+ * @param[in] b			- the second polynomial.
+ * @param[in] ctx		- the context for modular arithmetic.
+ */
+void encrypt_poly_mulmod(fmpz_mod_poly_t c, const fmpz_mod_poly_t a,
+		const fmpz_mod_poly_t b, const fmpz_mod_ctx_t ctx);
+
 /**
  * Initialize the commitment module.
  */

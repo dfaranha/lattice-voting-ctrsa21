@@ -42,23 +42,122 @@ static qcrt_poly_t irred;
 /* Inverses of the irreducible polynomials for CRT reconstruction. */
 static qcrt_poly_t inv;
 
+/* Scratch space for the multiplication routines. Like the rest of this module,
+ * they are not reentrant. */
+static fmpz_mod_poly_t mul_tmp;
+
+/**
+ * Reduce a polynomial modulo (x^m + r) in a given context.
+ *
+ * Both moduli used here have this shape: the cyclotomic polynomial is
+ * x^DEGREE + 1, and each CRT factor is x^DEGCRT + q_i. Reduction is then a fold
+ * of each successive block of m coefficients onto the lowest one, scaled by
+ * (-r)^k, which avoids the generic polynomial division that
+ * fmpz_mod_poly_mulmod performs.
+ *
+ * The input may have any degree. The output may alias the input: the copy loop
+ * is then a no-op, and the fold loop only reads coefficients at or above m,
+ * which it never writes.
+ *
+ * @param[out] c		- the reduced polynomial.
+ * @param[in] a			- the polynomial to reduce.
+ * @param[in] m			- the degree of the modulus.
+ * @param[in] r			- the constant coefficient of the modulus.
+ * @param[in] ctx		- the context for modular arithmetic.
+ */
+static void fold_mod(fmpz_mod_poly_t c, const fmpz_mod_poly_t a, slong m,
+		const fmpz_t r, const fmpz_mod_ctx_t ctx) {
+	fmpz_t f, t;
+	slong len = a->length;
+
+	fmpz_init_set_ui(f, 1);
+	fmpz_init(t);
+
+	fmpz_mod_poly_fit_length(c, m, ctx);
+	for (slong j = 0; j < m; j++) {
+		if (j < len) {
+			fmpz_set(c->coeffs + j, a->coeffs + j);
+		} else {
+			fmpz_zero(c->coeffs + j);
+		}
+	}
+	/* The block of coefficients at x^(k*m) contributes a factor (-r)^k. */
+	for (slong base = m; base < len; base += m) {
+		fmpz_mod_mul(f, f, r, ctx);
+		fmpz_mod_neg(f, f, ctx);
+		for (slong j = 0; j < m && base + j < len; j++) {
+			fmpz_mod_mul(t, a->coeffs + base + j, f, ctx);
+			fmpz_mod_add(c->coeffs + j, c->coeffs + j, t, ctx);
+		}
+	}
+	_fmpz_mod_poly_set_length(c, m);
+	_fmpz_mod_poly_normalise(c);
+
+	fmpz_clear(f);
+	fmpz_clear(t);
+}
+
+/* Constant coefficient of the i-th CRT factor, reduced into a context. */
+static void irred_const(fmpz_t r, int i, const fmpz_mod_ctx_t ctx) {
+	fmpz_mod_poly_get_coeff_fmpz(r, irred[i], 0, ctx_q);
+	fmpz_mod_set_fmpz(r, r, ctx);
+}
+
 /*============================================================================*/
 /* Public definitions                                                         */
 /*============================================================================*/
 
+/* Multiply two polynomials modulo the i-th CRT factor. */
+void qcrt_poly_mulmod(fmpz_mod_poly_t c, const fmpz_mod_poly_t a,
+		const fmpz_mod_poly_t b, int i, const fmpz_mod_ctx_t ctx) {
+	fmpz_t r;
+
+	fmpz_init(r);
+	irred_const(r, i, ctx);
+	fmpz_mod_poly_mul(mul_tmp, a, b, ctx);
+	fold_mod(c, mul_tmp, DEGCRT, r, ctx);
+	fmpz_clear(r);
+}
+
+/* Reduce a polynomial into the i-th CRT component. */
+void qcrt_poly_reduce(fmpz_mod_poly_t c, const fmpz_mod_poly_t a, int i,
+		const fmpz_mod_ctx_t ctx) {
+	fmpz_t r;
+
+	fmpz_init(r);
+	irred_const(r, i, ctx);
+	fold_mod(c, a, DEGCRT, r, ctx);
+	fmpz_clear(r);
+}
+
+/* Multiply two polynomials in the cyclotomic ring (x^DEGREE + 1). */
+void encrypt_poly_mulmod(fmpz_mod_poly_t c, const fmpz_mod_poly_t a,
+		const fmpz_mod_poly_t b, const fmpz_mod_ctx_t ctx) {
+	fmpz_t one;
+
+	fmpz_init_set_ui(one, 1);
+	fmpz_mod_poly_mul(mul_tmp, a, b, ctx);
+	fold_mod(c, mul_tmp, DEGREE, one, ctx);
+	fmpz_clear(one);
+}
+
 /* Recover polynomial from CRT representation. */
 void qcrt_poly_rec(fmpz_mod_poly_t c, qcrt_poly_t a) {
 	fmpz_mod_poly_t t;
+	fmpz_t one;
 
 	fmpz_mod_poly_init(t, ctx_q);
+	fmpz_init_set_ui(one, 1);
 
 	fmpz_mod_poly_sub(t, a[0], a[1], ctx_q);
 	fmpz_mod_poly_mul(t, t, inv[1], ctx_q);
 	fmpz_mod_poly_mul(c, t, irred[1], ctx_q);
 	fmpz_mod_poly_add(c, c, a[1], ctx_q);
-	fmpz_mod_poly_mul(t, irred[0], irred[1], ctx_q);
-	fmpz_mod_poly_rem(c, c, t, ctx_q);
+	/* The product of the two CRT factors is the cyclotomic polynomial, so the
+	 * reduction is a fold: no need to recompute that product and divide. */
+	fold_mod(c, c, DEGREE, one, ctx_q);
 
+	fmpz_clear(one);
 	fmpz_mod_poly_clear(t, ctx_q);
 }
 
@@ -90,8 +189,8 @@ void encrypt_sample_short_crt(fmpz_mod_poly_t r[2], fmpz_mod_ctx_t ctx) {
 
 	fmpz_mod_poly_init(t, ctx);
 	encrypt_sample_short(t, ctx);
-	fmpz_mod_poly_rem(r[0], t, irred[0], ctx);
-	fmpz_mod_poly_rem(r[1], t, irred[1], ctx);
+	qcrt_poly_reduce(r[0], t, 0, ctx);
+	qcrt_poly_reduce(r[1], t, 1, ctx);
 
 	fmpz_mod_poly_clear(t, ctx);
 }
@@ -115,6 +214,7 @@ void encrypt_setup() {
 
 	fmpz_mod_poly_init(poly, ctx_p);
 	fmpz_mod_poly_init(large_poly, ctx_q);
+	fmpz_mod_poly_init(mul_tmp, ctx_q);
 	for (int i = 0; i < 2; i++) {
 		fmpz_mod_poly_init(irred[i], ctx_q);
 		fmpz_mod_poly_init(inv[i], ctx_q);
@@ -180,6 +280,7 @@ fmpz_mod_poly_t *encrypt_irred(int i) {
 void encrypt_finish() {
 	fmpz_mod_poly_clear(poly, ctx_p);
 	fmpz_mod_poly_clear(large_poly, ctx_q);
+	fmpz_mod_poly_clear(mul_tmp, ctx_q);
 	for (int i = 0; i < 2; i++) {
 		fmpz_mod_poly_clear(irred[i], ctx_q);
 		fmpz_mod_poly_clear(inv[i], ctx_q);
@@ -221,8 +322,7 @@ void encrypt_keygen(publickey_t *pk, privatekey_t *sk, flint_rand_t rand) {
 	for (int i = 0; i < DIM; i++) {
 		for (int j = 0; j < DIM; j++) {
 			for (int k = 0; k < 2; k++) {
-				fmpz_mod_poly_mulmod(t, pk->A[i][j][k], sk->s1[j][k], irred[k],
-						ctx_q);
+				qcrt_poly_mulmod(t, pk->A[i][j][k], sk->s1[j][k], k, ctx_q);
 				fmpz_mod_poly_add(pk->t[i][k], pk->t[i][k], t, ctx_q);
 			}
 		}
@@ -270,8 +370,7 @@ void encrypt_make(ciphertext_t *c, qcrt_poly_t r[DIM], qcrt_poly_t e[DIM],
 	for (int i = 0; i < DIM; i++) {
 		for (int j = 0; j < DIM; j++) {
 			for (int k = 0; k < 2; k++) {
-				fmpz_mod_poly_mulmod(t, pk->A[j][i][k], r[j][k], irred[k],
-						ctx_q);
+				qcrt_poly_mulmod(t, pk->A[j][i][k], r[j][k], k, ctx_q);
 				fmpz_mod_poly_add(c->v[i][k], c->v[i][k], t, ctx_q);
 			}
 		}
@@ -294,12 +393,12 @@ void encrypt_make(ciphertext_t *c, qcrt_poly_t r[DIM], qcrt_poly_t e[DIM],
 			fmpz_mod_poly_add(c->v[i][j], c->v[i][j], e[i][j], ctx_q);
 			fmpz_mod_poly_scalar_mul_fmpz(c->v[i][j], c->v[i][j], p, ctx_q);
 
-			fmpz_mod_poly_mulmod(t, pk->t[j][i], r[j][i], irred[i], ctx_q);
+			qcrt_poly_mulmod(t, pk->t[j][i], r[j][i], i, ctx_q);
 			fmpz_mod_poly_add(c->w[i], c->w[i], t, ctx_q);
 		}
 		fmpz_mod_poly_add(c->w[i], c->w[i], e_[i], ctx_q);
 		fmpz_mod_poly_scalar_mul_fmpz(c->w[i], c->w[i], p, ctx_q);
-		fmpz_mod_poly_rem(t, _m, irred[i], ctx_q);
+		qcrt_poly_reduce(t, _m, i, ctx_q);
 		fmpz_mod_poly_add(c->w[i], c->w[i], t, ctx_q);
 	}
 	fmpz_mod_poly_clear(_m, ctx_q);
@@ -354,7 +453,7 @@ int encrypt_undo(fmpz_mod_poly_t m, fmpz_mod_poly_t chall, ciphertext_t *c,
 		fmpz_mod_poly_init(u[i], ctx_q);
 		fmpz_mod_poly_zero(u[i], ctx_q);
 		for (int j = 0; j < DIM; j++) {
-			fmpz_mod_poly_mulmod(t, c->v[j][i], sk->s1[j][i], irred[i], ctx_q);
+			qcrt_poly_mulmod(t, c->v[j][i], sk->s1[j][i], i, ctx_q);
 			fmpz_mod_poly_add(u[i], u[i], t, ctx_q);
 		}
 		fmpz_mod_poly_sub(u[i], c->w[i], u[i], ctx_q);
@@ -370,7 +469,7 @@ int encrypt_undo(fmpz_mod_poly_t m, fmpz_mod_poly_t chall, ciphertext_t *c,
 			}
 			fmpz_mod_poly_set_coeff_fmpz(_t, i, coeff, ctx_q);
 		}
-		fmpz_mod_poly_mulmod(t, t, _t, large_poly, ctx_q);
+		encrypt_poly_mulmod(t, t, _t, ctx_q);
 	}
 
 	fmpz_mod_poly_get_fmpz_poly(s, t, ctx_q);
@@ -433,7 +532,7 @@ static void test(flint_rand_t rand) {
 	TEST_BEGIN("CRT representation is correct") {
 		fmpz_mod_poly_randtest(m, rand, DEGREE, ctx_q);
 		for (int i = 0; i < 2; i++) {
-			fmpz_mod_poly_rem(w[i], m, irred[i], ctx_q);
+			qcrt_poly_reduce(w[i], m, i, ctx_q);
 		}
 		qcrt_poly_rec(_m, w);
 		TEST_ASSERT(fmpz_mod_poly_equal(m, _m, ctx_q) == 1, end);
