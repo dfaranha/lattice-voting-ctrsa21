@@ -34,7 +34,9 @@
 /* Modulus p defining the cyclotomic ring for the commitment scheme. */
 #define MODP 	3906450253
 /* Degree of the polynomial defining the cyclotomic ring for the commitment scheme. */
+#ifndef DEGREE
 #define DEGREE 	1024
+#endif
 /* Degree of each polynomial used to define the CRT representation. */
 #define DEGCRT 	(DEGREE >> 1)
 /* Number of irreducible factors of (x^DEGREE + 1), and therefore the number of
