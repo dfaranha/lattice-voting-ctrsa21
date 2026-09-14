@@ -12,6 +12,8 @@
 #include <flint/flint.h>
 #include <flint/nmod_poly.h>
 
+#include "param.h"
+
 /*============================================================================*/
 /* Constant definitions                                                       */
 /*============================================================================*/
@@ -30,7 +32,7 @@
 /*============================================================================*/
 
 /* Type that represents a polynomial in CRT representation. */
-typedef nmod_poly_t pcrt_poly_t[2];
+typedef nmod_poly_t pcrt_poly_t[NCRT];
 
 /* Type that represents a commitment key pair. */
 typedef struct _key_t {

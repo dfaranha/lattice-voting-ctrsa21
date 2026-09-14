@@ -15,6 +15,8 @@
 #include <flint/fmpz_poly.h>
 #include <flint/fmpz_mod_poly.h>
 
+#include "param.h"
+
 /*============================================================================*/
 /* Constant definitions                                                       */
 /*============================================================================*/
@@ -29,7 +31,7 @@
 /*============================================================================*/
 
 /* Type that represents a polynomial in CRT representation. */
-typedef fmpz_mod_poly_t qcrt_poly_t[2];
+typedef fmpz_mod_poly_t qcrt_poly_t[NCRT];
 
 /* Type that represents a public key for the encryption scheme. */
 typedef struct _publickey_t {

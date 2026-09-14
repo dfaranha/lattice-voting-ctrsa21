@@ -189,8 +189,9 @@ void encrypt_sample_short_crt(fmpz_mod_poly_t r[2], fmpz_mod_ctx_t ctx) {
 
 	fmpz_mod_poly_init(t, ctx);
 	encrypt_sample_short(t, ctx);
-	qcrt_poly_reduce(r[0], t, 0, ctx);
-	qcrt_poly_reduce(r[1], t, 1, ctx);
+	for (int i = 0; i < NCRT; i++) {
+		qcrt_poly_reduce(r[i], t, i, ctx);
+	}
 
 	fmpz_mod_poly_clear(t, ctx);
 }
@@ -215,7 +216,7 @@ void encrypt_setup() {
 	fmpz_mod_poly_init(poly, ctx_p);
 	fmpz_mod_poly_init(large_poly, ctx_q);
 	fmpz_mod_poly_init(mul_tmp, ctx_q);
-	for (int i = 0; i < 2; i++) {
+	for (int i = 0; i < NCRT; i++) {
 		fmpz_mod_poly_init(irred[i], ctx_q);
 		fmpz_mod_poly_init(inv[i], ctx_q);
 	}
@@ -281,7 +282,7 @@ void encrypt_finish() {
 	fmpz_mod_poly_clear(poly, ctx_p);
 	fmpz_mod_poly_clear(large_poly, ctx_q);
 	fmpz_mod_poly_clear(mul_tmp, ctx_q);
-	for (int i = 0; i < 2; i++) {
+	for (int i = 0; i < NCRT; i++) {
 		fmpz_mod_poly_clear(irred[i], ctx_q);
 		fmpz_mod_poly_clear(inv[i], ctx_q);
 	}
@@ -294,9 +295,11 @@ void encrypt_finish() {
 // Generate a key pair.
 // Initialise a ciphertext.
 void encrypt_cipher_init(ciphertext_t *c) {
-	for (int i = 0; i < DIM; i++) {
+	for (int i = 0; i < NCRT; i++) {
 		fmpz_mod_poly_init(c->w[i], ctx_q);
-		for (int j = 0; j < 2; j++) {
+	}
+	for (int i = 0; i < DIM; i++) {
+		for (int j = 0; j < NCRT; j++) {
 			fmpz_mod_poly_init(c->v[i][j], ctx_q);
 		}
 	}
@@ -305,13 +308,13 @@ void encrypt_cipher_init(ciphertext_t *c) {
 // Initialise a key pair.
 void encrypt_keyinit(publickey_t *pk, privatekey_t *sk) {
 	for (int i = 0; i < DIM; i++) {
-		for (int j = 0; j < 2; j++) {
+		for (int j = 0; j < NCRT; j++) {
 			fmpz_mod_poly_init(sk->s1[i][j], ctx_q);
 			fmpz_mod_poly_init(sk->s2[i][j], ctx_q);
+			fmpz_mod_poly_init(pk->t[i][j], ctx_q);
 		}
 		for (int j = 0; j < DIM; j++) {
-			fmpz_mod_poly_init(pk->t[i][j], ctx_q);
-			for (int k = 0; k < 2; k++) {
+			for (int k = 0; k < NCRT; k++) {
 				fmpz_mod_poly_init(pk->A[i][j][k], ctx_q);
 			}
 		}
@@ -328,13 +331,15 @@ void encrypt_keygen(publickey_t *pk, privatekey_t *sk, flint_rand_t rand) {
 		encrypt_sample_short_crt(sk->s2[i], ctx_q);
 	}
 	for (int i = 0; i < DIM; i++) {
-		for (int j = 0; j < DIM; j++) {
+		for (int j = 0; j < NCRT; j++) {
 			fmpz_mod_poly_zero(pk->t[i][j], ctx_q);
-			for (int k = 0; k < 2; k++) {
+		}
+		for (int j = 0; j < DIM; j++) {
+			for (int k = 0; k < NCRT; k++) {
 				fmpz_mod_poly_randtest(pk->A[i][j][k], rand, DEGCRT, ctx_q);
 			}
 		}
-		for (int k = 0; k < 2; k++) {
+		for (int k = 0; k < NCRT; k++) {
 			fmpz_mod_poly_add(pk->t[i][k], pk->t[i][k], sk->s2[i][k], ctx_q);
 		}
 	}
@@ -342,7 +347,7 @@ void encrypt_keygen(publickey_t *pk, privatekey_t *sk, flint_rand_t rand) {
 	// Compute (A, t = As_1 + s_2).
 	for (int i = 0; i < DIM; i++) {
 		for (int j = 0; j < DIM; j++) {
-			for (int k = 0; k < 2; k++) {
+			for (int k = 0; k < NCRT; k++) {
 				qcrt_poly_mulmod(t, pk->A[i][j][k], sk->s1[j][k], k, ctx_q);
 				fmpz_mod_poly_add(pk->t[i][k], pk->t[i][k], t, ctx_q);
 			}
@@ -354,15 +359,15 @@ void encrypt_keygen(publickey_t *pk, privatekey_t *sk, flint_rand_t rand) {
 // Free key pair.
 void encrypt_keyfree(publickey_t *pk, privatekey_t *sk) {
 	for (int i = 0; i < DIM; i++) {
-		for (int j = 0; j < DIM; j++) {
+		for (int j = 0; j < NCRT; j++) {
 			fmpz_mod_poly_clear(pk->t[i][j], ctx_q);
-			for (int k = 0; k < 2; k++) {
+			fmpz_mod_poly_clear(sk->s1[i][j], ctx_q);
+			fmpz_mod_poly_clear(sk->s2[i][j], ctx_q);
+		}
+		for (int j = 0; j < DIM; j++) {
+			for (int k = 0; k < NCRT; k++) {
 				fmpz_mod_poly_clear(pk->A[i][j][k], ctx_q);
 			}
-		}
-		for (int k = 0; k < 2; k++) {
-			fmpz_mod_poly_clear(sk->s1[i][k], ctx_q);
-			fmpz_mod_poly_clear(sk->s2[i][k], ctx_q);
 		}
 	}
 }
@@ -380,7 +385,7 @@ void encrypt_make(ciphertext_t *c, qcrt_poly_t r[DIM], qcrt_poly_t e[DIM],
 	fmpz_poly_init(s);
 	fmpz_mod_poly_init(_m, ctx_q);
 	for (int i = 0; i < DIM; i++) {
-		for (int j = 0; j < 2; j++) {
+		for (int j = 0; j < NCRT; j++) {
 			fmpz_mod_poly_zero(c->v[i][j], ctx_q);
 		}
 	}
@@ -388,7 +393,7 @@ void encrypt_make(ciphertext_t *c, qcrt_poly_t r[DIM], qcrt_poly_t e[DIM],
 	fmpz_mod_poly_init(t, ctx_q);
 	for (int i = 0; i < DIM; i++) {
 		for (int j = 0; j < DIM; j++) {
-			for (int k = 0; k < 2; k++) {
+			for (int k = 0; k < NCRT; k++) {
 				qcrt_poly_mulmod(t, pk->A[j][i][k], r[j][k], k, ctx_q);
 				fmpz_mod_poly_add(c->v[i][k], c->v[i][k], t, ctx_q);
 			}
@@ -406,19 +411,26 @@ void encrypt_make(ciphertext_t *c, qcrt_poly_t r[DIM], qcrt_poly_t e[DIM],
 		fmpz_mod_poly_set_coeff_fmpz(_m, i, coeff, ctx_q);
 	}
 
+	/* v is indexed by the module dimension and then the CRT component. */
 	for (int i = 0; i < DIM; i++) {
-		fmpz_mod_poly_zero(c->w[i], ctx_q);
-		for (int j = 0; j < 2; j++) {
+		for (int j = 0; j < NCRT; j++) {
 			fmpz_mod_poly_add(c->v[i][j], c->v[i][j], e[i][j], ctx_q);
 			fmpz_mod_poly_scalar_mul_fmpz(c->v[i][j], c->v[i][j], p, ctx_q);
-
-			qcrt_poly_mulmod(t, pk->t[j][i], r[j][i], i, ctx_q);
-			fmpz_mod_poly_add(c->w[i], c->w[i], t, ctx_q);
 		}
-		fmpz_mod_poly_add(c->w[i], c->w[i], e_[i], ctx_q);
-		fmpz_mod_poly_scalar_mul_fmpz(c->w[i], c->w[i], p, ctx_q);
-		qcrt_poly_reduce(t, _m, i, ctx_q);
-		fmpz_mod_poly_add(c->w[i], c->w[i], t, ctx_q);
+	}
+
+	/* w has one entry per CRT component, each a sum over the module
+	 * dimension. */
+	for (int k = 0; k < NCRT; k++) {
+		fmpz_mod_poly_zero(c->w[k], ctx_q);
+		for (int j = 0; j < DIM; j++) {
+			qcrt_poly_mulmod(t, pk->t[j][k], r[j][k], k, ctx_q);
+			fmpz_mod_poly_add(c->w[k], c->w[k], t, ctx_q);
+		}
+		fmpz_mod_poly_add(c->w[k], c->w[k], e_[k], ctx_q);
+		fmpz_mod_poly_scalar_mul_fmpz(c->w[k], c->w[k], p, ctx_q);
+		qcrt_poly_reduce(t, _m, k, ctx_q);
+		fmpz_mod_poly_add(c->w[k], c->w[k], t, ctx_q);
 	}
 	fmpz_mod_poly_clear(_m, ctx_q);
 	fmpz_mod_poly_clear(t, ctx_q);
@@ -432,9 +444,11 @@ void encrypt_doit(ciphertext_t *c, fmpz_mod_poly_t m, publickey_t *pk,
 		flint_rand_t rand) {
 	qcrt_poly_t r[DIM], e[DIM], e_;
 
-	for (int i = 0; i < DIM; i++) {
+	for (int i = 0; i < NCRT; i++) {
 		fmpz_mod_poly_init(e_[i], ctx_q);
-		for (int j = 0; j < 2; j++) {
+	}
+	for (int i = 0; i < DIM; i++) {
+		for (int j = 0; j < NCRT; j++) {
 			fmpz_mod_poly_init(r[i][j], ctx_q);
 			fmpz_mod_poly_init(e[i][j], ctx_q);
 		}
@@ -445,9 +459,11 @@ void encrypt_doit(ciphertext_t *c, fmpz_mod_poly_t m, publickey_t *pk,
 
 	encrypt_make(c, r, e, e_, m, pk);
 
-	for (int i = 0; i < DIM; i++) {
+	for (int i = 0; i < NCRT; i++) {
 		fmpz_mod_poly_clear(e_[i], ctx_q);
-		for (int j = 0; j < 2; j++) {
+	}
+	for (int i = 0; i < DIM; i++) {
+		for (int j = 0; j < NCRT; j++) {
 			fmpz_mod_poly_clear(r[i][j], ctx_q);
 			fmpz_mod_poly_clear(e[i][j], ctx_q);
 		}
@@ -468,7 +484,7 @@ int encrypt_undo(fmpz_mod_poly_t m, fmpz_mod_poly_t chall, ciphertext_t *c,
 	fmpz_mod_poly_init(t, ctx_q);
 	fmpz_mod_poly_init(_t, ctx_q);
 
-	for (int i = 0; i < 2; i++) {
+	for (int i = 0; i < NCRT; i++) {
 		fmpz_mod_poly_init(u[i], ctx_q);
 		fmpz_mod_poly_zero(u[i], ctx_q);
 		for (int j = 0; j < DIM; j++) {
@@ -527,9 +543,11 @@ int encrypt_undo(fmpz_mod_poly_t m, fmpz_mod_poly_t chall, ciphertext_t *c,
 
 // Free ciphertext
 void encrypt_free(ciphertext_t *c) {
-	for (int i = 0; i < DIM; i++) {
+	for (int i = 0; i < NCRT; i++) {
 		fmpz_mod_poly_clear(c->w[i], ctx_q);
-		for (int j = 0; j < DIM; j++) {
+	}
+	for (int i = 0; i < DIM; i++) {
+		for (int j = 0; j < NCRT; j++) {
 			fmpz_mod_poly_clear(c->v[i][j], ctx_q);
 		}
 	}
@@ -550,7 +568,7 @@ static void test(flint_rand_t rand) {
 
 	TEST_BEGIN("CRT representation is correct") {
 		fmpz_mod_poly_randtest(m, rand, DEGREE, ctx_q);
-		for (int i = 0; i < 2; i++) {
+		for (int i = 0; i < NCRT; i++) {
 			qcrt_poly_reduce(w[i], m, i, ctx_q);
 		}
 		qcrt_poly_rec(_m, w);

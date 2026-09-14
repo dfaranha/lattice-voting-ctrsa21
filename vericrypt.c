@@ -18,9 +18,9 @@
 typedef struct _veritext_t {
 	ciphertext_t cipher[VECTOR];
 	fmpz_mod_poly_t c;
-	fmpz_mod_poly_t r[VECTOR][DIM][2];
-	fmpz_mod_poly_t e[VECTOR][DIM][2];
-	fmpz_mod_poly_t e_[VECTOR][2];
+	fmpz_mod_poly_t r[VECTOR][DIM][NCRT];
+	fmpz_mod_poly_t e[VECTOR][DIM][NCRT];
+	fmpz_mod_poly_t e_[VECTOR][NCRT];
 	fmpz_mod_poly_t u[VECTOR];
 } veritext_t;
 
@@ -118,11 +118,11 @@ void vericrypt_init(veritext_t *out) {
 	for (int i = 0; i < VECTOR; i++) {
 		encrypt_cipher_init(&out->cipher[i]);
 		fmpz_mod_poly_init(out->u[i], *ctx_p);
-		for (int j = 0; j < 2; j++) {
+		for (int j = 0; j < NCRT; j++) {
 			fmpz_mod_poly_init(out->e_[i][j], *ctx_q);
 		}
 		for (int j = 0; j < DIM; j++) {
-			for (int k = 0; k < 2; k++) {
+			for (int k = 0; k < NCRT; k++) {
 				fmpz_mod_poly_init(out->r[i][j][k], *ctx_q);
 				fmpz_mod_poly_init(out->e[i][j][k], *ctx_q);
 			}
@@ -136,11 +136,11 @@ void vericrypt_free(veritext_t *out) {
 		encrypt_free(&out->cipher[i]);
 		fmpz_mod_poly_clear(out->u[i], *encrypt_modulus_ctx());
 		/* e_ is indexed by the CRT component, which is 2 and not DIM. */
-		for (int j = 0; j < 2; j++) {
+		for (int j = 0; j < NCRT; j++) {
 			fmpz_mod_poly_clear(out->e_[i][j], *encrypt_large_modulus_ctx());
 		}
 		for (int j = 0; j < DIM; j++) {
-			for (int k = 0; k < 2; k++) {
+			for (int k = 0; k < NCRT; k++) {
 				fmpz_mod_poly_clear(out->r[i][j][k],
 						*encrypt_large_modulus_ctx());
 				fmpz_mod_poly_clear(out->e[i][j][k],
@@ -164,7 +164,7 @@ void vericrypt_hash(uint8_t hash[SHA256HashSize], publickey_t *pk,
 	/* Hash public key (A,t). */
 	for (int i = 0; i < DIM; i++) {
 		for (int j = 0; j < DIM; j++) {
-			for (int k = 0; k < 2; k++) {
+			for (int k = 0; k < NCRT; k++) {
 				fmpz_mod_poly_get_fmpz_poly(s, pk->A[i][j][k], *ctx);
 				str = fmpz_poly_get_str(s);
 				SHA256Input(&sha, (const uint8_t *)str, strlen(str));
@@ -191,7 +191,7 @@ void vericrypt_hash(uint8_t hash[SHA256HashSize], publickey_t *pk,
 	/* Hash ciphertexts c = (v, w), y. */
 	for (int i = 0; i < VECTOR; i++) {
 		for (int j = 0; j < DIM; j++) {
-			for (int k = 0; k < 2; k++) {
+			for (int k = 0; k < NCRT; k++) {
 				fmpz_mod_poly_get_fmpz_poly(s, out->cipher[i].v[j][k], *ctx);
 				str = fmpz_poly_get_str(s);
 				SHA256Input(&sha, (const uint8_t *)str, strlen(str));
@@ -202,7 +202,7 @@ void vericrypt_hash(uint8_t hash[SHA256HashSize], publickey_t *pk,
 				free(str);
 			}
 		}
-		for (int k = 0; k < 2; k++) {
+		for (int k = 0; k < NCRT; k++) {
 			fmpz_mod_poly_get_fmpz_poly(s, out->cipher[i].w[k], *ctx);
 			str = fmpz_poly_get_str(s);
 			SHA256Input(&sha, (const uint8_t *)str, strlen(str));
@@ -265,8 +265,9 @@ void vericrypt_sample_gauss_crt(fmpz_mod_poly_t r[2], fmpz_mod_ctx_t *ctx) {
 
 	fmpz_mod_poly_init(t, *ctx);
 	vericrypt_sample_gauss(t, ctx);
-	qcrt_poly_reduce(r[0], t, 0, *ctx);
-	qcrt_poly_reduce(r[1], t, 1, *ctx);
+	for (int i = 0; i < NCRT; i++) {
+		qcrt_poly_reduce(r[i], t, i, *ctx);
+	}
 
 	fmpz_mod_poly_clear(t, *encrypt_large_modulus_ctx());
 }
@@ -290,7 +291,7 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 	for (int i = 0; i < VECTOR; i++) {
 		encrypt_cipher_init(&y[i]);
 		for (int j = 0; j < DIM; j++) {
-			for (int k = 0; k < 2; k++) {
+			for (int k = 0; k < NCRT; k++) {
 				fmpz_mod_poly_init(y_r[i][j][k], *ctx_q);
 				fmpz_mod_poly_init(y_e[i][j][k], *ctx_q);
 			}
@@ -335,13 +336,14 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 		/* Hash and convert result to challenge space. */
 		vericrypt_hash(hash, pk, t, u, out, y, _u);
 		vericrypt_sample_chall(out->c, hash, SHA256HashSize, ctx_p);
-		qcrt_poly_reduce(c[0], out->c, 0, *ctx_q);
-		qcrt_poly_reduce(c[1], out->c, 1, *ctx_q);
+		for (int i = 0; i < NCRT; i++) {
+			qcrt_poly_reduce(c[i], out->c, i, *ctx_q);
+		}
 
 		// Compute z = [r e e' mu]^T c + y.
 		for (int i = 0; i < VECTOR; i++) {
 			for (int j = 0; j < DIM; j++) {
-				for (int k = 0; k < 2; k++) {
+				for (int k = 0; k < NCRT; k++) {
 					qcrt_poly_mulmod(out->r[i][j][k], out->r[i][j][k], c[k], k, *ctx_q);
 					fmpz_mod_poly_add(out->r[i][j][k], out->r[i][j][k],
 							y_r[i][j][k], *ctx_q);
@@ -352,7 +354,7 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 			}
 		}
 		for (int i = 0; i < VECTOR; i++) {
-			for (int k = 0; k < 2; k++) {
+			for (int k = 0; k < NCRT; k++) {
 				qcrt_poly_mulmod(out->e_[i][k], out->e_[i][k], c[k], k, *ctx_q);
 				fmpz_mod_poly_add(out->e_[i][k], out->e_[i][k], y_e_[i][k],
 						*ctx_q);
@@ -371,7 +373,7 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 	for (int i = 0; i < VECTOR; i++) {
 		encrypt_free(&y[i]);
 		for (int j = 0; j < DIM; j++) {
-			for (int k = 0; k < 2; k++) {
+			for (int k = 0; k < NCRT; k++) {
 				fmpz_mod_poly_clear(y_r[i][j][k], *ctx_q);
 				fmpz_mod_poly_clear(y_e[i][j][k], *ctx_q);
 			}
@@ -406,8 +408,9 @@ int vericrypt_verify(veritext_t *in, fmpz_mod_poly_t t[VECTOR],
 			encrypt_cipher_init(&y[i]);
 			encrypt_make(&y[i], in->r[i], in->e[i], in->e_[i], in->u[i], pk);
 		}
-		qcrt_poly_reduce(_c[0], in->c, 0, *ctx_q);
-		qcrt_poly_reduce(_c[1], in->c, 1, *ctx_q);
+		for (int i = 0; i < NCRT; i++) {
+			qcrt_poly_reduce(_c[i], in->c, i, *ctx_q);
+		}
 
 		fmpz_mod_poly_zero(_u, *ctx_p);
 		for (int i = 0; i < VECTOR; i++) {
@@ -419,12 +422,12 @@ int vericrypt_verify(veritext_t *in, fmpz_mod_poly_t t[VECTOR],
 
 		for (int i = 0; i < VECTOR; i++) {
 			for (int j = 0; j < DIM; j++) {
-				for (int k = 0; k < 2; k++) {
+				for (int k = 0; k < NCRT; k++) {
 					qcrt_poly_mulmod(tq, _c[k], in->cipher[i].v[j][k], k, *ctx_q);
 					fmpz_mod_poly_sub(y[i].v[j][k], y[i].v[j][k], tq, *ctx_q);
 				}
 			}
-			for (int k = 0; k < 2; k++) {
+			for (int k = 0; k < NCRT; k++) {
 				qcrt_poly_mulmod(tq, _c[k], in->cipher[i].w[k], k, *ctx_q);
 				fmpz_mod_poly_sub(y[i].w[k], y[i].w[k], tq, *ctx_q);
 			}
