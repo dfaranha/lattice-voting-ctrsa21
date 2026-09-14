@@ -74,6 +74,27 @@ int rej_sampling(nmod_poly_t z[WIDTH][2], nmod_poly_t v[WIDTH][2], uint64_t s2) 
 	return result;
 }
 
+/**
+ * Absorb a polynomial into a hash computation in a canonical way.
+ *
+ * The coefficients are absorbed one by one up to DEGREE, so that the digest
+ * depends only on the value of the polynomial. Absorbing the raw coefficient
+ * array instead makes the digest depend on the capacity FLINT happens to have
+ * allocated, which is a function of how the polynomial was built and therefore
+ * need not agree between the prover and the verifier.
+ *
+ * @param[in,out] sha		- the hash context.
+ * @param[in] p				- the polynomial to absorb.
+ */
+static void hash_poly(SHA256Context *sha, nmod_poly_t p) {
+	uint64_t buf[DEGREE];
+
+	for (int i = 0; i < DEGREE; i++) {
+		buf[i] = nmod_poly_get_coeff_ui(p, i);
+	}
+	SHA256Input(sha, (const uint8_t *)buf, sizeof(buf));
+}
+
 void lin_hash(nmod_poly_t d[2], commitkey_t *key, commit_t x, commit_t y,
 		nmod_poly_t alpha, nmod_poly_t beta, nmod_poly_t u[2],
 		nmod_poly_t t[2], nmod_poly_t _t[2]) {
@@ -87,38 +108,27 @@ void lin_hash(nmod_poly_t d[2], commitkey_t *key, commit_t x, commit_t y,
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < WIDTH; j++) {
 			for (int k = 0; k < NCRT; k++) {
-				SHA256Input(&sha, (const uint8_t *)key->B1[i][j][k]->coeffs,
-						key->B1[i][j][k]->alloc * sizeof(uint64_t));
+				hash_poly(&sha, key->B1[i][j][k]);
 				if (i == 0) {
-					SHA256Input(&sha, (const uint8_t *)key->b2[j][k]->coeffs,
-							key->b2[j][k]->alloc * sizeof(uint64_t));
+					hash_poly(&sha, key->b2[j][k]);
 				}
 			}
 		}
 	}
 
 	/* Hash alpha, beta from linear relation. */
-	SHA256Input(&sha, (const uint8_t *)alpha->coeffs,
-			alpha->alloc * sizeof(uint64_t));
-	SHA256Input(&sha, (const uint8_t *)beta->coeffs,
-			beta->alloc * sizeof(uint64_t));
+	hash_poly(&sha, alpha);
+	hash_poly(&sha, beta);
 
 	/* Hash [x], [x'], t, t' in CRT representation. */
 	for (int i = 0; i < NCRT; i++) {
-		SHA256Input(&sha, (const uint8_t *)x.c1[i]->coeffs,
-				x.c1[i]->alloc * sizeof(uint64_t));
-		SHA256Input(&sha, (const uint8_t *)x.c2[i]->coeffs,
-				x.c2[i]->alloc * sizeof(uint64_t));
-		SHA256Input(&sha, (const uint8_t *)y.c1[i]->coeffs,
-				y.c1[i]->alloc * sizeof(uint64_t));
-		SHA256Input(&sha, (const uint8_t *)y.c2[i]->coeffs,
-				y.c2[i]->alloc * sizeof(uint64_t));
-		SHA256Input(&sha, (const uint8_t *)u[i]->coeffs,
-				u[i]->alloc * sizeof(uint64_t));
-		SHA256Input(&sha, (const uint8_t *)t[i]->coeffs,
-				t[i]->alloc * sizeof(uint64_t));
-		SHA256Input(&sha, (const uint8_t *)_t[i]->coeffs,
-				_t[i]->alloc * sizeof(uint64_t));
+		hash_poly(&sha, x.c1[i]);
+		hash_poly(&sha, x.c2[i]);
+		hash_poly(&sha, y.c1[i]);
+		hash_poly(&sha, y.c2[i]);
+		hash_poly(&sha, u[i]);
+		hash_poly(&sha, t[i]);
+		hash_poly(&sha, _t[i]);
 	}
 
 	SHA256Result(&sha, hash);
@@ -353,21 +363,15 @@ void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS],
 	SHA256Reset(&sha);
 
 	for (int i = 0; i < MSGS; i++) {
-		SHA256Input(&sha, (const uint8_t *)_m[i]->coeffs,
-				_m[i]->alloc * sizeof(uint64_t));
+		hash_poly(&sha, _m[i]);
 		for (int j = 0; j < NCRT; j++) {
-			SHA256Input(&sha, (const uint8_t *)c[i].c1[j]->coeffs,
-					c[i].c1[j]->alloc * sizeof(uint64_t));
-			SHA256Input(&sha, (const uint8_t *)c[i].c2[j]->coeffs,
-					c[i].c2[j]->alloc * sizeof(uint64_t));
-			SHA256Input(&sha, (const uint8_t *)d[i].c1[j]->coeffs,
-					d[i].c1[j]->alloc * sizeof(uint64_t));
-			SHA256Input(&sha, (const uint8_t *)d[i].c2[j]->coeffs,
-					d[i].c2[j]->alloc * sizeof(uint64_t));
+			hash_poly(&sha, c[i].c1[j]);
+			hash_poly(&sha, c[i].c2[j]);
+			hash_poly(&sha, d[i].c1[j]);
+			hash_poly(&sha, d[i].c2[j]);
 		}
 	}
-	SHA256Input(&sha, (const uint8_t *)rho->coeffs,
-			rho->alloc * sizeof(uint64_t));
+	hash_poly(&sha, rho);
 	SHA256Result(&sha, hash);
 
 	flint_rand_init(rand);
