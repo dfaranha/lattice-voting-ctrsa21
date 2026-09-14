@@ -24,9 +24,22 @@
 /* Constant definitions                                                       */
 /*============================================================================*/
 
-/* Number of message slots in the multi-slot commitment. The is_bin proof uses
- * four: the witness, the constant-coefficient mask, and two garbage terms. */
-#define SLOTS 	4
+/* Number of independent masks used to prove that a constant coefficient is
+ * zero. Each one contributes a factor 1/MODP to the soundness error, so four
+ * of them give about 2^-127 at this modulus. */
+#define LNP_LAMBDA 	4
+
+/* Number of message slots in the multi-slot commitment. Slots 0 to 3 are the
+ * is_bin witness, its claimed product and two garbage terms; the remaining
+ * LNP_LAMBDA slots hold the masks of the constant-coefficient proof, so that
+ * one commitment serves both halves. */
+#define SLOTS 	(4 + LNP_LAMBDA)
+
+/* Slot holding the value whose constant coefficient is proven to be zero. */
+#define SLOT_F 	1
+
+/* First slot holding a constant-coefficient mask. */
+#define SLOT_G 	4
 
 /* Rank of the MLWE instance that hides the commitment, which is the number of
  * randomness components beyond those consumed by the Ajtai part and by the
@@ -63,6 +76,18 @@ typedef struct _lnpproof_t {
 	pcrt_poly_t t;					/* The masked challenge-free term. */
 	pcrt_poly_t z[LNP_WIDTH];		/* The masked opening. */
 } lnpproof_t;
+
+/* A proof that the constant coefficient of a committed value is zero. The
+ * aggregated values h are sent in the clear: each is a mask with zero constant
+ * coefficient plus a scalar multiple of the claim, so it is uniform on the
+ * subspace of polynomials with zero constant coefficient and reveals nothing
+ * else. */
+typedef struct _lnpctproof_t {
+	pcrt_poly_t w[HEIGHT];			/* Ajtai part of the first message. */
+	pcrt_poly_t h[LNP_LAMBDA];		/* The aggregated values. */
+	pcrt_poly_t v[LNP_LAMBDA];		/* The masked openings of the relations. */
+	pcrt_poly_t z[LNP_WIDTH];		/* The masked opening. */
+} lnpctproof_t;
 
 /*============================================================================*/
 /* Function prototypes                                                        */
@@ -114,6 +139,8 @@ void lnp_com_init(lnpcom_t *com);
 void lnp_com_free(lnpcom_t *com);
 void lnp_proof_init(lnpproof_t *pi);
 void lnp_proof_free(lnpproof_t *pi);
+void lnp_ctproof_init(lnpctproof_t *pi);
+void lnp_ctproof_free(lnpctproof_t *pi);
 
 /**
  * Commit to SLOTS messages under one randomness vector.
@@ -189,5 +216,50 @@ void lnp_isbin_prover(lnpproof_t *pi, lnpcom_t *com, pcrt_poly_t s,
  * @return 1 if the proof is accepted, 0 otherwise.
  */
 int lnp_isbin_verifier(lnpproof_t *pi, lnpcom_t *com, lnpkey_t *key);
+
+/**
+ * Sample a polynomial uniformly at random subject to its constant coefficient
+ * being zero. These are the masks of the constant-coefficient proof.
+ *
+ * @param[out] g			- the sampled polynomial, in CRT representation.
+ * @param[in] rand			- the source of randomness.
+ */
+void lnp_sample_ct_zero(pcrt_poly_t g, flint_rand_t rand);
+
+/**
+ * Prove that the constant coefficient of the value in slot SLOT_F is zero.
+ *
+ * The masks in slots SLOT_G onwards must already be committed, and must have
+ * been sampled with lnp_sample_ct_zero. The aggregation scalars are derived
+ * from the commitment alone, so that the masks are fixed before them: that
+ * ordering is what makes the proof sound, since a prover facing a non-zero
+ * constant coefficient would otherwise commit a mask that cancels it.
+ *
+ * @param[out] pi			- the resulting proof.
+ * @param[in] com			- the commitment.
+ * @param[in] f				- the value in slot SLOT_F, in CRT representation.
+ * @param[in] g				- the masks, in CRT representation.
+ * @param[in] key			- the commitment key.
+ * @param[in] r				- the commitment randomness, in CRT representation.
+ */
+void lnp_ct_prover(lnpctproof_t *pi, lnpcom_t *com, pcrt_poly_t f,
+		pcrt_poly_t g[LNP_LAMBDA], lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]);
+
+/**
+ * Verify the proof produced by lnp_ct_prover.
+ *
+ * @param[in] pi			- the proof.
+ * @param[in] com			- the commitment.
+ * @param[in] key			- the commitment key.
+ * @return 1 if the proof is accepted, 0 otherwise.
+ */
+int lnp_ct_verifier(lnpctproof_t *pi, lnpcom_t *com, lnpkey_t *key);
+
+/**
+ * Expose the aggregation scalars, for tests that play the part of a prover
+ * trying to adapt its masks to them.
+ */
+void lnp_ct_scalars_for_test(ulong mu[LNP_LAMBDA], lnpkey_t *key,
+		lnpcom_t *com);
 
 #endif /* LNP_H */

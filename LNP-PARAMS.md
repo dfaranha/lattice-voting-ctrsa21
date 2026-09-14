@@ -3,8 +3,12 @@
 [ISBIN-PLAN.md](ISBIN-PLAN.md) section 6 says not to start at B1 with the
 intent of finishing B6, but to run a spike first: B1, B2 against a toy
 statement, and enough of B7 to see whether the parameters close. This is the
-report of that spike. It is not a complete `is_bin` proof, and section 3 says
-exactly what is missing.
+report of that spike, and of the constant-coefficient proof that it identified
+as the one piece with real design content, which was then built as well.
+
+`is_bin` now holds end to end for a committed witness, on the hypothesis that
+the witness is short. Supplying that hypothesis is B5, which is not built;
+section 4 says what else is missing.
 
 ## 1. What is implemented
 
@@ -39,6 +43,27 @@ separately: slot 2 commits the coefficient of `c`, and slot 3 commits *sigma
 of* the coefficient of `sigma(c)`, so that applying `sigma` to its `u` recovers
 a term multiplied by `sigma(c)` rather than by `c`.
 
+**B3, the constant coefficient** (`lnp_ct_prover`, `lnp_ct_verifier`). Proves
+that the constant coefficient of a committed value is zero, which is what turns
+the product relation above into `is_bin`. For each of `LNP_LAMBDA` masks `g_i`,
+sampled uniformly subject to `ct(g_i) = 0`, the prover publishes
+`h_i = g_i + mu_i * f` for a scalar `mu_i`, and the verifier checks
+`ct(h_i) = 0`. Tying `h_i` back to the committed values is linear, so it needs
+no garbage terms: with `B_i = b2[SLOT_G + i] + mu_i * b2[SLOT_F]`, the value
+`T_i - h_i` is a commitment to zero under `B_i`.
+
+Two orderings carry the whole argument. The scalars are derived from the
+commitment alone, so the masks are fixed before them; and `h` is absorbed into
+the opening challenge, so it is fixed before that. Both are tested: one test
+plays a prover that reads off the scalars it would face and then rewrites its
+masks to cancel a non-zero constant coefficient, and fails, because committing
+the rewritten masks changes the commitment and so changes the scalars.
+
+**The two halves composed.** `is_bin` is the product proof and the
+constant-coefficient proof over one commitment, the first filling the garbage
+slots and the second reading slot 1. Tested to accept a binary witness and to
+reject one carrying a single coefficient of 2 or of -1.
+
 ## 2. B7: the parameters close
 
 The plan expected pressure towards a larger modulus. For the machinery built
@@ -50,23 +75,30 @@ here there is none. At `DEGREE = 1024` and `MODP` about `2^31.86`:
 | MLWE hiding, `LNP_RANK = 2` | 187 bits core-SVP | yes |
 | MSIS binding, bound `16 sigma_C sqrt(nu N)` | 118 bits core-SVP | same as the base scheme |
 | `\|\|c - c'\|\| < sqrt(p/2)` for Lemma 1 | 8.5 against 44195 | yes |
+| soundness of the scalar aggregation, `p^-LNP_LAMBDA` | `2^-127.5` at `LNP_LAMBDA = 4` | just |
 
-MSIS binding is flat in the commitment width, so widening the randomness from
-3 to 7 to make room for the message slots costs nothing there. Hiding is the
-constraint that dictates the width: rank 1 is 73 bits and rank 2 is 187, which
-is why `LNP_WIDTH` is `HEIGHT + SLOTS + 2` rather than `HEIGHT + SLOTS + 1`.
+MSIS binding is flat in the commitment width, so widening the randomness to
+make room for the message slots costs nothing there. Hiding is the constraint
+that dictates the width: rank 1 is 73 bits and rank 2 is 187, which is why
+`LNP_WIDTH` is `HEIGHT + SLOTS + 2` rather than `HEIGHT + SLOTS + 1`.
+
+The aggregation is the one place where the modulus is close to binding. Each
+mask contributes a factor `1/MODP`, so four give `2^-127.5` here, which clears
+128 bits only just. On the smaller modulus proposed on the `balanced-params`
+branch, `2^31.25`, four masks give `2^-125.0` and a fifth would be needed. A
+mask costs one commitment slot and one published ring element, so this is
+cheap to fix but is worth noting: it is a constraint the base scheme does not
+have, and it couples `LNP_LAMBDA` to any future change in the modulus.
 
 So the verdict the spike was meant to produce is: **the quadratic layer closes
 at the existing modulus.** The modulus pressure the plan anticipated belongs to
 B5, the approximate range proof, which is not implemented and not assessed
 here.
 
-## 3. What is missing, and the one real obstacle
+## 3. The obstacle the spike found, and how it was removed
 
-`is_bin` needs two things: the product relation, which is implemented, and
-`ct(f) = 0` for the committed `f`, which is not. Proving that the constant
-coefficient of a *committed* polynomial is zero turned out to be the hard part,
-and the spike pinned down why.
+The spike stopped at `ct(f) = 0` for a committed `f`, and the reason is worth
+keeping, because it dictates the shape of the solution.
 
 The obvious construction does not work. Commit a mask `g` with `ct(g) = 0`,
 send `h = g + f` in the clear, and have the verifier check `ct(h) = 0`. This is
@@ -74,39 +106,61 @@ unsound: nothing forces `ct(g) = 0`, so a prover with `ct(f) != 0` simply
 commits `g` with `ct(g) = -ct(f)`. The quadratic relation `h = g + f` still
 holds and the constant coefficient still vanishes.
 
-The repair is to make the mask commit before the challenge and to aggregate
-with a challenge that acts on the constant coefficient linearly, so that the
-prover cannot precompute the offset. That forces a **scalar** challenge, and
-this is the obstacle: for a ring challenge `gamma`, `ct(gamma * f)` is not
-`gamma * ct(f)`. It is a linear form in the coefficients of `gamma` applied to
-`f`, so requiring it to vanish for a random ring `gamma` forces `f = 0`, which
-is false for an honest binary `s`, whose `f` is non-zero in every coefficient
-but the constant one. Multiplying by a ring challenge destroys exactly the
-structure the statement is about.
+The repair has to stop the prover from knowing what to cancel, which means the
+mask must be committed before a challenge, and the challenge must act on the
+constant coefficient linearly. That last requirement is what forces the
+challenge to be a **scalar**: for a ring challenge `gamma`, `ct(gamma * f)` is
+not `gamma * ct(f)`. It is a linear form in the coefficients of `gamma` applied
+to `f`, so requiring it to vanish for a random ring `gamma` would force
+`f = 0`, which is false for an honest binary `s`, whose `f` is non-zero in
+every coefficient but the constant one. Multiplying by a ring challenge
+destroys exactly the structure the statement is about.
 
-So the missing piece is not more of the same algebra. It is a genuine
-subroutine: either scalar-challenge aggregation of many constant-coefficient
-claims at once, which is what LNP does and which only pays off when there are
-many claims to batch, or a direct proof that a committed polynomial has zero
-constant coefficient via the automorphism trace, which needs the whole
-automorphism group rather than `sigma_{-1}` alone.
+With scalars, `ct(h_i) = ct(g_i) + mu_i * ct(f)` really is linear, a prover
+facing `ct(f) != 0` needs `ct(g_i) = -mu_i * ct(f)` for a scalar it cannot
+predict, and each mask independently catches it with probability `1 - 1/p`.
+This is also why the construction wants to be used on many claims at once: the
+`LNP_LAMBDA` masks are paid for once regardless of how many constant
+coefficients are being proven zero, so proving `is_bin` for all `MSGS`
+permutation elements together costs the same four masks as proving it for one.
 
-Also absent, as in the original plan: B4 (the Ajtai part of ABDLOP, so that the
-committed `s` carries a norm bound at all), B5 (the approximate range proof
-that would supply `\|\|s\|\|_inf <= 1953`), and B6 (wiring into the shuffle).
-Without B4 and B5 the norm hypothesis is assumed, not proven, so nothing here
-yet replaces the relaxed norm proof in `shuffle.c`.
+## 4. What is still missing
 
-## 4. What this changes about the decision
+`is_bin` holds here for a committed witness **given that the witness is short**.
+That hypothesis is not proven, and supplying it is B5, the approximate range
+proof. Without it a prover can commit a witness with large coefficients whose
+`sum_j s_j (s_j - 1)` wraps modulo `p` back to zero. The bound needed is
+`\|\|s\|\|_inf <= 1953`, against 1 for an honest witness, so it is a mild
+statement, but it is a real gap and the test suite cannot see it: every test
+here builds its witness honestly.
+
+Also absent, as in the original plan: B4, the Ajtai part of ABDLOP, which is
+what would let the commitment carry a norm bound on its message at all, and
+B6, wiring into the shuffle. Until B6, nothing here replaces the relaxed norm
+proof in `shuffle.c`; the two are independent.
+
+Finally, none of this is a soundness proof. The extraction argument for the
+product relation divides by `(c - c')(sigma(c) - sigma(c'))` and yields a
+relaxed opening, and what that relaxation does to the binding bound has not
+been worked out. The tests establish completeness and that specific cheating
+strategies fail. They do not establish that no strategy succeeds.
+
+## 5. What this changes about the decision
 
 The plan's section 7 framed the choice as fidelity to Protocol 1 against
-1500-2000 lines of new proof-system code. The spike moves two things.
+1500-2000 lines of new proof-system code. Three things have moved.
 
-It removes the parameter risk: the modulus does not have to change for the
-quadratic layer, so the cascade the plan worried about, into the CRT constants
-and the ciphertext sizes, does not happen at this stage.
+The parameter risk is gone: the modulus does not have to change, so the
+cascade the plan worried about, into the CRT constants and the ciphertext
+sizes, does not happen. The one new coupling is `LNP_LAMBDA` against the
+modulus, and it is cheap.
 
-It sharpens the cost. The automorphism layer and the quadratic layer came to
-about 600 lines and behave. The constant-coefficient subroutine is the piece
-with real design content, and it is the piece LaZer already has. If the
-artifact is going to take Track A, this is the natural place to stop.
+The cost estimate came down. B1, B2 and B3 together are about 900 lines, well
+under the plan's figure for the whole of Track B, and the piece that looked
+hardest turned out to have a short answer once the reason it was hard was
+clear.
+
+What is left is B4 and B5, which are the parts the plan sized at 700 lines and
+which are the parts that carry the norm bound. They are also the parts LaZer
+would supply directly. The Track A against Track B decision is now a decision
+about those two stages alone, rather than about the proof system as a whole.
