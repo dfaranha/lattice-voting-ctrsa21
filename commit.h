@@ -209,6 +209,9 @@ void commit_sample_gauss_crt(pcrt_poly_t r);
 /**
  * Commit to a message and randomness using a key pair.
  *
+ * The commitment is initialised by this call, so it must not already hold one:
+ * release a previous commitment with commit_free first, or it is leaked.
+ *
  * @param[out] com 		- the resulting commitment.
  * @param[in] m 		- the message to commit.
  * @param[in] r 		- the commitment randomness.

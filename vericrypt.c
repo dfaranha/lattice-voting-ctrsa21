@@ -26,20 +26,24 @@ typedef struct _veritext_t {
 
 static int vericrypt_test_norm(veritext_t *out) {
 	int result;
-	fmpz_t coeff, max, qdiv2, *q;
+	fmpz_t coeff, max, qdiv2, pdiv2, *q, *p;
 	fmpz_mod_poly_t t;
-	fmpz_mod_ctx_t *ctx;
+	fmpz_mod_ctx_t *ctx, *ctx_p;
 
 	fmpz_init(coeff);
 	fmpz_init(max);
 	fmpz_init(qdiv2);
+	fmpz_init(pdiv2);
 
 	q = encrypt_large_modulus();
 	ctx = encrypt_large_modulus_ctx();
+	p = encrypt_modulus();
+	ctx_p = encrypt_modulus_ctx();
 
 	fmpz_mod_poly_init(t, *ctx);
-	fmpz_set(qdiv2, *q);
-	fmpz_divexact_ui(qdiv2, qdiv2, 2);
+	/* Both moduli are odd, so this is a floor division, not an exact one. */
+	fmpz_fdiv_q_ui(qdiv2, *q, 2);
+	fmpz_fdiv_q_ui(pdiv2, *p, 2);
 	fmpz_set_ui(max, 0);
 
 	/* Compute norm_infty. */
@@ -71,15 +75,19 @@ static int vericrypt_test_norm(veritext_t *out) {
 				fmpz_sub(coeff, coeff, *q);
 			fmpz_abs(coeff, coeff);
 			if (fmpz_cmp(coeff, max) > 0)
-				fmpz_set(coeff, max);
+				fmpz_set(max, coeff);
 		}
 	}
+	/* The u components live modulo p, not q, so they need their own centering
+	 * before the absolute value is taken. */
 	for (int i = 0; i < VECTOR; i++) {
 		for (int k = 0; k < DEGREE; k++) {
-			fmpz_mod_poly_get_coeff_fmpz(coeff, out->u[i], k, *ctx);
+			fmpz_mod_poly_get_coeff_fmpz(coeff, out->u[i], k, *ctx_p);
+			if (fmpz_cmp(coeff, pdiv2) > 0)
+				fmpz_sub(coeff, coeff, *p);
 			fmpz_abs(coeff, coeff);
 			if (fmpz_cmp(coeff, max) > 0)
-				fmpz_set(coeff, max);
+				fmpz_set(max, coeff);
 		}
 	}
 
@@ -87,9 +95,11 @@ static int vericrypt_test_norm(veritext_t *out) {
 	fmpz_set_ui(coeff, 6 * SIGMA_E);
 	result = fmpz_cmp(max, coeff);
 
+	fmpz_mod_poly_clear(t, *ctx);
 	fmpz_clear(coeff);
 	fmpz_clear(max);
 	fmpz_clear(qdiv2);
+	fmpz_clear(pdiv2);
 	return (result < 0);
 }
 
@@ -98,10 +108,15 @@ static int vericrypt_test_norm(veritext_t *out) {
 /*============================================================================*/
 
 void vericrypt_free(veritext_t *out) {
+	fmpz_mod_poly_clear(out->c, *encrypt_modulus_ctx());
 	for (int i = 0; i < VECTOR; i++) {
+		encrypt_free(&out->cipher[i]);
 		fmpz_mod_poly_clear(out->u[i], *encrypt_modulus_ctx());
-		for (int j = 0; j < DIM; j++) {
+		/* e_ is indexed by the CRT component, which is 2 and not DIM. */
+		for (int j = 0; j < 2; j++) {
 			fmpz_mod_poly_clear(out->e_[i][j], *encrypt_large_modulus_ctx());
+		}
+		for (int j = 0; j < DIM; j++) {
 			for (int k = 0; k < 2; k++) {
 				fmpz_mod_poly_clear(out->r[i][j][k],
 						*encrypt_large_modulus_ctx());
@@ -292,7 +307,7 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 			encrypt_make(&y[i], y_r[i], y_e[i], y_e_[i], y_mu[i], pk);
 		}
 
-		fmpz_mod_poly_init(_u, *ctx_p);
+		fmpz_mod_poly_zero(_u, *ctx_p);
 		for (int i = 0; i < VECTOR; i++) {
 			encrypt_poly_mulmod(tmp, t[i], y_mu[i], *ctx_p);
 			fmpz_mod_poly_add(_u, _u, tmp, *ctx_p);
@@ -328,9 +343,16 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 		}
 
 		result = vericrypt_test_norm(out);
+
+		/* encrypt_make initialises y on every pass of the rejection loop, so
+		 * it has to be released on every pass too. */
+		for (int i = 0; i < VECTOR; i++) {
+			encrypt_free(&y[i]);
+		}
 	}
 
 	fmpz_mod_poly_clear(tmp, *ctx_p);
+	fmpz_mod_poly_clear(_u, *ctx_p);
 	fmpz_mod_poly_clear(c[0], *ctx_p);
 	fmpz_mod_poly_clear(c[1], *ctx_p);
 	for (int i = 0; i < VECTOR; i++) {
@@ -397,9 +419,14 @@ int vericrypt_verify(veritext_t *in, fmpz_mod_poly_t t[VECTOR],
 		vericrypt_sample_chall(c, hash, SHA256HashSize, ctx_p);
 
 		result = fmpz_mod_poly_equal(in->c, c, *ctx_p);
+
+		for (int i = 0; i < VECTOR; i++) {
+			encrypt_free(&y[i]);
+		}
 	}
 
 	fmpz_mod_poly_clear(c, *ctx_p);
+	fmpz_mod_poly_clear(_u, *ctx_p);
 	fmpz_mod_poly_clear(tp, *ctx_p);
 	fmpz_mod_poly_clear(tq, *ctx_q);
 	for (int i = 0; i < DIM; i++) {
@@ -475,6 +502,8 @@ static void test(flint_rand_t rand) {
 		encrypt_poly_mulmod(u, u, c, *encrypt_modulus_ctx());
 
 		TEST_ASSERT(fmpz_mod_poly_equal(u, v, *encrypt_modulus_ctx()) == 1, end);
+
+		vericrypt_free(&cipher);
 	} TEST_END;
 
   end:
@@ -536,6 +565,8 @@ static void bench(flint_rand_t rand) {
 	BENCH_BEGIN("vericrypt_undo") {
 		BENCH_ADD(vericrypt_undo(_m, c, &cipher, t, u, &pk, &sk));
 	} BENCH_END;
+
+	vericrypt_free(&cipher);
 
 	encrypt_keyfree(&pk, &sk);
 

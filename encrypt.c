@@ -522,6 +522,7 @@ static void test(flint_rand_t rand) {
 	publickey_t pk;
 	privatekey_t sk;
 	ciphertext_t c;
+	int have_key = 0, have_c = 0;
 	fmpz_mod_poly_t m, _m, w[2];
 
 	fmpz_mod_poly_init(m, ctx_q);
@@ -546,8 +547,18 @@ static void test(flint_rand_t rand) {
 
 	TEST_BEGIN("encryption and decryption are consistent") {
 		encrypt_sample_short(m, ctx_p);
+		/* Both calls initialise what they write to, so the previous keypair
+		 * and ciphertext have to be released first. */
+		if (have_key) {
+			encrypt_keyfree(&pk, &sk);
+		}
 		encrypt_keygen(&pk, &sk, rand);
+		have_key = 1;
+		if (have_c) {
+			encrypt_free(&c);
+		}
 		encrypt_doit(&c, m, &pk, rand);
+		have_c = 1;
 		TEST_ASSERT(encrypt_undo(_m, NULL, &c, &sk) == 1, end);
 		TEST_ASSERT(fmpz_mod_poly_equal(m, _m, ctx_p) == 1, end);
 	} TEST_END;
@@ -556,7 +567,12 @@ static void test(flint_rand_t rand) {
 	fmpz_mod_poly_clear(w[1], ctx_q);
 	fmpz_mod_poly_clear(m, ctx_p);
 	fmpz_mod_poly_clear(_m, ctx_p);
-	encrypt_keyfree(&pk, &sk);
+	if (have_key) {
+		encrypt_keyfree(&pk, &sk);
+	}
+	if (have_c) {
+		encrypt_free(&c);
+	}
 }
 
 static void bench(flint_rand_t rand) {
@@ -578,6 +594,11 @@ static void bench(flint_rand_t rand) {
 	BENCH_BEGIN("encrypt_undo") {
 		BENCH_ADD(encrypt_undo(_m, NULL, &c, &sk));
 	} BENCH_END;
+
+	/* BENCH_ADD runs encrypt_doit BENCH times inside the timed region and each
+	 * call re-initialises the ciphertext, so only the last one can be released
+	 * here without polluting the measurement. */
+	encrypt_free(&c);
 
 	fmpz_mod_poly_clear(m, ctx_p);
 	fmpz_mod_poly_clear(_m, ctx_p);

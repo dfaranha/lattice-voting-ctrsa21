@@ -506,6 +506,8 @@ int commit_open(commit_t *com, nmod_poly_t m, commitkey_t *key,
 	for (int i = 0; i < 2; i++) {
 		nmod_poly_clear(c1[i]);
 		nmod_poly_clear(c2[i]);
+		nmod_poly_clear(_c1[i]);
+		nmod_poly_clear(_c2[i]);
 	}
 	return result;
 }
@@ -523,6 +525,7 @@ void commit_free(commit_t *com) {
 static void test(flint_rand_t rand) {
 	commitkey_t key;
 	commit_t com, _com;
+	int have_com = 0, have__com = 0;
 	nmod_poly_t m, rho;
 	pcrt_poly_t r[WIDTH], s[WIDTH], f;
 
@@ -547,8 +550,13 @@ static void test(flint_rand_t rand) {
 	}
 
 	TEST_BEGIN("commitment can be generated and opened") {
-
+		/* commit_doit initialises the commitment it writes to, so any previous
+		 * one has to be released first. */
+		if (have_com) {
+			commit_free(&com);
+		}
 		commit_doit(&com, m, &key, r);
+		have_com = 1;
 
 		commit_sample_chall_crt(f);
 		commit_sample_chall(rho);
@@ -569,7 +577,11 @@ static void test(flint_rand_t rand) {
 				nmod_poly_zero(r[i][j]);
 			}
 		}
+		if (have__com) {
+			commit_free(&_com);
+		}
 		commit_doit(&_com, rho, &key, r);
+		have__com = 1;
 		for (int i = 0; i < 2; i++) {
 			nmod_poly_sub(com.c1[i], com.c1[i], _com.c1[i]);
 			nmod_poly_sub(com.c2[i], com.c2[i], _com.c2[i]);
@@ -580,7 +592,12 @@ static void test(flint_rand_t rand) {
 
   end:
 	commit_keyfree(&key);
-	commit_free(&com);
+	if (have_com) {
+		commit_free(&com);
+	}
+	if (have__com) {
+		commit_free(&_com);
+	}
 	nmod_poly_clear(m);
 	nmod_poly_clear(rho);
 	nmod_poly_clear(f[0]);
@@ -620,6 +637,10 @@ static void bench(flint_rand_t rand) {
 		BENCH_ADD(commit_sample_short_crt(r[0]));
 	} BENCH_END;
 
+	/* BENCH_ADD runs the expression BENCH times inside the timed region, and
+	 * each commit_doit re-initialises the commitment. Only the last one of each
+	 * batch can be released here without polluting the measurement; separating
+	 * allocation from computation in the API would be the real fix. */
 	BENCH_BEGIN("commit_doit") {
 		BENCH_ADD(commit_doit(&com, m, &key, r));
 		commit_free(&com);
@@ -629,10 +650,10 @@ static void bench(flint_rand_t rand) {
 		commit_sample_chall_crt(f);
 		commit_doit(&com, m, &key, r);
 		BENCH_ADD(commit_open(&com, m, &key, r, f));
+		commit_free(&com);
 	} BENCH_END;
 
 	commit_keyfree(&key);
-	commit_free(&com);
 	nmod_poly_clear(m);
 	nmod_poly_clear(f[0]);
 	nmod_poly_clear(f[1]);

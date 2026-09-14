@@ -555,6 +555,8 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	nmod_poly_clear(t1);
 	nmod_poly_clear(rho);
 	for (int i = 0; i < MSGS; i++) {
+		/* shuffle_prover commits to each d[i], so run() owns them. */
+		commit_free(&d[i]);
 		nmod_poly_clear(s[i]);
 		for (int k = 0; k < 2; k++) {
 			nmod_poly_clear(t[i][k]);
