@@ -56,4 +56,7 @@ runs:
     - name: Check FLINT
       shell: bash
       run: |
-        /usr/local/bin/flint-config --version
+        test -f /usr/local/include/flint/flint.h
+        test -f /usr/local/lib/libflint.so
+        grep 'FLINT_VERSION' /usr/local/include/flint/flint.h || true
+        ldconfig -p | grep libflint
