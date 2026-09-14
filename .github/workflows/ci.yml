@@ -13,7 +13,28 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libflint-dev libgmp-dev
+          sudo apt-get install -y \
+            libgmp-dev \
+            libmpfr-dev \
+            libmpc-dev \
+            cmake \
+            ninja-build
+
+          git clone --depth 1 --branch v3.6.0 \
+            https://github.com/flintlib/flint.git /tmp/flint
+
+          cmake -S /tmp/flint -B /tmp/flint/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local
+
+          cmake --build /tmp/flint/build -j2
+          sudo cmake --install /tmp/flint/build
+          sudo ldconfig
+
+      - name: Check FLINT
+        run: |
+          flint-config --version
+          g++ -E -v -x c++ /dev/null 2>&1 | grep -A20 '#include <...> search starts here'
 
       - name: Build
         run: make
@@ -29,13 +50,24 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libflint-dev libgmp-dev
+          sudo apt-get install -y \
+            libgmp-dev \
+            libmpfr-dev \
+            libmpc-dev \
+            cmake \
+            ninja-build
 
-      # Catches the leaks and the undefined behaviour that plain tests miss:
-      # the test phase allocates and releases every aggregate, so an unbalanced
-      # init/clear pair shows up here rather than as a passing test.
-      # TESTS is lowered because the sanitizers are slow and memory errors
-      # show up in the first iterations, not the hundredth.
+          git clone --depth 1 --branch v3.6.0 \
+            https://github.com/flintlib/flint.git /tmp/flint
+
+          cmake -S /tmp/flint -B /tmp/flint/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local
+
+          cmake --build /tmp/flint/build -j2
+          sudo cmake --install /tmp/flint/build
+          sudo ldconfig
+
       - name: Run tests under AddressSanitizer and UndefinedBehaviorSanitizer
         run: |
           make CFLAGS="-O1 -g -march=native -pthread -DTESTS=5 \
