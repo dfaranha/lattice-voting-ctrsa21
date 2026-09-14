@@ -95,17 +95,6 @@ typedef struct _lnpproof_t {
 	pcrt_poly_t z[LNP_WIDTH];		/* The masked opening. */
 } lnpproof_t;
 
-/* A proof that the constant coefficient of a committed value is zero. The
- * aggregated values h are sent in the clear: each is a mask with zero constant
- * coefficient plus a scalar multiple of the claim, so it is uniform on the
- * subspace of polynomials with zero constant coefficient and reveals nothing
- * else. */
-typedef struct _lnpctproof_t {
-	pcrt_poly_t w[HEIGHT];			/* Ajtai part of the first message. */
-	pcrt_poly_t h[LNP_LAMBDA];		/* The aggregated values. */
-	pcrt_poly_t v[LNP_LAMBDA];		/* The masked openings of the relations. */
-	pcrt_poly_t z[LNP_WIDTH];		/* The masked opening. */
-} lnpctproof_t;
 
 /* A proof that the witness is short. The projection z is published as PROJ
  * residues; the rest is the same shape as the constant-coefficient proof,
@@ -168,8 +157,6 @@ void lnp_com_init(lnpcom_t *com);
 void lnp_com_free(lnpcom_t *com);
 void lnp_proof_init(lnpproof_t *pi);
 void lnp_proof_free(lnpproof_t *pi);
-void lnp_ctproof_init(lnpctproof_t *pi);
-void lnp_ctproof_free(lnpctproof_t *pi);
 
 /**
  * Commit to SLOTS messages under one randomness vector.
@@ -265,41 +252,7 @@ int lnp_isbin_verifier(lnpproof_t *pi, lnpcom_t *com, lnpkey_t *key);
  */
 void lnp_sample_ct_zero(pcrt_poly_t g, flint_rand_t rand);
 
-/**
- * Prove that the constant coefficient of the value in slot SLOT_F is zero.
- *
- * The masks in slots SLOT_G onwards must already be committed, and must have
- * been sampled with lnp_sample_ct_zero. The aggregation scalars are derived
- * from the commitment alone, so that the masks are fixed before them: that
- * ordering is what makes the proof sound, since a prover facing a non-zero
- * constant coefficient would otherwise commit a mask that cancels it.
- *
- * @param[out] pi			- the resulting proof.
- * @param[in] com			- the commitment.
- * @param[in] f				- the value in slot SLOT_F, in CRT representation.
- * @param[in] g				- the masks, in CRT representation.
- * @param[in] key			- the commitment key.
- * @param[in] r				- the commitment randomness, in CRT representation.
- */
-void lnp_ct_prover(lnpctproof_t *pi, lnpcom_t *com, pcrt_poly_t f,
-		pcrt_poly_t g[LNP_LAMBDA], lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]);
 
-/**
- * Verify the proof produced by lnp_ct_prover.
- *
- * @param[in] pi			- the proof.
- * @param[in] com			- the commitment.
- * @param[in] key			- the commitment key.
- * @return 1 if the proof is accepted, 0 otherwise.
- */
-int lnp_ct_verifier(lnpctproof_t *pi, lnpcom_t *com, lnpkey_t *key);
-
-/**
- * Expose the aggregation scalars, for tests that play the part of a prover
- * trying to adapt its masks to them.
- */
-void lnp_ct_scalars_for_test(ulong mu[LNP_LAMBDA], lnpkey_t *key,
-		lnpcom_t *com);
 
 /**
  * Sample the projection mask: a ring element whose first PROJ coefficients are
@@ -312,8 +265,12 @@ void lnp_ct_scalars_for_test(ulong mu[LNP_LAMBDA], lnpkey_t *key,
 void lnp_sample_proj_mask(pcrt_poly_t w, nmod_poly_t raw);
 
 /**
- * Prove that the witness in slot SLOT_S is short, by projecting it onto PROJ
- * coordinates and bounding the projection.
+ * Prove, in one proof, that the constant coefficient of slot SLOT_F is zero and
+ * that the witness in slot SLOT_S is short.
+ *
+ * These were two proofs. Merging them is not only cheaper: run separately they
+ * were given the same masks, and publishing both sets of aggregated values
+ * then cancelled the mask and revealed a linear function of the witness.
  *
  * This certifies a bound weaker than the honest norm by a constant factor,
  * which is what an approximate range proof does. It is the hypothesis that the
@@ -328,9 +285,9 @@ void lnp_sample_proj_mask(pcrt_poly_t w, nmod_poly_t raw);
  * @param[in] r				- the commitment randomness.
  * @return 1 if a transcript was produced, 0 if rejection sampling gave up.
  */
-int lnp_range_prover(lnprangeproof_t *pi, lnpcom_t *com, pcrt_poly_t s,
-		nmod_poly_t w, pcrt_poly_t g[LNP_LAMBDA], lnpkey_t *key,
-		pcrt_poly_t r[LNP_WIDTH]);
+int lnp_ct_range_prover(lnprangeproof_t *pi, lnpcom_t *com, pcrt_poly_t s,
+		pcrt_poly_t f, nmod_poly_t w, pcrt_poly_t g[LNP_LAMBDA],
+		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]);
 
 /**
  * Verify the proof produced by lnp_range_prover.
@@ -340,7 +297,14 @@ int lnp_range_prover(lnprangeproof_t *pi, lnpcom_t *com, pcrt_poly_t s,
  * @param[in] key			- the commitment key.
  * @return 1 if the proof is accepted, 0 otherwise.
  */
-int lnp_range_verifier(lnprangeproof_t *pi, lnpcom_t *com, lnpkey_t *key);
+int lnp_ct_range_verifier(lnprangeproof_t *pi, lnpcom_t *com, lnpkey_t *key);
+
+/**
+ * Expose the aggregation scalars, for tests that play the part of a prover
+ * trying to adapt its masks to them.
+ */
+void lnp_scalars_for_test(ulong nu[LNP_LAMBDA], lnpkey_t *key, lnpcom_t *com,
+		ulong z[PROJ]);
 
 void lnp_rangeproof_init(lnprangeproof_t *pi);
 void lnp_rangeproof_free(lnprangeproof_t *pi);
