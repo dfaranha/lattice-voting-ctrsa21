@@ -15,10 +15,12 @@ runs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
+          libgmp-dev \
+          libmpfr-dev \
+          make \
           autoconf \
           automake \
-          libtool \
-          libgmp-dev
+          libtool
 
     - name: Restore FLINT cache
       id: cache-flint
@@ -35,6 +37,8 @@ runs:
           https://github.com/flintlib/flint.git /tmp/flint
 
         cd /tmp/flint
+
+        ./bootstrap.sh
 
         ./configure \
           --prefix=/tmp/flint-install
