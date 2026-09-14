@@ -16,10 +16,9 @@
 /*============================================================================*/
 
 /* The large modulus for the encryption scheme. */
-#define Q		"72057594037928893"
-#define Q0		"29973109198516688"
-#define Q1		"42084484839412205"
-#define Q2		"36028797018964446"
+#define Q		"36028797018964429"
+#define Q0		"5491149130035647"
+#define Q1		"30537647888928782"
 
 /* Prime modulus for defining commitment ring. */
 static fmpz_t p;
@@ -509,7 +508,9 @@ int encrypt_undo(fmpz_mod_poly_t m, fmpz_mod_poly_t chall, ciphertext_t *c,
 
 	fmpz_mod_poly_get_fmpz_poly(s, t, ctx_q);
 
-	fmpz_set_str(q2, Q2, 10);
+	/* Centre the coefficients around zero: q2 = floor(q / 2). Deriving this
+	 * from q rather than hard-coding it keeps it correct if q changes. */
+	fmpz_fdiv_q_ui(q2, q, 2);
 	for (int i = 0; i < DEGREE; i++) {
 		fmpz_poly_get_coeff_fmpz(coeff, s, i);
 		if (fmpz_cmp(coeff, q2) >= 0) {

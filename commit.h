@@ -18,14 +18,9 @@
 /* Constant definitions                                                       */
 /*============================================================================*/
 
-/* Parameter v in the commitment scheme (laximum l1-norm of challs). */
-#define NONZERO 36
-/* The \infty-norm bound of certain elements. */
-#define BETA 	1
-/* Width k of the comming matrix. */
-#define WIDTH 	3
-/* Height of the commitment matrix. */
-#define HEIGHT 	1
+/* The module dimensions NONZERO, BETA, WIDTH and HEIGHT, and the standard
+ * deviations, now live in param.h so that the encryption scheme can derive its
+ * own dimensions from them. */
 
 /*============================================================================*/
 /* Type definitions                                                           */

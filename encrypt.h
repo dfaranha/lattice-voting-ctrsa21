@@ -21,8 +21,6 @@
 /* Constant definitions                                                       */
 /*============================================================================*/
 
-/* The dimension of the encryption matrix. */
-#define DIM		2
 /* The dimension of the linear relation matrix. */
 #define LAMBDA	1
 

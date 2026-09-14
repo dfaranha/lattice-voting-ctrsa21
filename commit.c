@@ -20,9 +20,9 @@
 /*============================================================================*/
 
 /* The first square root of -1. */
-#define	P0		3153606543
+#define	P0		816738466
 /* The second square root of -1. */
-#define P1		752843710
+#define P1		1737064531
 
 /* Polynomial defining the cyclotomic ring. */
 static nmod_poly_t cyclo_poly;
@@ -114,9 +114,9 @@ void commit_setup() {
 
 	// Initialize two factors of the polynomial for CRT representation.
 	nmod_poly_set_coeff_ui(irred[0], DEGCRT, 1);
-	nmod_poly_set_coeff_ui(irred[0], 0, 3153606543);
+	nmod_poly_set_coeff_ui(irred[0], 0, P0);
 	nmod_poly_set_coeff_ui(irred[1], DEGCRT, 1);
-	nmod_poly_set_coeff_ui(irred[1], 0, 752843710);
+	nmod_poly_set_coeff_ui(irred[1], 0, P1);
 
 	nmod_poly_invmod(inv[0], irred[0], irred[1]);
 	nmod_poly_invmod(inv[1], irred[1], irred[0]);
