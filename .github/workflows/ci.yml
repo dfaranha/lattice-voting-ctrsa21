@@ -10,31 +10,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup FLINT
+        uses: ./.github/actions/setup-flint
+        with:
+          version: v3.6.0
+
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgmp-dev \
-            libmpfr-dev \
-            libmpc-dev \
-            cmake \
-            ninja-build
-
-          git clone --depth 1 --branch v3.6.0 \
-            https://github.com/flintlib/flint.git /tmp/flint
-
-          cmake -S /tmp/flint -B /tmp/flint/build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr/local
-
-          cmake --build /tmp/flint/build -j2
-          sudo cmake --install /tmp/flint/build
-          sudo ldconfig
-
-      - name: Check FLINT
-        run: |
-          flint-config --version
-          g++ -E -v -x c++ /dev/null 2>&1 | grep -A20 '#include <...> search starts here'
+          sudo apt-get install -y libgmp-dev
 
       - name: Build
         run: make
@@ -47,27 +31,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup FLINT
+        uses: ./.github/actions/setup-flint
+        with:
+          version: v3.6.0
+
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgmp-dev \
-            libmpfr-dev \
-            libmpc-dev \
-            cmake \
-            ninja-build
-
-          git clone --depth 1 --branch v3.6.0 \
-            https://github.com/flintlib/flint.git /tmp/flint
-
-          cmake -S /tmp/flint -B /tmp/flint/build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr/local
-
-          cmake --build /tmp/flint/build -j2
-          sudo cmake --install /tmp/flint/build
-          sudo ldconfig
-
+          sudo apt-get install -y libgmp-dev
       - name: Run tests under AddressSanitizer and UndefinedBehaviorSanitizer
         run: |
           make CFLAGS="-O1 -g -march=native -pthread -DTESTS=5 \
