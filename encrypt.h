@@ -220,3 +220,21 @@ int encrypt_undo(fmpz_mod_poly_t m, fmpz_mod_poly_t chall, ciphertext_t *c, priv
  * @param[in] c			- the ciphertext to free.
  */
 void encrypt_free(ciphertext_t *c);
+
+/**
+ * Initialize a ciphertext. Must be called before encrypt_doit or encrypt_make,
+ * and released with encrypt_free. Separating this from the computation is what
+ * allows the same ciphertext to be recomputed in a loop without leaking.
+ *
+ * @param[out] c 		- the ciphertext to initialize.
+ */
+void encrypt_cipher_init(ciphertext_t *c);
+
+/**
+ * Initialize a key pair. Must be called before encrypt_keygen, and released
+ * with encrypt_keyfree.
+ *
+ * @param[out] pk 		- the public key to initialize.
+ * @param[out] sk 		- the private key to initialize.
+ */
+void encrypt_keyinit(publickey_t *pk, privatekey_t *sk);

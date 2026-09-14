@@ -134,6 +134,14 @@ uint64_t commit_norm_inf(nmod_poly_t r);
 int commit_norm2_leq(nmod_poly_t r, uint64_t bound);
 
 /**
+ * Initialize a key pair for the commitment scheme. Must be called before
+ * commit_keygen, and released with commit_keyfree.
+ *
+ * @param[out] key 		- the key pair to initialize.
+ */
+void commit_keyinit(commitkey_t *key);
+
+/**
  * Generate a key pair for the commitment scheme using a PRNG.
  *
  * @param[out] key 		- the generated key pair.
@@ -207,10 +215,18 @@ void commit_sample_gauss(nmod_poly_t r);
 void commit_sample_gauss_crt(pcrt_poly_t r);
 
 /**
+ * Initialize a commitment. Must be called before commit_doit, and released
+ * with commit_free. Separating this from commit_doit is what allows the same
+ * commitment to be recomputed in a loop without leaking.
+ *
+ * @param[out] com 		- the commitment to initialize.
+ */
+void commit_init(commit_t *com);
+
+/**
  * Commit to a message and randomness using a key pair.
  *
- * The commitment is initialised by this call, so it must not already hold one:
- * release a previous commitment with commit_free first, or it is leaked.
+ * The commitment must already be initialized with commit_init.
  *
  * @param[out] com 		- the resulting commitment.
  * @param[in] m 		- the message to commit.

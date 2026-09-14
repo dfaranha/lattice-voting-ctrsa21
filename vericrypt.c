@@ -107,6 +107,29 @@ static int vericrypt_test_norm(veritext_t *out) {
 /* Public definitions                                                         */
 /*============================================================================*/
 
+/* Initialise a verifiable ciphertext. Must be called before vericrypt_doit,
+ * and released with vericrypt_free. Separating this from the computation lets
+ * the same ciphertext be recomputed in a loop without leaking. */
+void vericrypt_init(veritext_t *out) {
+	fmpz_mod_ctx_t *ctx_p = encrypt_modulus_ctx();
+	fmpz_mod_ctx_t *ctx_q = encrypt_large_modulus_ctx();
+
+	fmpz_mod_poly_init(out->c, *ctx_p);
+	for (int i = 0; i < VECTOR; i++) {
+		encrypt_cipher_init(&out->cipher[i]);
+		fmpz_mod_poly_init(out->u[i], *ctx_p);
+		for (int j = 0; j < 2; j++) {
+			fmpz_mod_poly_init(out->e_[i][j], *ctx_q);
+		}
+		for (int j = 0; j < DIM; j++) {
+			for (int k = 0; k < 2; k++) {
+				fmpz_mod_poly_init(out->r[i][j][k], *ctx_q);
+				fmpz_mod_poly_init(out->e[i][j][k], *ctx_q);
+			}
+		}
+	}
+}
+
 void vericrypt_free(veritext_t *out) {
 	fmpz_mod_poly_clear(out->c, *encrypt_modulus_ctx());
 	for (int i = 0; i < VECTOR; i++) {
@@ -262,21 +285,17 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 
 	fmpz_mod_poly_init(tmp, *ctx_p);
 	fmpz_mod_poly_init(_u, *ctx_p);
-	fmpz_mod_poly_init(out->c, *ctx_p);
 	fmpz_mod_poly_init(c[0], *ctx_p);
 	fmpz_mod_poly_init(c[1], *ctx_p);
 	for (int i = 0; i < VECTOR; i++) {
+		encrypt_cipher_init(&y[i]);
 		for (int j = 0; j < DIM; j++) {
 			for (int k = 0; k < 2; k++) {
 				fmpz_mod_poly_init(y_r[i][j][k], *ctx_q);
 				fmpz_mod_poly_init(y_e[i][j][k], *ctx_q);
-				fmpz_mod_poly_init(out->r[i][j][k], *ctx_q);
-				fmpz_mod_poly_init(out->e[i][j][k], *ctx_q);
 			}
-			fmpz_mod_poly_init(out->e_[i][j], *ctx_q);
 			fmpz_mod_poly_init(y_e_[i][j], *ctx_q);
 		}
-		fmpz_mod_poly_init(out->u[i], *ctx_p);
 		fmpz_mod_poly_init(y_mu[i], *ctx_p);
 	}
 
@@ -343,12 +362,6 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 		}
 
 		result = vericrypt_test_norm(out);
-
-		/* encrypt_make initialises y on every pass of the rejection loop, so
-		 * it has to be released on every pass too. */
-		for (int i = 0; i < VECTOR; i++) {
-			encrypt_free(&y[i]);
-		}
 	}
 
 	fmpz_mod_poly_clear(tmp, *ctx_p);
@@ -356,6 +369,7 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 	fmpz_mod_poly_clear(c[0], *ctx_p);
 	fmpz_mod_poly_clear(c[1], *ctx_p);
 	for (int i = 0; i < VECTOR; i++) {
+		encrypt_free(&y[i]);
 		for (int j = 0; j < DIM; j++) {
 			for (int k = 0; k < 2; k++) {
 				fmpz_mod_poly_clear(y_r[i][j][k], *ctx_q);
@@ -389,6 +403,7 @@ int vericrypt_verify(veritext_t *in, fmpz_mod_poly_t t[VECTOR],
 
 	if (vericrypt_test_norm(in)) {
 		for (int i = 0; i < VECTOR; i++) {
+			encrypt_cipher_init(&y[i]);
 			encrypt_make(&y[i], in->r[i], in->e[i], in->e_[i], in->u[i], pk);
 		}
 		qcrt_poly_reduce(_c[0], in->c, 0, *ctx_q);
@@ -476,7 +491,9 @@ static void test(flint_rand_t rand) {
 	fmpz_mod_poly_init(u, *encrypt_modulus_ctx());
 	fmpz_mod_poly_init(v, *encrypt_modulus_ctx());
 
+	encrypt_keyinit(&pk, &sk);
 	encrypt_keygen(&pk, &sk, rand);
+	vericrypt_init(&cipher);
 
 	TEST_BEGIN("verifiable encryption is consistent") {
 		for (int i = 0; i < VECTOR; i++) {
@@ -502,12 +519,11 @@ static void test(flint_rand_t rand) {
 		encrypt_poly_mulmod(u, u, c, *encrypt_modulus_ctx());
 
 		TEST_ASSERT(fmpz_mod_poly_equal(u, v, *encrypt_modulus_ctx()) == 1, end);
-
-		vericrypt_free(&cipher);
 	} TEST_END;
 
   end:
 	encrypt_keyfree(&pk, &sk);
+	vericrypt_free(&cipher);
 
 	fmpz_mod_poly_clear(tmp, *encrypt_modulus_ctx());
 	for (int i = 0; i < VECTOR; i++) {
@@ -541,7 +557,9 @@ static void bench(flint_rand_t rand) {
 	fmpz_mod_poly_init(c, *encrypt_modulus_ctx());
 	fmpz_mod_poly_init(u, *encrypt_modulus_ctx());
 
+	encrypt_keyinit(&pk, &sk);
 	encrypt_keygen(&pk, &sk, rand);
+	vericrypt_init(&cipher);
 
 	fmpz_mod_poly_zero(u, *encrypt_modulus_ctx());
 	for (int i = 0; i < VECTOR; i++) {

@@ -516,6 +516,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	nmod_poly_init(t1, MODP);
 	nmod_poly_init(rho, MODP);
 	for (int i = 0; i < MSGS; i++) {
+		commit_init(&d[i]);
 		nmod_poly_init(s[i], MODP);
 		for (int k = 0; k < 2; k++) {
 			nmod_poly_init(t[i][k], MODP);
@@ -555,7 +556,6 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	nmod_poly_clear(t1);
 	nmod_poly_clear(rho);
 	for (int i = 0; i < MSGS; i++) {
-		/* shuffle_prover commits to each d[i], so run() owns them. */
 		commit_free(&d[i]);
 		nmod_poly_clear(s[i]);
 		for (int k = 0; k < 2; k++) {
@@ -589,6 +589,7 @@ static void test(flint_rand_t rand) {
 
 	/* Generate commitment key-> */
 	commit_setup();
+	commit_keyinit(&key);
 	commit_keygen(&key, rand);
 
 	for (int i = 0; i < MSGS; i++) {
@@ -596,6 +597,7 @@ static void test(flint_rand_t rand) {
 			commit_sample_short_crt(r[i][j]);
 		}
 		commit_sample_short(m[i]);
+		commit_init(&com[i]);
 		commit_doit(&com[i], m[i], &key, r[i]);
 	}
 
@@ -648,6 +650,7 @@ static void bench(flint_rand_t rand) {
 
 	/* Generate commitment key-> */
 	commit_setup();
+	commit_keyinit(&key);
 	commit_keygen(&key, rand);
 
 	for (int i = 0; i < MSGS; i++) {
@@ -655,6 +658,7 @@ static void bench(flint_rand_t rand) {
 			commit_sample_short_crt(r[i][j]);
 		}
 		commit_sample_short(m[i]);
+		commit_init(&com[i]);
 		commit_doit(&com[i], m[i], &key, r[i]);
 	}
 

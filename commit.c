@@ -233,12 +233,27 @@ int commit_norm2_leq(nmod_poly_t r, uint64_t bound) {
 	return 1;
 }
 
+// Initialise a commitment key pair.
+void commit_keyinit(commitkey_t *key) {
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int j = 0; j < WIDTH; j++) {
+			for (int k = 0; k < 2; k++) {
+				nmod_poly_init(key->B1[i][j][k], MODP);
+			}
+		}
+	}
+	for (int i = 0; i < WIDTH; i++) {
+		for (int j = 0; j < 2; j++) {
+			nmod_poly_init(key->b2[i][j], MODP);
+		}
+	}
+}
+
 // Generate a key pair.
 void commit_keygen(commitkey_t *key, flint_rand_t rand) {
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < WIDTH; j++) {
 			for (int k = 0; k < 2; k++) {
-				nmod_poly_init(key->B1[i][j][k], MODP);
 				nmod_poly_zero(key->B1[i][j][k]);
 				if (i == j) {
 					nmod_poly_set_coeff_ui(key->B1[i][j][k], 0, 1);
@@ -256,7 +271,6 @@ void commit_keygen(commitkey_t *key, flint_rand_t rand) {
 	}
 	for (int i = 0; i < WIDTH; i++) {
 		for (int j = 0; j < 2; j++) {
-			nmod_poly_init(key->b2[i][j], MODP);
 			nmod_poly_zero(key->b2[i][j]);
 			if (i == HEIGHT) {
 				nmod_poly_set_coeff_ui(key->b2[i][j], 0, 1);
@@ -406,6 +420,14 @@ void commit_sample_gauss_crt(nmod_poly_t r[2]) {
 	nmod_poly_clear(t);
 }
 
+// Initialise a commitment.
+void commit_init(commit_t *com) {
+	for (int i = 0; i < 2; i++) {
+		nmod_poly_init(com->c1[i], MODP);
+		nmod_poly_init(com->c2[i], MODP);
+	}
+}
+
 // Commit to a message.
 void commit_doit(commit_t *com, nmod_poly_t m, commitkey_t *key,
 		pcrt_poly_t r[WIDTH]) {
@@ -413,8 +435,6 @@ void commit_doit(commit_t *com, nmod_poly_t m, commitkey_t *key,
 
 	nmod_poly_init(t, MODP);
 	for (int i = 0; i < 2; i++) {
-		nmod_poly_init(com->c1[i], MODP);
-		nmod_poly_init(com->c2[i], MODP);
 		nmod_poly_zero(com->c1[i]);
 		nmod_poly_zero(com->c2[i]);
 	}
@@ -525,7 +545,6 @@ void commit_free(commit_t *com) {
 static void test(flint_rand_t rand) {
 	commitkey_t key;
 	commit_t com, _com;
-	int have_com = 0, have__com = 0;
 	nmod_poly_t m, rho;
 	pcrt_poly_t r[WIDTH], s[WIDTH], f;
 
@@ -544,19 +563,16 @@ static void test(flint_rand_t rand) {
 	nmod_poly_randtest(m, rand, DEGREE);
 
 	/* Generate commitment key. */
+	commit_keyinit(&key);
 	commit_keygen(&key, rand);
+	commit_init(&com);
+	commit_init(&_com);
 	for (int i = 0; i < WIDTH; i++) {
 		commit_sample_short_crt(r[i]);
 	}
 
 	TEST_BEGIN("commitment can be generated and opened") {
-		/* commit_doit initialises the commitment it writes to, so any previous
-		 * one has to be released first. */
-		if (have_com) {
-			commit_free(&com);
-		}
 		commit_doit(&com, m, &key, r);
-		have_com = 1;
 
 		commit_sample_chall_crt(f);
 		commit_sample_chall(rho);
@@ -577,11 +593,7 @@ static void test(flint_rand_t rand) {
 				nmod_poly_zero(r[i][j]);
 			}
 		}
-		if (have__com) {
-			commit_free(&_com);
-		}
 		commit_doit(&_com, rho, &key, r);
-		have__com = 1;
 		for (int i = 0; i < 2; i++) {
 			nmod_poly_sub(com.c1[i], com.c1[i], _com.c1[i]);
 			nmod_poly_sub(com.c2[i], com.c2[i], _com.c2[i]);
@@ -592,12 +604,8 @@ static void test(flint_rand_t rand) {
 
   end:
 	commit_keyfree(&key);
-	if (have_com) {
-		commit_free(&com);
-	}
-	if (have__com) {
-		commit_free(&_com);
-	}
+	commit_free(&com);
+	commit_free(&_com);
 	nmod_poly_clear(m);
 	nmod_poly_clear(rho);
 	nmod_poly_clear(f[0]);
@@ -626,7 +634,9 @@ static void bench(flint_rand_t rand) {
 		}
 	}
 
+	commit_keyinit(&key);
 	commit_keygen(&key, rand);
+	commit_init(&com);
 	nmod_poly_randtest(m, rand, DEGREE);
 
 	for (int i = 0; i < WIDTH; i++) {
@@ -637,23 +647,18 @@ static void bench(flint_rand_t rand) {
 		BENCH_ADD(commit_sample_short_crt(r[0]));
 	} BENCH_END;
 
-	/* BENCH_ADD runs the expression BENCH times inside the timed region, and
-	 * each commit_doit re-initialises the commitment. Only the last one of each
-	 * batch can be released here without polluting the measurement; separating
-	 * allocation from computation in the API would be the real fix. */
 	BENCH_BEGIN("commit_doit") {
 		BENCH_ADD(commit_doit(&com, m, &key, r));
-		commit_free(&com);
 	} BENCH_END;
 
 	BENCH_BEGIN("commit_open") {
 		commit_sample_chall_crt(f);
 		commit_doit(&com, m, &key, r);
 		BENCH_ADD(commit_open(&com, m, &key, r, f));
-		commit_free(&com);
 	} BENCH_END;
 
 	commit_keyfree(&key);
+	commit_free(&com);
 	nmod_poly_clear(m);
 	nmod_poly_clear(f[0]);
 	nmod_poly_clear(f[1]);
