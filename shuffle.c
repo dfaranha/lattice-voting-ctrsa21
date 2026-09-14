@@ -127,6 +127,15 @@ static void hash_poly(SHA256Context *sha, nmod_poly_t p) {
 	SHA256Input(sha, (const uint8_t *)buf, sizeof(buf));
 }
 
+/* Everything the is_bin sub-proof contributes for one message: the product
+ * relation, the constant coefficient being zero, and the norm bound. The three
+ * together say that the committed permutation element is binary, which is the
+ * set D that Lemma 5 needs. */
+typedef struct _isbin_t {
+	lnpbinproof_t all;
+	lnpbinctx_t ctx;
+} isbin_t;
+
 /*
  * The linear proof now relates *three* commitments instead of two. It proves
  * knowledge of openings of x, p and _x such that
@@ -142,7 +151,7 @@ static void hash_poly(SHA256Context *sha, nmod_poly_t p) {
 void lin_hash(nmod_poly_t d[2], commitkey_t *key, lnpkey_t *lkey, commit_t x,
 		lnpcom_t *p, commit_t y, nmod_poly_t alpha, nmod_poly_t gamma,
 		nmod_poly_t beta, nmod_poly_t u[2], nmod_poly_t t[2],
-		nmod_poly_t tp[2], nmod_poly_t _t[2]) {
+		nmod_poly_t tp[2], nmod_poly_t _t[2], lnpbinproof_t *bp) {
 	SHA256Context sha;
 	uint8_t hash[SHA256HashSize];
 	uint32_t buf;
@@ -186,7 +195,15 @@ void lin_hash(nmod_poly_t d[2], commitkey_t *key, lnpkey_t *lkey, commit_t x,
 		hash_poly(&sha, t[i]);
 		hash_poly(&sha, tp[i]);
 		hash_poly(&sha, _t[i]);
+		/* The is_bin first messages go into the same challenge, which is what
+		 * lets one response answer both proofs. */
+		hash_poly(&sha, bp->t[i]);
+		for (int j = 0; j < LNP_LAMBDA; j++) {
+			hash_poly(&sha, bp->h[j][i]);
+			hash_poly(&sha, bp->v[j][i]);
+		}
 	}
+	SHA256Input(&sha, (const uint8_t *)bp->zp, PROJ * sizeof(ulong));
 
 	SHA256Result(&sha, hash);
 
@@ -218,7 +235,8 @@ static void lin_prover(nmod_poly_t y[WIDTH][2], nmod_poly_t w[LNP_WIDTH][2],
 		nmod_poly_t u[2], commit_t x, lnpcom_t *p, commit_t _x,
 		commitkey_t *key, lnpkey_t *lkey, nmod_poly_t alpha,
 		nmod_poly_t gamma, nmod_poly_t beta, nmod_poly_t r[WIDTH][2],
-		nmod_poly_t s[LNP_WIDTH][2], nmod_poly_t _r[WIDTH][2]) {
+		nmod_poly_t s[LNP_WIDTH][2], nmod_poly_t _r[WIDTH][2],
+		isbin_t *ib, nmod_poly_t sig[2]) {
 	nmod_poly_t tmp, rec, d[2], a[2], g[2];
 	nmod_poly_t dr[WIDTH][2], ds[LNP_WIDTH][2], _dr[WIDTH][2];
 	int rej0, rej1, rej2;
@@ -305,7 +323,11 @@ static void lin_prover(nmod_poly_t y[WIDTH][2], nmod_poly_t w[LNP_WIDTH][2],
 		}
 
 		/* Sample challenge. */
-		lin_hash(d, key, lkey, x, p, _x, alpha, gamma, beta, u, t, tp, _t);
+		/* The is_bin first messages depend on the same mask and must be in
+		 * place before the challenge is drawn. */
+		lnp_bin_first(&ib->all, &ib->ctx, p, sig, lkey, s, w);
+		lin_hash(d, key, lkey, x, p, _x, alpha, gamma, beta, u, t, tp, _t,
+				&ib->all);
 
 		/* Prover */
 		for (int i = 0; i < WIDTH; i++) {
@@ -352,7 +374,7 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t w[LNP_WIDTH][2],
 		nmod_poly_t tp[2], nmod_poly_t _t[2],
 		nmod_poly_t u[2], commit_t x, lnpcom_t *p, commit_t _x,
 		commitkey_t *key, lnpkey_t *lkey, nmod_poly_t alpha,
-		nmod_poly_t gamma, nmod_poly_t beta) {
+		nmod_poly_t gamma, nmod_poly_t beta, isbin_t *ib) {
 	nmod_poly_t tmp, _d[2], a[2], g[2], b[2];
 	nmod_poly_t v[2], vp[2], _v[2], lhs[2], rhs[2];
 	nmod_poly_t z[WIDTH], zp[LNP_WIDTH], _z[WIDTH];
@@ -386,7 +408,11 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t w[LNP_WIDTH][2],
 	}
 
 	/* Sample challenge. */
-	lin_hash(_d, key, lkey, x, p, _x, alpha, gamma, beta, u, t, tp, _t);
+	lnp_bin_public(&ib->ctx, &ib->all, p, lkey);
+	lin_hash(_d, key, lkey, x, p, _x, alpha, gamma, beta, u, t, tp, _t,
+			&ib->all);
+	/* The same opening w answers the is_bin argument. */
+	result &= lnp_bin_check(&ib->all, &ib->ctx, p, lkey, _d, w);
 
 	/* Verifier checks norms, reconstructing from CRT representation. These are
 	 * soundness checks and must make verification fail, so they are ordinary
@@ -602,14 +628,6 @@ static void shuffle_coeffs(nmod_poly_t alpha, nmod_poly_t gamma,
 	nmod_poly_clear(t1);
 }
 
-/* Everything the is_bin sub-proof contributes for one message: the product
- * relation, the constant coefficient being zero, and the norm bound. The three
- * together say that the committed permutation element is binary, which is the
- * set D that Lemma 5 needs. */
-typedef struct _isbin_t {
-	lnpbinproof_t all;
-} isbin_t;
-
 static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 		nmod_poly_t w[MSGS][LNP_WIDTH][2], nmod_poly_t _y[MSGS][WIDTH][2],
 		nmod_poly_t t[MSGS][2],
@@ -703,17 +721,9 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 		commit_poly_mulmod(s[i], s[i], t0);
 	}
 
-	for (int l = 0; l < MSGS; l++) {
-		shuffle_coeffs(alpha, gamma, pub, l, s, _m, beta, tau, rho);
-		lin_prover(y[l], w[l], _y[l], t[l], tp[l], _t[l], u[l],
-				com[l], &p[l], d[l], key, lkey, alpha, gamma, pub, r[l],
-				pr[l], _r[l]);
-	}
-
-	/* The is_bin sub-proof, once per message. The order matters: the product
-	 * proof fills the garbage slots of the commitment, and both the range
-	 * proof and the constant-coefficient proof derive their challenges from
-	 * the whole commitment, so they have to see it in its final state. */
+	/* The setup half of the is_bin argument, once per message. It has to run
+	 * before the linear proof, which drives the mask-dependent half and needs
+	 * the context this produces. */
 	{
 		pcrt_poly_t msg[SLOTS], g[LNP_LAMBDA], wc;
 		nmod_poly_t wraw;
@@ -733,6 +743,10 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 			}
 		}
 		for (int l = 0; l < MSGS; l++) {
+			/* The setup half of the is_bin argument fixes the projection,
+			 * which cannot be retried once its mask is committed, so a
+			 * rejection here means recommitting. The mask-dependent half runs
+			 * inside lin_prover, which owns the shared opening. */
 			for (int tries = 0; tries < 64; tries++) {
 				for (int i = 0; i < SLOTS; i++) {
 					for (int k = 0; k < NCRT; k++) {
@@ -754,8 +768,8 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 					}
 				}
 				lnp_commit(&p[l], msg, lkey, pr[l]);
-				if (lnp_bin_prover(&ib[l].all, &p[l], msg[SLOT_S],
-						msg[SLOT_F], wraw, g, lkey, pr[l])) {
+				if (lnp_bin_setup(&ib[l].all, &ib[l].ctx, &p[l], msg[SLOT_S],
+						msg[SLOT_F], wraw, g, lkey)) {
 					break;
 				}
 			}
@@ -775,6 +789,14 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 			}
 		}
 	}
+
+	for (int l = 0; l < MSGS; l++) {
+		shuffle_coeffs(alpha, gamma, pub, l, s, _m, beta, tau, rho);
+		lin_prover(y[l], w[l], _y[l], t[l], tp[l], _t[l], u[l],
+				com[l], &p[l], d[l], key, lkey, alpha, gamma, pub, r[l],
+				pr[l], _r[l], &ib[l], sig[l]);
+	}
+
 
 	nmod_poly_clear(t0);
 	nmod_poly_clear(t1);
@@ -815,14 +837,13 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 	/* Now verify each \Prod_LIN instance, one for each commitment. */
 	for (int l = 0; l < MSGS; l++) {
 		shuffle_coeffs(alpha, gamma, pub, l, s, _m, beta, tau, rho);
+		/* This also checks membership of sigma_l in the set D that Lemma 5
+		 * requires, since the is_bin argument now shares the linear proof's
+		 * challenge and opening. */
 		result &=
 				lin_verifier(y[l], w[l], _y[l], t[l], tp[l], _t[l],
-				u[l], com[l], &p[l], d[l], key, lkey, alpha, gamma, pub);
-		/* Membership of sigma_l in the set D that Lemma 5 requires. All three
-		 * are needed: the product relation and the constant coefficient
-		 * together say binary, and the range proof supplies the norm bound
-		 * that keeps the coefficient sum from wrapping. */
-		result &= lnp_bin_verifier(&ib[l].all, &p[l], lkey);
+				u[l], com[l], &p[l], d[l], key, lkey, alpha, gamma, pub,
+				&ib[l]);
 	}
 
 	nmod_poly_clear(beta);
@@ -873,6 +894,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		commit_init(&d[i]);
 		lnp_com_init(&p[i]);
 		lnp_binproof_init(&ib[i].all);
+		lnp_binctx_init(&ib[i].ctx);
 		nmod_poly_init(s[i], MODP);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(t[i][k], MODP);
@@ -929,6 +951,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		commit_free(&d[i]);
 		lnp_com_free(&p[i]);
 		lnp_binproof_free(&ib[i].all);
+		lnp_binctx_free(&ib[i].ctx);
 		nmod_poly_clear(s[i]);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(t[i][k]);
@@ -1154,6 +1177,9 @@ static void bench(flint_rand_t rand) {
 	nmod_poly_t w[LNP_WIDTH][2], lr[LNP_WIDTH][2], lmsg_store[LNP_WIDTH][2];
 	pcrt_poly_t lmsg[SLOTS];
 	lnpcom_t lcom;
+	isbin_t lib;
+	nmod_poly_t bwraw;
+	pcrt_poly_t bg[LNP_LAMBDA], bwc;
 	nmod_poly_t t[2], tp[2], _t[2], u[2];
 
 	nmod_poly_init(alpha, MODP);
@@ -1240,17 +1266,52 @@ static void bench(flint_rand_t rand) {
 			nmod_poly_zero(lmsg[i][j]);
 		}
 	}
+	/* The linear proof now also carries the is_bin argument, so the benchmark
+	 * has to set one up: a binary witness, its product, and the masks. */
+	lnp_binproof_init(&lib.all);
+	lnp_binctx_init(&lib.ctx);
+	nmod_poly_init(bwraw, MODP);
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_init(bwc[k], MODP);
+	}
+	for (int i = 0; i < LNP_LAMBDA; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(bg[i][k], MODP);
+		}
+		lnp_sample_ct_zero(bg[i], rand);
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_set(lmsg[SLOT_G + i][k], bg[i][k]);
+		}
+	}
+	for (int i = 0; i < DEGREE; i++) {
+		nmod_poly_set_coeff_ui(m[0], i, i & 1);
+	}
+	pcrt_poly_reduce(lmsg[SLOT_S][0], m[0], 0);
+	pcrt_poly_reduce(lmsg[SLOT_S][1], m[0], 1);
+	lnp_isbin_product(lmsg[SLOT_F], lmsg[SLOT_S]);
+	lnp_sample_proj_mask(bwc, bwraw);
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_set(lmsg[SLOT_W][k], bwc[k]);
+	}
 	lnp_commit(&lcom, lmsg, &lkey, lr);
+	while (!lnp_bin_setup(&lib.all, &lib.ctx, &lcom, lmsg[SLOT_S],
+			lmsg[SLOT_F], bwraw, bg, &lkey)) {
+		lnp_sample_proj_mask(bwc, bwraw);
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_set(lmsg[SLOT_W][k], bwc[k]);
+		}
+		lnp_commit(&lcom, lmsg, &lkey, lr);
+	}
 
 	BENCH_BEGIN("linear proof") {
 		BENCH_ADD(lin_prover(y, w, _y, t, tp, _t, u, com[0], &lcom,
 						com[2], &key, &lkey, alpha, gamma, beta, r[0], lr,
-						r[2]));
+						r[2], &lib, lmsg[SLOT_S]));
 	} BENCH_END;
 
 	BENCH_BEGIN("linear verifier") {
 		BENCH_ADD(lin_verifier(y, w, _y, t, tp, _t, u, com[0], &lcom,
-						com[2], &key, &lkey, alpha, gamma, beta));
+						com[2], &key, &lkey, alpha, gamma, beta, &lib));
 	} BENCH_END;
 
 	commit_finish();

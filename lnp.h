@@ -101,13 +101,20 @@ typedef struct _lnpproof_t {
  * one randomness, so they share a single mask, a single challenge and a single
  * masked opening z, instead of carrying one each. */
 typedef struct _lnpbinproof_t {
-	pcrt_poly_t w[HEIGHT];			/* Ajtai part of the first message. */
 	pcrt_poly_t t;					/* Product relation's masked term. */
 	ulong zp[PROJ];					/* The masked projection. */
 	pcrt_poly_t h[LNP_LAMBDA];		/* The aggregated values. */
 	pcrt_poly_t v[LNP_LAMBDA];		/* The masked openings of the relations. */
-	pcrt_poly_t z[LNP_WIDTH];		/* The single masked opening. */
 } lnpbinproof_t;
+
+/* What the setup phase derives from the commitment and the projection. It is
+ * public, so the verifier rebuilds it rather than receiving it. */
+typedef struct _lnpbinctx_t {
+	pcrt_poly_t P[LNP_LAMBDA];
+	pcrt_poly_t M[LNP_LAMBDA];
+	ulong Z[LNP_LAMBDA];
+	ulong nu[LNP_LAMBDA];
+} lnpbinctx_t;
 
 /*============================================================================*/
 /* Function prototypes                                                        */
@@ -251,33 +258,54 @@ void lnp_scalars_for_test(ulong nu[LNP_LAMBDA], lnpkey_t *key, lnpcom_t *com,
 void lnp_binproof_init(lnpbinproof_t *pi);
 void lnp_binproof_free(lnpbinproof_t *pi);
 
-/**
- * Prove the whole is_bin argument in one proof: that slot SLOT_F holds
- * sigma_{-1}(s) * (s - ones) for the witness s in slot SLOT_S, that its
- * constant coefficient is zero, and that s is short.
+/*
+ * The is_bin argument in phases, so that it can share one masked opening with
+ * whatever else opens the same commitment. The linear proof of the shuffle
+ * opens exactly this commitment under exactly this randomness, so running the
+ * two as separate protocols meant masking the randomness twice and sending two
+ * Ajtai first messages and two responses. Split like this, the caller supplies
+ * the mask, absorbs both sets of first messages into one challenge, and sends
+ * one response that answers both.
  *
- * All three speak about one commitment under one randomness, so they share a
- * single mask, a single challenge and a single masked opening rather than
- * carrying one each.
- *
- * @param[out] pi			- the resulting proof.
- * @param[in,out] com		- the commitment, whose garbage slots are filled in.
- * @param[in] s				- the witness, in CRT representation.
- * @param[in] f				- the claimed product, in CRT representation.
- * @param[in] w				- the projection mask, in coefficient form.
- * @param[in] g				- the constant-coefficient masks.
- * @param[in] key			- the commitment key.
- * @param[in] r				- the commitment randomness.
- * @return 1 if a transcript was produced, 0 if the projection was rejected.
+ * The order is setup, then first, then the caller's challenge, then check.
  */
-int lnp_bin_prover(lnpbinproof_t *pi, lnpcom_t *com, pcrt_poly_t s,
-		pcrt_poly_t f, nmod_poly_t w, pcrt_poly_t g[LNP_LAMBDA],
-		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]);
 
 /**
- * Verify the proof produced by lnp_bin_prover.
+ * Everything that does not depend on the mask: the projection, its scalars and
+ * public multipliers, and the aggregated values.
+ *
+ * @return 1 if a transcript can be produced, 0 if the projection was rejected,
+ *         in which case the caller must recommit with a fresh mask.
  */
-int lnp_bin_verifier(lnpbinproof_t *pi, lnpcom_t *com, lnpkey_t *key);
+int lnp_bin_setup(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
+		pcrt_poly_t s, pcrt_poly_t f, nmod_poly_t w,
+		pcrt_poly_t g[LNP_LAMBDA], lnpkey_t *key);
+
+/**
+ * Rebuild the public part of the setup, for the verifier.
+ */
+void lnp_bin_public(lnpbinctx_t *ctx, lnpbinproof_t *pi, lnpcom_t *com,
+		lnpkey_t *key);
+
+/**
+ * The mask-dependent first messages. Fills the garbage slots of the
+ * commitment, so it must run before anything that hashes them.
+ */
+void lnp_bin_first(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
+		pcrt_poly_t s, lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH],
+		pcrt_poly_t y[LNP_WIDTH]);
+
+/**
+ * Check the argument against a challenge and an opening the caller owns.
+ */
+int lnp_bin_check(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
+		lnpkey_t *key, pcrt_poly_t d, pcrt_poly_t z[LNP_WIDTH]);
+
+/**
+ * Initialise and free the context.
+ */
+void lnp_binctx_init(lnpbinctx_t *ctx);
+void lnp_binctx_free(lnpbinctx_t *ctx);
 
 
 #endif /* LNP_H */

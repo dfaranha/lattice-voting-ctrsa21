@@ -921,71 +921,30 @@ static void ct_scalars(ulong mu[LNP_LAMBDA], lnpkey_t *key, lnpcom_t *com) {
 }
 
 
-/* One challenge for the whole is_bin argument, absorbing every first message
- * of both halves. Deriving a single challenge is what lets the two share one
- * masked opening; with separate challenges each would need its own. */
-static void bin_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
-		lnpbinproof_t *pi) {
-	SHA256Context sha;
-	uint8_t hash[SHA256HashSize];
-	uint32_t buf;
-	nmod_poly_t c;
 
-	SHA256Reset(&sha);
-	for (int i = 0; i < HEIGHT; i++) {
-		for (int j = 0; j < LNP_WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->B1[i][j][k]);
-			}
-		}
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int j = 0; j < LNP_WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->b2[i][j][k]);
-			}
-		}
-	}
-	for (int k = 0; k < NCRT; k++) {
-		for (int i = 0; i < HEIGHT; i++) {
-			hash_poly(&sha, com->c1[i][k]);
-			hash_poly(&sha, pi->w[i][k]);
-		}
-		for (int i = 0; i < SLOTS; i++) {
-			hash_poly(&sha, com->c2[i][k]);
-		}
-		hash_poly(&sha, pi->t[k]);
-		for (int i = 0; i < LNP_LAMBDA; i++) {
-			hash_poly(&sha, pi->h[i][k]);
-			hash_poly(&sha, pi->v[i][k]);
-		}
-	}
-	SHA256Input(&sha, (const uint8_t *)pi->zp, PROJ * sizeof(ulong));
-	SHA256Result(&sha, hash);
 
-	nmod_poly_init(c, MODP);
-	fastrandombytes_setseed(hash);
-	nmod_poly_fit_length(c, DEGREE);
-	for (int i = 0; i < NONZERO; i++) {
-		fastrandombytes((unsigned char *)&buf, sizeof(buf));
-		buf = buf % DEGREE;
-		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
-			buf = buf % DEGREE;
+
+
+
+void lnp_binctx_init(lnpbinctx_t *ctx) {
+	for (int j = 0; j < LNP_LAMBDA; j++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(ctx->P[j][k], MODP);
+			nmod_poly_init(ctx->M[j][k], MODP);
 		}
-		nmod_poly_set_coeff_ui(c, buf, 1);
 	}
-	pcrt_poly_reduce(d[0], c, 0);
-	pcrt_poly_reduce(d[1], c, 1);
-	nmod_poly_clear(c);
+}
+
+void lnp_binctx_free(lnpbinctx_t *ctx) {
+	for (int j = 0; j < LNP_LAMBDA; j++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(ctx->P[j][k]);
+			nmod_poly_clear(ctx->M[j][k]);
+		}
+	}
 }
 
 void lnp_binproof_init(lnpbinproof_t *pi) {
-	for (int i = 0; i < HEIGHT; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(pi->w[i][k], MODP);
-		}
-	}
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_init(pi->t[k], MODP);
 	}
@@ -995,19 +954,9 @@ void lnp_binproof_init(lnpbinproof_t *pi) {
 			nmod_poly_init(pi->v[i][k], MODP);
 		}
 	}
-	for (int i = 0; i < LNP_WIDTH; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(pi->z[i][k], MODP);
-		}
-	}
 }
 
 void lnp_binproof_free(lnpbinproof_t *pi) {
-	for (int i = 0; i < HEIGHT; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(pi->w[i][k]);
-		}
-	}
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_clear(pi->t[k]);
 	}
@@ -1017,89 +966,40 @@ void lnp_binproof_free(lnpbinproof_t *pi) {
 			nmod_poly_clear(pi->v[i][k]);
 		}
 	}
-	for (int i = 0; i < LNP_WIDTH; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(pi->z[i][k]);
-		}
-	}
 }
 
-/*
- * The whole is_bin argument under one opening.
- *
- * The product relation and the constant-coefficient-with-norm-bound half both
- * open the same commitment under the same randomness, so running them as two
- * proofs meant masking that randomness twice, sending two Ajtai first messages
- * and two responses, and paying rejection sampling twice. Here one mask y
- * serves both: each half contributes its own first messages, a single
- * challenge is derived over all of them, and a single z = y + c r answers
- * both.
- *
- * The ordering inside the loop is forced. The product relation writes the
- * garbage slots of the commitment, and the projection matrix is seeded from
- * the whole commitment, so the garbage has to be in place before the
- * projection is computed.
- */
-int lnp_bin_prover(lnpbinproof_t *pi, lnpcom_t *com, pcrt_poly_t s,
-		pcrt_poly_t f, nmod_poly_t w, pcrt_poly_t g[LNP_LAMBDA],
-		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]) {
-	pcrt_poly_t y[LNP_WIDTH], cr[LNP_WIDTH], b[LNP_WIDTH], vq[SLOTS];
-	pcrt_poly_t d, g1, g2, sv0, ss, one, zc, wc;
-	pcrt_poly_t P[LNP_LAMBDA], M[LNP_LAMBDA];
-	nmod_poly_t tmp, sc;
+void lnp_bin_public(lnpbinctx_t *ctx, lnpbinproof_t *pi, lnpcom_t *com,
+		lnpkey_t *key) {
 	uint8_t seed[SHA256HashSize];
-	ulong (*mu)[PROJ], *rs, Z[LNP_LAMBDA], nu[LNP_LAMBDA];
-	int rej, ok = 1;
-	const slong minus1 = 2 * DEGREE - 1;
-	uint64_t sigma_sqr = 11 * NONZERO * BETA;
+	ulong (*mu)[PROJ] = (ulong (*)[PROJ]) flint_malloc((size_t) LNP_LAMBDA *
+			PROJ * sizeof(ulong));
 
-	sigma_sqr *= sigma_sqr * DEGREE * LNP_WIDTH;
-	mu = (ulong (*)[PROJ]) flint_malloc((size_t) LNP_LAMBDA * PROJ *
-			sizeof(ulong));
+	proj_seed(seed, key, com);
+	proj_scalars(mu, ctx->nu, seed, pi->zp);
+	proj_public(ctx->P, ctx->M, ctx->Z, seed, mu, pi->zp);
+	flint_free(mu);
+}
+
+int lnp_bin_setup(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
+		pcrt_poly_t s, pcrt_poly_t f, nmod_poly_t w,
+		pcrt_poly_t g[LNP_LAMBDA], lnpkey_t *key) {
+	nmod_poly_t sc, tmp;
+	pcrt_poly_t zc, wc;
+	uint8_t seed[SHA256HashSize];
+	ulong *rs;
+	int ok = 1;
+
 	rs = (ulong *) flint_malloc(PROJ * sizeof(ulong));
-
-	nmod_poly_init(tmp, MODP);
 	nmod_poly_init(sc, MODP);
-	for (int i = 0; i < LNP_WIDTH; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(y[i][k], MODP);
-			nmod_poly_init(cr[i][k], MODP);
-			nmod_poly_init(b[i][k], MODP);
-		}
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(vq[i][k], MODP);
-		}
-	}
+	nmod_poly_init(tmp, MODP);
 	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_init(d[k], MODP);
-		nmod_poly_init(g1[k], MODP);
-		nmod_poly_init(g2[k], MODP);
-		nmod_poly_init(sv0[k], MODP);
-		nmod_poly_init(ss[k], MODP);
-		nmod_poly_init(one[k], MODP);
 		nmod_poly_init(zc[k], MODP);
 		nmod_poly_init(wc[k], MODP);
 	}
-	for (int j = 0; j < LNP_LAMBDA; j++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(P[j][k], MODP);
-			nmod_poly_init(M[j][k], MODP);
-		}
-	}
-	lnp_ones(one);
-	lnp_auto_crt(ss, s, minus1);
 	pcrt_poly_rec(sc, s);
 	pcrt_poly_reduce(wc[0], w, 0);
 	pcrt_poly_reduce(wc[1], w, 1);
 
-	/* The projection and everything derived from it depend only on the
-	 * commitment, the witness and the masks, none of which the rejection
-	 * sampling below disturbs, so this is computed once rather than on every
-	 * retry. It is also where a rejected projection is detected, and that
-	 * cannot be retried here since its mask is committed: the caller
-	 * recommits and calls again. */
 	proj_seed(seed, key, com);
 	proj_pass(seed, NULL, NULL, sc, rs);
 	for (int i = 0; i < PROJ; i++) {
@@ -1108,120 +1008,120 @@ int lnp_bin_prover(lnpbinproof_t *pi, lnpcom_t *com, pcrt_poly_t s,
 	if (proj_reject(pi->zp, rs)) {
 		ok = 0;
 	}
-	proj_scalars(mu, nu, seed, pi->zp);
-	proj_public(P, M, Z, seed, mu, pi->zp);
+	lnp_bin_public(ctx, pi, com, key);
+
+	/* h_j = g_j + nu_j f + P_j s + sigma(M_j) W - Z_j. */
 	for (int j = 0; j < LNP_LAMBDA; j++) {
-		scalar_crt(zc, Z[j]);
+		scalar_crt(zc, ctx->Z[j]);
 		for (int k = 0; k < NCRT; k++) {
-			pcrt_poly_mulmod(pi->h[j][k], P[j][k], s[k], k);
-			pcrt_poly_mulmod(tmp, M[j][k], wc[k], k);
+			pcrt_poly_mulmod(pi->h[j][k], ctx->P[j][k], s[k], k);
+			pcrt_poly_mulmod(tmp, ctx->M[j][k], wc[k], k);
 			nmod_poly_add(pi->h[j][k], pi->h[j][k], tmp);
-			nmod_poly_scalar_mul_nmod(tmp, f[k], nu[j]);
+			nmod_poly_scalar_mul_nmod(tmp, f[k], ctx->nu[j]);
 			nmod_poly_add(pi->h[j][k], pi->h[j][k], tmp);
 			nmod_poly_add(pi->h[j][k], pi->h[j][k], g[j][k]);
 			nmod_poly_sub(pi->h[j][k], pi->h[j][k], zc[k]);
 		}
 	}
 
-	do {
-		for (int i = 0; i < LNP_WIDTH; i++) {
-			commit_sample_gauss_crt(y[i]);
-		}
-		for (int i = 0; i < HEIGHT; i++) {
-			inner(pi->w[i], key->B1[i], y, LNP_WIDTH);
-		}
-		for (int i = 0; i < SLOTS; i++) {
-			inner(vq[i], key->b2[i], y, LNP_WIDTH);
-		}
-
-		/* --- the product relation's first message. */
-		lnp_auto_crt(sv0, vq[0], minus1);
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_sub(tmp, s[k], one[k]);
-			pcrt_poly_mulmod(g1[k], sv0[k], tmp, k);
-			nmod_poly_neg(g1[k], g1[k]);
-			pcrt_poly_mulmod(tmp, vq[0][k], ss[k], k);
-			nmod_poly_sub(g2[k], vq[1][k], tmp);
-		}
-		lnp_auto_crt(g2, g2, minus1);
-		inner(com->c2[2], key->b2[2], r, LNP_WIDTH);
-		inner(com->c2[3], key->b2[3], r, LNP_WIDTH);
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_add(com->c2[2][k], com->c2[2][k], g1[k]);
-			nmod_poly_add(com->c2[3][k], com->c2[3][k], g2[k]);
-		}
-		lnp_auto_crt(sv0, vq[3], minus1);
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_add(pi->t[k], vq[2][k], sv0[k]);
-		}
-		lnp_auto_crt(sv0, vq[0], minus1);
-		for (int k = 0; k < NCRT; k++) {
-			pcrt_poly_mulmod(tmp, sv0[k], vq[0][k], k);
-			nmod_poly_add(pi->t[k], pi->t[k], tmp);
-		}
-
-		for (int j = 0; j < LNP_LAMBDA; j++) {
-			range_row(b, NULL, key, com, P[j], M[j], nu[j], j);
-			inner(pi->v[j], b, y, LNP_WIDTH);
-		}
-
-		/* --- one challenge over both halves, one response. */
-		bin_hash(d, key, com, pi);
-		for (int i = 0; i < LNP_WIDTH; i++) {
-			for (int k = 0; k < NCRT; k++) {
-				pcrt_poly_mulmod(cr[i][k], d[k], r[i][k], k);
-				nmod_poly_add(pi->z[i][k], y[i][k], cr[i][k]);
-			}
-		}
-		rej = commit_rej_sampling(pi->z, cr, sigma_sqr, LNP_WIDTH);
-	} while (rej);
-
-	flint_free(mu);
 	flint_free(rs);
-	nmod_poly_clear(tmp);
 	nmod_poly_clear(sc);
-	for (int i = 0; i < LNP_WIDTH; i++) {
+	nmod_poly_clear(tmp);
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_clear(zc[k]);
+		nmod_poly_clear(wc[k]);
+	}
+	return ok;
+}
+
+void lnp_bin_first(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
+		pcrt_poly_t s, lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH],
+		pcrt_poly_t y[LNP_WIDTH]) {
+	pcrt_poly_t vq[SLOTS], b[LNP_WIDTH], g1, g2, sv0, ss, one;
+	nmod_poly_t tmp;
+	const slong minus1 = 2 * DEGREE - 1;
+
+	nmod_poly_init(tmp, MODP);
+	for (int i = 0; i < SLOTS; i++) {
 		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(y[i][k]);
-			nmod_poly_clear(cr[i][k]);
-			nmod_poly_clear(b[i][k]);
+			nmod_poly_init(vq[i][k], MODP);
 		}
 	}
+	for (int i = 0; i < LNP_WIDTH; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(b[i][k], MODP);
+		}
+	}
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_init(g1[k], MODP);
+		nmod_poly_init(g2[k], MODP);
+		nmod_poly_init(sv0[k], MODP);
+		nmod_poly_init(ss[k], MODP);
+		nmod_poly_init(one[k], MODP);
+		nmod_poly_zero(pi->t[k]);
+	}
+	lnp_ones(one);
+	lnp_auto_crt(ss, s, minus1);
+
+	for (int i = 0; i < SLOTS; i++) {
+		inner(vq[i], key->b2[i], y, LNP_WIDTH);
+	}
+	lnp_auto_crt(sv0, vq[0], minus1);
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_sub(tmp, s[k], one[k]);
+		pcrt_poly_mulmod(g1[k], sv0[k], tmp, k);
+		nmod_poly_neg(g1[k], g1[k]);
+		pcrt_poly_mulmod(tmp, vq[0][k], ss[k], k);
+		nmod_poly_sub(g2[k], vq[1][k], tmp);
+	}
+	lnp_auto_crt(g2, g2, minus1);
+	inner(com->c2[2], key->b2[2], r, LNP_WIDTH);
+	inner(com->c2[3], key->b2[3], r, LNP_WIDTH);
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_add(com->c2[2][k], com->c2[2][k], g1[k]);
+		nmod_poly_add(com->c2[3][k], com->c2[3][k], g2[k]);
+	}
+	lnp_auto_crt(sv0, vq[3], minus1);
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_add(pi->t[k], vq[2][k], sv0[k]);
+	}
+	lnp_auto_crt(sv0, vq[0], minus1);
+	for (int k = 0; k < NCRT; k++) {
+		pcrt_poly_mulmod(tmp, sv0[k], vq[0][k], k);
+		nmod_poly_add(pi->t[k], pi->t[k], tmp);
+	}
+	for (int j = 0; j < LNP_LAMBDA; j++) {
+		range_row(b, NULL, key, com, ctx->P[j], ctx->M[j], ctx->nu[j], j);
+		inner(pi->v[j], b, y, LNP_WIDTH);
+	}
+
+	nmod_poly_clear(tmp);
 	for (int i = 0; i < SLOTS; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(vq[i][k]);
 		}
 	}
+	for (int i = 0; i < LNP_WIDTH; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(b[i][k]);
+		}
+	}
 	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_clear(d[k]);
 		nmod_poly_clear(g1[k]);
 		nmod_poly_clear(g2[k]);
 		nmod_poly_clear(sv0[k]);
 		nmod_poly_clear(ss[k]);
 		nmod_poly_clear(one[k]);
-		nmod_poly_clear(zc[k]);
-		nmod_poly_clear(wc[k]);
 	}
-	for (int j = 0; j < LNP_LAMBDA; j++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(P[j][k]);
-			nmod_poly_clear(M[j][k]);
-		}
-	}
-	return ok;
 }
 
-int lnp_bin_verifier(lnpbinproof_t *pi, lnpcom_t *com, lnpkey_t *key) {
-	pcrt_poly_t d, sd, u[SLOTS], su, lhs, rhs, one, t, zc, b[LNP_WIDTH];
-	pcrt_poly_t P[LNP_LAMBDA], M[LNP_LAMBDA];
+int lnp_bin_check(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
+		lnpkey_t *key, pcrt_poly_t d, pcrt_poly_t z[LNP_WIDTH]) {
+	pcrt_poly_t sd, u[SLOTS], su, lhs, rhs, one, t, zc, b[LNP_WIDTH];
 	nmod_poly_t tmp, rec;
-	uint8_t seed[SHA256HashSize];
-	ulong (*mu)[PROJ], Z[LNP_LAMBDA], nu[LNP_LAMBDA];
 	int result = 1;
 	const slong minus1 = 2 * DEGREE - 1;
 
-	mu = (ulong (*)[PROJ]) flint_malloc((size_t) LNP_LAMBDA * PROJ *
-			sizeof(ulong));
 	nmod_poly_init(tmp, MODP);
 	nmod_poly_init(rec, MODP);
 	for (int i = 0; i < LNP_WIDTH; i++) {
@@ -1230,7 +1130,6 @@ int lnp_bin_verifier(lnpbinproof_t *pi, lnpcom_t *com, lnpkey_t *key) {
 		}
 	}
 	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_init(d[k], MODP);
 		nmod_poly_init(sd[k], MODP);
 		nmod_poly_init(su[k], MODP);
 		nmod_poly_init(lhs[k], MODP);
@@ -1244,41 +1143,18 @@ int lnp_bin_verifier(lnpbinproof_t *pi, lnpcom_t *com, lnpkey_t *key) {
 			nmod_poly_init(u[i][k], MODP);
 		}
 	}
-	for (int j = 0; j < LNP_LAMBDA; j++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(P[j][k], MODP);
-			nmod_poly_init(M[j][k], MODP);
-		}
-	}
 	lnp_ones(one);
-
-	/* The published projection must be short: this is the norm bound the whole
-	 * argument is conditional on. */
-	result &= proj_norm2_leq(pi->zp, (uint64_t) 4 * PROJ * SIGMA_P * SIGMA_P);
-
-	proj_seed(seed, key, com);
-	proj_scalars(mu, nu, seed, pi->zp);
-	proj_public(P, M, Z, seed, mu, pi->zp);
-	bin_hash(d, key, com, pi);
 	lnp_auto_crt(sd, d, minus1);
 
-	for (int i = 0; i < LNP_WIDTH; i++) {
-		pcrt_poly_rec(rec, pi->z[i]);
-		result &= commit_norm2_leq(rec,
-				(uint64_t) 4 * DEGREE * SIGMA_C * SIGMA_C);
-	}
-	for (int i = 0; i < HEIGHT; i++) {
-		inner(lhs, key->B1[i], pi->z, LNP_WIDTH);
-		for (int k = 0; k < NCRT; k++) {
-			pcrt_poly_mulmod(tmp, d[k], com->c1[i][k], k);
-			nmod_poly_add(rhs[k], pi->w[i][k], tmp);
-			result &= nmod_poly_equal(lhs[k], rhs[k]);
-		}
+	/* The published projection must be short. */
+	result &= proj_norm2_leq(pi->zp, (uint64_t) 4 * PROJ * SIGMA_P * SIGMA_P);
+	for (int i = 0; i < LNP_LAMBDA; i++) {
+		pcrt_poly_rec(rec, pi->h[i]);
+		result &= (nmod_poly_get_coeff_ui(rec, 0) == 0);
 	}
 
-	/* The product relation, against the shared opening. */
 	for (int i = 0; i < SLOTS; i++) {
-		inner(u[i], key->b2[i], pi->z, LNP_WIDTH);
+		inner(u[i], key->b2[i], z, LNP_WIDTH);
 		for (int k = 0; k < NCRT; k++) {
 			pcrt_poly_mulmod(tmp, d[k], com->c2[i][k], k);
 			nmod_poly_sub(u[i][k], u[i][k], tmp);
@@ -1299,16 +1175,10 @@ int lnp_bin_verifier(lnpbinproof_t *pi, lnpcom_t *com, lnpkey_t *key) {
 		result &= nmod_poly_equal(lhs[k], pi->t[k]);
 	}
 
-	/* The constant coefficient and the projection consistency, against the
-	 * same opening. */
-	for (int i = 0; i < LNP_LAMBDA; i++) {
-		pcrt_poly_rec(rec, pi->h[i]);
-		result &= (nmod_poly_get_coeff_ui(rec, 0) == 0);
-	}
 	for (int j = 0; j < LNP_LAMBDA; j++) {
-		range_row(b, t, key, com, P[j], M[j], nu[j], j);
-		inner(lhs, b, pi->z, LNP_WIDTH);
-		scalar_crt(zc, Z[j]);
+		range_row(b, t, key, com, ctx->P[j], ctx->M[j], ctx->nu[j], j);
+		inner(lhs, b, z, LNP_WIDTH);
+		scalar_crt(zc, ctx->Z[j]);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_sub(t[k], t[k], zc[k]);
 			nmod_poly_sub(t[k], t[k], pi->h[j][k]);
@@ -1318,7 +1188,6 @@ int lnp_bin_verifier(lnpbinproof_t *pi, lnpcom_t *com, lnpkey_t *key) {
 		}
 	}
 
-	flint_free(mu);
 	nmod_poly_clear(tmp);
 	nmod_poly_clear(rec);
 	for (int i = 0; i < LNP_WIDTH; i++) {
@@ -1327,7 +1196,6 @@ int lnp_bin_verifier(lnpbinproof_t *pi, lnpcom_t *com, lnpkey_t *key) {
 		}
 	}
 	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_clear(d[k]);
 		nmod_poly_clear(sd[k]);
 		nmod_poly_clear(su[k]);
 		nmod_poly_clear(lhs[k]);
@@ -1339,12 +1207,6 @@ int lnp_bin_verifier(lnpbinproof_t *pi, lnpcom_t *com, lnpkey_t *key) {
 	for (int i = 0; i < SLOTS; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(u[i][k]);
-		}
-	}
-	for (int j = 0; j < LNP_LAMBDA; j++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(P[j][k]);
-			nmod_poly_clear(M[j][k]);
 		}
 	}
 	return result;
@@ -1414,6 +1276,167 @@ static void set_ct(pcrt_poly_t out, flint_rand_t rng, ulong c0) {
 }
 
 
+/* Drive the phases the way the shuffle does: setup, mask, first messages, one
+ * challenge over all of them, one response. Tests go through this so that they
+ * exercise the same path as the real caller. */
+static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
+		lnpbinproof_t *pi, pcrt_poly_t ajtai[HEIGHT]) {
+	SHA256Context sha;
+	uint8_t hash[SHA256HashSize];
+	uint32_t buf;
+	nmod_poly_t c;
+
+	SHA256Reset(&sha);
+	for (int i = 0; i < SLOTS; i++) {
+		for (int j = 0; j < LNP_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				hash_poly(&sha, key->b2[i][j][k]);
+			}
+		}
+	}
+	for (int k = 0; k < NCRT; k++) {
+		for (int i = 0; i < HEIGHT; i++) {
+			hash_poly(&sha, com->c1[i][k]);
+			hash_poly(&sha, ajtai[i][k]);
+		}
+		for (int i = 0; i < SLOTS; i++) {
+			hash_poly(&sha, com->c2[i][k]);
+		}
+		hash_poly(&sha, pi->t[k]);
+		for (int i = 0; i < LNP_LAMBDA; i++) {
+			hash_poly(&sha, pi->h[i][k]);
+			hash_poly(&sha, pi->v[i][k]);
+		}
+	}
+	SHA256Input(&sha, (const uint8_t *)pi->zp, PROJ * sizeof(ulong));
+	SHA256Result(&sha, hash);
+
+	nmod_poly_init(c, MODP);
+	fastrandombytes_setseed(hash);
+	nmod_poly_fit_length(c, DEGREE);
+	for (int i = 0; i < NONZERO; i++) {
+		fastrandombytes((unsigned char *)&buf, sizeof(buf));
+		buf = buf % DEGREE;
+		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
+			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			buf = buf % DEGREE;
+		}
+		nmod_poly_set_coeff_ui(c, buf, 1);
+	}
+	pcrt_poly_reduce(d[0], c, 0);
+	pcrt_poly_reduce(d[1], c, 1);
+	nmod_poly_clear(c);
+}
+
+static pcrt_poly_t tst_z[LNP_WIDTH], tst_ajtai[HEIGHT];
+static int tst_ready = 0;
+
+static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
+		pcrt_poly_t s, pcrt_poly_t f, nmod_poly_t w, pcrt_poly_t g[LNP_LAMBDA],
+		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]) {
+	pcrt_poly_t y[LNP_WIDTH], cr[LNP_WIDTH], d;
+	int rej, ok;
+	uint64_t sigma_sqr = 11 * NONZERO * BETA;
+
+	sigma_sqr *= sigma_sqr * DEGREE * LNP_WIDTH;
+	if (!tst_ready) {
+		for (int i = 0; i < LNP_WIDTH; i++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_init(tst_z[i][k], MODP);
+			}
+		}
+		for (int i = 0; i < HEIGHT; i++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_init(tst_ajtai[i][k], MODP);
+			}
+		}
+		tst_ready = 1;
+	}
+	for (int i = 0; i < LNP_WIDTH; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(y[i][k], MODP);
+			nmod_poly_init(cr[i][k], MODP);
+		}
+	}
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_init(d[k], MODP);
+	}
+
+	ok = lnp_bin_setup(pi, ctx, com, s, f, w, g, key);
+	do {
+		for (int i = 0; i < LNP_WIDTH; i++) {
+			commit_sample_gauss_crt(y[i]);
+		}
+		lnp_bin_first(pi, ctx, com, s, key, r, y);
+		for (int i = 0; i < HEIGHT; i++) {
+			inner(tst_ajtai[i], key->B1[i], y, LNP_WIDTH);
+		}
+		bin_local_hash(d, key, com, pi, tst_ajtai);
+		for (int i = 0; i < LNP_WIDTH; i++) {
+			for (int k = 0; k < NCRT; k++) {
+				pcrt_poly_mulmod(cr[i][k], d[k], r[i][k], k);
+				nmod_poly_add(tst_z[i][k], y[i][k], cr[i][k]);
+			}
+		}
+		rej = commit_rej_sampling(tst_z, cr, sigma_sqr, LNP_WIDTH);
+	} while (rej);
+
+	for (int i = 0; i < LNP_WIDTH; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(y[i][k]);
+			nmod_poly_clear(cr[i][k]);
+		}
+	}
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_clear(d[k]);
+	}
+	return ok;
+}
+
+static int bin_verify_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
+		lnpkey_t *key) {
+	pcrt_poly_t d;
+	nmod_poly_t rec;
+	int result = 1;
+
+	nmod_poly_init(rec, MODP);
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_init(d[k], MODP);
+	}
+	lnp_bin_public(ctx, pi, com, key);
+	bin_local_hash(d, key, com, pi, tst_ajtai);
+	for (int i = 0; i < LNP_WIDTH; i++) {
+		pcrt_poly_rec(rec, tst_z[i]);
+		result &= commit_norm2_leq(rec,
+				(uint64_t) 4 * DEGREE * SIGMA_C * SIGMA_C);
+	}
+	for (int i = 0; i < HEIGHT; i++) {
+		pcrt_poly_t lhs, rhs;
+		nmod_poly_t tmp;
+
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(lhs[k], MODP);
+			nmod_poly_init(rhs[k], MODP);
+		}
+		nmod_poly_init(tmp, MODP);
+		inner(lhs, key->B1[i], tst_z, LNP_WIDTH);
+		for (int k = 0; k < NCRT; k++) {
+			pcrt_poly_mulmod(tmp, d[k], com->c1[i][k], k);
+			nmod_poly_add(rhs[k], tst_ajtai[i][k], tmp);
+			result &= nmod_poly_equal(lhs[k], rhs[k]);
+			nmod_poly_clear(lhs[k]);
+			nmod_poly_clear(rhs[k]);
+		}
+		nmod_poly_clear(tmp);
+	}
+	result &= lnp_bin_check(pi, ctx, com, key, d, tst_z);
+	nmod_poly_clear(rec);
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_clear(d[k]);
+	}
+	return result;
+}
+
 /* The two halves composed: the product relation says slot 1 holds
  * sigma_{-1}(s) (s - ones), and the constant-coefficient proof says its
  * constant coefficient is zero. Together they say that every coefficient of s
@@ -1422,6 +1445,7 @@ static int isbin_full(lnpkey_t *key, flint_rand_t rng, nmod_poly_t s) {
 	lnpcom_t com;
 	lnpproof_t pi;
 	lnpbinproof_t pc;
+	lnpbinctx_t ctx_pc;
 	nmod_poly_t wraw;
 	pcrt_poly_t wc;
 	pcrt_poly_t r[LNP_WIDTH], m[SLOTS], g[LNP_LAMBDA];
@@ -1430,6 +1454,7 @@ static int isbin_full(lnpkey_t *key, flint_rand_t rng, nmod_poly_t s) {
 	lnp_com_init(&com);
 	lnp_proof_init(&pi);
 	lnp_binproof_init(&pc);
+	lnp_binctx_init(&ctx_pc);
 	nmod_poly_init(wraw, MODP);
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_init(wc[k], MODP);
@@ -1465,8 +1490,8 @@ static int isbin_full(lnpkey_t *key, flint_rand_t rng, nmod_poly_t s) {
 		nmod_poly_set(m[SLOT_W][k], wc[k]);
 	}
 	lnp_commit(&com, m, key, r);
-	lnp_bin_prover(&pc, &com, m[0], m[SLOT_F], wraw, g, key, r);
-	result = lnp_bin_verifier(&pc, &com, key);
+	bin_prove_local(&pc, &ctx_pc, &com, m[0], m[SLOT_F], wraw, g, key, r);
+	result = bin_verify_local(&pc, &ctx_pc, &com, key);
 
 	for (int i = 0; i < LNP_WIDTH; i++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -1486,6 +1511,7 @@ static int isbin_full(lnpkey_t *key, flint_rand_t rng, nmod_poly_t s) {
 	lnp_com_free(&com);
 	lnp_proof_free(&pi);
 	lnp_binproof_free(&pc);
+	lnp_binctx_free(&ctx_pc);
 	nmod_poly_clear(wraw);
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_clear(wc[k]);
@@ -1712,6 +1738,7 @@ static void test_isbin(flint_rand_t rng) {
 	lnpkey_t key;
 	lnpcom_t com;
 	lnpbinproof_t pi;
+	lnpbinctx_t ctx_pi;
 	pcrt_poly_t r[LNP_WIDTH], m[SLOTS], g[LNP_LAMBDA], wc;
 	nmod_poly_t wraw;
 	nmod_poly_t s;
@@ -1720,6 +1747,7 @@ static void test_isbin(flint_rand_t rng) {
 	lnp_keyinit(&key);
 	lnp_com_init(&com);
 	lnp_binproof_init(&pi);
+	lnp_binctx_init(&ctx_pi);
 	nmod_poly_init(wraw, MODP);
 	lnp_keygen(&key, rng);
 	nmod_poly_init(s, MODP);
@@ -1793,8 +1821,8 @@ static void test_isbin(flint_rand_t rng) {
 			}
 		}
 		lnp_commit(&com, m, &key, r);
-		lnp_bin_prover(&pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r);
-		TEST_ASSERT(lnp_bin_verifier(&pi, &com, &key) == 1, end);
+		bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r);
+		TEST_ASSERT(bin_verify_local(&pi, &ctx_pi, &com, &key) == 1, end);
 	} TEST_END;
 
 	TEST_BEGIN("is_bin product proof rejects a wrong product") {
@@ -1822,8 +1850,8 @@ static void test_isbin(flint_rand_t rng) {
 			}
 		}
 		lnp_commit(&com, m, &key, r);
-		lnp_bin_prover(&pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r);
-		TEST_ASSERT(lnp_bin_verifier(&pi, &com, &key) == 0, end);
+		bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r);
+		TEST_ASSERT(bin_verify_local(&pi, &ctx_pi, &com, &key) == 0, end);
 	} TEST_END;
 
   end:
@@ -1849,6 +1877,7 @@ static void test_isbin(flint_rand_t rng) {
 	lnp_keyfree(&key);
 	lnp_com_free(&com);
 	lnp_binproof_free(&pi);
+	lnp_binctx_free(&ctx_pi);
 	nmod_poly_clear(wraw);
 }
 
@@ -1856,6 +1885,7 @@ static void test_adaptive(flint_rand_t rng) {
 	lnpkey_t key;
 	lnpcom_t com;
 	lnpbinproof_t pi;
+	lnpbinctx_t ctx_pi;
 	nmod_poly_t wraw;
 	pcrt_poly_t wc;
 	pcrt_poly_t r[LNP_WIDTH], m[SLOTS], g[LNP_LAMBDA];
@@ -1863,6 +1893,7 @@ static void test_adaptive(flint_rand_t rng) {
 	lnp_keyinit(&key);
 	lnp_com_init(&com);
 	lnp_binproof_init(&pi);
+	lnp_binctx_init(&ctx_pi);
 	nmod_poly_init(wraw, MODP);
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_init(wc[k], MODP);
@@ -1917,7 +1948,7 @@ static void test_adaptive(flint_rand_t rng) {
 			}
 		}
 		lnp_commit(&com, m, &key, r);
-		lnp_bin_prover(&pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r);
+		bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r);
 		/* The cheating prover reads the scalars it would face and rewrites
 		 * each mask so that nu_j * ct(f) is cancelled. */
 		lnp_scalars_for_test(nu_seen, &key, &com, pi.zp);
@@ -1934,10 +1965,10 @@ static void test_adaptive(flint_rand_t rng) {
 		/* Committing the adapted masks changes the commitment, so the scalars
 		 * it now faces are not the ones it prepared for. */
 		lnp_commit(&com, m, &key, r);
-		lnp_bin_prover(&pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r);
+		bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r);
 		nmod_poly_clear(tt);
 		nmod_poly_clear(tw);
-		TEST_ASSERT(lnp_bin_verifier(&pi, &com, &key) == 0, end);
+		TEST_ASSERT(bin_verify_local(&pi, &ctx_pi, &com, &key) == 0, end);
 	} TEST_END;
 
 
@@ -1960,6 +1991,7 @@ static void test_adaptive(flint_rand_t rng) {
 	lnp_keyfree(&key);
 	lnp_com_free(&com);
 	lnp_binproof_free(&pi);
+	lnp_binctx_free(&ctx_pi);
 	nmod_poly_clear(wraw);
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_clear(wc[k]);
@@ -2022,6 +2054,7 @@ static void test_range(flint_rand_t rng) {
 	lnpkey_t key;
 	lnpcom_t com;
 	lnpbinproof_t pi;
+	lnpbinctx_t ctx_pi;
 	pcrt_poly_t r[LNP_WIDTH], m[SLOTS], g[LNP_LAMBDA], w;
 	nmod_poly_t s, wraw;
 	uint64_t buf;
@@ -2030,6 +2063,7 @@ static void test_range(flint_rand_t rng) {
 	lnp_keyinit(&key);
 	lnp_com_init(&com);
 	lnp_binproof_init(&pi);
+	lnp_binctx_init(&ctx_pi);
 	lnp_keygen(&key, rng);
 	nmod_poly_init(s, MODP);
 	nmod_poly_init(wraw, MODP);
@@ -2088,12 +2122,12 @@ static void test_range(flint_rand_t rng) {
 				}
 			}
 			lnp_commit(&com, m, &key, r);
-			if (lnp_bin_prover(&pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r)) {
+			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r)) {
 				break;
 			}
 		}
 		TEST_ASSERT(tries < 64, end);
-		TEST_ASSERT(lnp_bin_verifier(&pi, &com, &key) == 1, end);
+		TEST_ASSERT(bin_verify_local(&pi, &ctx_pi, &com, &key) == 1, end);
 	} TEST_END;
 
 	TEST_ONCE("range proof rejects a witness that is far too large") {
@@ -2124,8 +2158,8 @@ static void test_range(flint_rand_t rng) {
 			}
 		}
 		lnp_commit(&com, m, &key, r);
-		lnp_bin_prover(&pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r);
-		TEST_ASSERT(lnp_bin_verifier(&pi, &com, &key) == 0, end);
+		bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r);
+		TEST_ASSERT(bin_verify_local(&pi, &ctx_pi, &com, &key) == 0, end);
 	} TEST_END;
 
 	TEST_ONCE("range proof rejects a tampered projection") {
@@ -2159,12 +2193,12 @@ static void test_range(flint_rand_t rng) {
 				}
 			}
 			lnp_commit(&com, m, &key, r);
-			if (lnp_bin_prover(&pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r)) {
+			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r)) {
 				break;
 			}
 		}
 		pi.zp[5] = nmod_add(pi.zp[5], 1, s->mod);
-		TEST_ASSERT(lnp_bin_verifier(&pi, &com, &key) == 0, end);
+		TEST_ASSERT(bin_verify_local(&pi, &ctx_pi, &com, &key) == 0, end);
 	} TEST_END;
 
   end:
@@ -2191,6 +2225,7 @@ static void test_range(flint_rand_t rng) {
 	lnp_keyfree(&key);
 	lnp_com_free(&com);
 	lnp_binproof_free(&pi);
+	lnp_binctx_free(&ctx_pi);
 }
 
 int main(int argc, char *argv[]) {
