@@ -221,8 +221,14 @@ int commit_norm2_leq(nmod_poly_t r, uint64_t bound) {
 		if (coeff < 0) {
 			coeff = -coeff;
 		}
-		/* Bail out before squaring could overflow the accumulator. */
-		if ((uint64_t) coeff > bound) {
+		/* Bail out before squaring could overflow the accumulator. Comparing
+		 * against bound alone is not enough: bound is a squared norm, so a
+		 * coefficient below it can still square past 2^64 and wrap, which
+		 * would let an oversized response pass this check. Dividing decides
+		 * the same question without overflowing. Wrapping needs a centred
+		 * coefficient of 2^32, so at the current MODP this is unreachable,
+		 * with about one bit to spare. */
+		if (coeff != 0 && (uint64_t) coeff > bound / (uint64_t) coeff) {
 			return 0;
 		}
 		norm += (uint64_t) coeff * coeff;
@@ -301,7 +307,12 @@ void commit_keyfree(commitkey_t *key) {
 // Sample a short polynomial.
 void commit_sample_short(nmod_poly_t r) {
 	uint64_t buf;
-	uint32_t coeff;
+	/* This holds MODP - 1 + d for d in {0, 1, 2}, so it has to be as wide as
+	 * the modulus. As a uint32_t it is correct at the current MODP but only
+	 * just: the moment MODP passes 2^32 it truncates, the randomness stops
+	 * being ternary, and rejection sampling then never accepts, so the prover
+	 * hangs rather than failing. */
+	ulong coeff;
 	int i, j, s;
 
 	nmod_poly_zero(r);
