@@ -167,6 +167,15 @@ void commit_sample_gauss(nmod_poly_t r);
 void commit_sample_gauss_crt(pcrt_poly_t r);
 
 /**
+ * Sample a random polynomial following a narrow Gaussian distribution of
+ * standard deviation SIGMA_S, in CRT representation. Used to mask committed
+ * messages that must be proven short.
+ *
+ * @param[out] r		- the polynomial to sample.
+ */
+void commit_sample_gauss_small_crt(pcrt_poly_t r);
+
+/**
  * Commit to a message and randomness using a key pair.
  *
  * @param[out] com 		- the resulting commitment.

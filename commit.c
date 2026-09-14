@@ -290,6 +290,24 @@ void commit_sample_gauss_crt(nmod_poly_t r[2]) {
 	nmod_poly_clear(t);
 }
 
+// Sample a polynomial according to a narrow Gaussian distribution in CRT rep.
+void commit_sample_gauss_small_crt(nmod_poly_t r[2]) {
+	nmod_poly_t t;
+	int64_t coeff;
+
+	nmod_poly_init(t, MODP);
+	for (int i = 0; i < DEGREE; i++) {
+		coeff = discrete_gaussian_small(0.0);
+		if (coeff < 0)
+			coeff += MODP;
+		nmod_poly_set_coeff_ui(t, i, coeff);
+	}
+	nmod_poly_rem(r[0], t, irred[0]);
+	nmod_poly_rem(r[1], t, irred[1]);
+
+	nmod_poly_clear(t);
+}
+
 // Commit to a message.
 void commit_doit(commit_t *com, nmod_poly_t m, commitkey_t *key,
 		pcrt_poly_t r[WIDTH]) {
