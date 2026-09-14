@@ -21,8 +21,11 @@
 /* Constant definitions                                                       */
 /*============================================================================*/
 
-/* The dimension of the encryption matrix. */
-#define DIM		2
+/* The dimension of the encryption matrix. This is the MLWE rank of the
+ * encryption scheme and is independent of the commitment width; at the larger
+ * modulus that the range proof forces, rank 2 is only about 75 bits.
+ * DIM = 4 would be stronger but pushes q past 64 bits. */
+#define DIM		3
 /* The dimension of the linear relation matrix. */
 #define LAMBDA	1
 

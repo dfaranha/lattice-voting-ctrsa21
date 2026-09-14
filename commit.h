@@ -26,8 +26,10 @@
 #define NONZERO 36
 /* The \infty-norm bound of certain elements. */
 #define BETA 	1
-/* Width k of the comming matrix. */
-#define WIDTH 	3
+/* Width k of the commitment matrix. The hiding property is MLWE of rank
+ * k - n - 1, which at k = 3 is rank 1 and only 49.6 bits at this modulus.
+ * k = 4 gives rank 2. */
+#define WIDTH 	4
 /* Height of the commitment matrix. */
 #define HEIGHT 	1
 
@@ -130,7 +132,8 @@ uint64_t commit_norm_inf(nmod_poly_t r);
 
 /* Test whether the squared l2-norm of a polynomial is at most a bound.
  *
- * Unlike commit_norm2_sqr this cannot overflow, so it is safe on input chosen
+ * Unlike commit_norm2_sqr this cannot overflow for any modulus, so it is safe
+ * on input chosen
  * by a malicious party.
  *
  * @param[in] r			- the polynomial to test.

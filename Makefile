@@ -45,6 +45,12 @@ gaussian_s.o: gaussian_ct.cpp ${INCLUDES}
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_S \
 		-Ddiscrete_gaussian=discrete_gaussian_small -c gaussian_ct.cpp -o $@
 
+# The approximate range proof masks a 256-coordinate projection, which wants a
+# width between the two above.
+gaussian_p.o: gaussian_ct.cpp ${INCLUDES}
+	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_P \
+		-Ddiscrete_gaussian=discrete_gaussian_proj -c gaussian_ct.cpp -o $@
+
 encrypt.o: encrypt.c encrypt.h ${INCLUDES}
 	${CPP} ${CFLAGS} -c encrypt.c -o $@
 
@@ -60,8 +66,8 @@ vericrypt: vericrypt.c encrypt.o ${TEST} ${BENCH} ${INCLUDES} gaussian_e.o
 shuffle: shuffle.c commit.c commit.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
 	${CPP} ${CFLAGS} commit.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
-lnp: lnp.c lnp.h commit.c commit.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
-	${CPP} ${CFLAGS} commit.c lnp.c sha224-256.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
+lnp: lnp.c lnp.h commit.c commit.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_p.o
+	${CPP} ${CFLAGS} commit.c lnp.c sha224-256.c gaussian_c.o gaussian_s.o gaussian_p.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
 clean:
 	rm -f *.o commit encrypt vericrypt shuffle lnp

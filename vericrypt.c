@@ -12,7 +12,9 @@
 /*============================================================================*/
 
 // Dimension of the message space in verifiable encryption.
-#define VECTOR	3
+/* Dimension kappa of the encryption message space: the commitment randomness
+ * being encrypted is WIDTH ring elements long. */
+#define VECTOR	WIDTH
 
 /* Type that represents a verifiable encryption ciphertext. */
 typedef struct _veritext_t {

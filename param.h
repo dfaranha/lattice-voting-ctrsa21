@@ -31,8 +31,12 @@
 /* Constant definitions                                                       */
 /*============================================================================*/
 
-/* Modulus p defining the cyclotomic ring for the commitment scheme. */
-#define MODP 	3906450253
+/* Modulus p defining the cyclotomic ring for the commitment scheme. Prime and
+ * congruent to 5 mod 8, so that (x^DEGREE + 1) splits into exactly NCRT = 2
+ * factors as Lemma 1 requires. Sized so that the approximate range proof can
+ * certify a bound under sqrt(p/2); see LNP-PARAMS.md. Changing it requires new
+ * CRT constants P0 and P1 in commit.c, and a new Q in encrypt.c. */
+#define MODP 	1099511627917
 /* Degree of the polynomial defining the cyclotomic ring for the commitment scheme. */
 #ifndef DEGREE
 #define DEGREE 	1024
@@ -55,6 +59,10 @@
  * remains below sqrt(MODP) ~ 62501, the bound under which Lemma 1 guarantees
  * invertibility. */
 #define SIGMA_S 256
+/* Standard deviation of the projection mask in the approximate range proof:
+ * TAU_PROJ * sqrt(PROJ * DEGREE / 2), the width needed to hide a projection of
+ * an honest binary witness. */
+#define SIGMA_P 3258
 // Standard deviation of discrete Gaussian
 #define SIGMA_E	54000
 

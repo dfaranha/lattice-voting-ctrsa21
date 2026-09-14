@@ -30,16 +30,34 @@
 #define LNP_LAMBDA 	4
 
 /* Number of message slots in the multi-slot commitment. Slots 0 to 3 are the
- * is_bin witness, its claimed product and two garbage terms; the remaining
- * LNP_LAMBDA slots hold the masks of the constant-coefficient proof, so that
- * one commitment serves both halves. */
-#define SLOTS 	(4 + LNP_LAMBDA)
+ * is_bin witness, its claimed product and two garbage terms, slot 4 is the
+ * projection mask of the range proof, and the remaining LNP_LAMBDA slots hold
+ * the masks of the constant-coefficient proof, so that one commitment serves
+ * every part of the proof. */
+#define SLOTS 	(5 + LNP_LAMBDA)
+
+/* Number of coordinates the approximate range proof projects onto. The
+ * projection lemma needs 256 of them for a 2^-128 soundness error. */
+#define PROJ 	256
+
+/* Ratio between the projection mask and the value it hides. Lower means a
+ * tighter certified bound but more rejection-sampling repetitions; 9 gives
+ * about 3.8 and leaves the certified bound a factor 1.78 inside the ceiling
+ * that no-wraparound imposes. */
+#define TAU_PROJ 	9
+
+/* Slot holding the witness. */
+#define SLOT_S 	0
 
 /* Slot holding the value whose constant coefficient is proven to be zero. */
 #define SLOT_F 	1
 
+/* Slot holding the projection mask, packed into the first PROJ coefficients
+ * of a ring element. */
+#define SLOT_W 	4
+
 /* First slot holding a constant-coefficient mask. */
-#define SLOT_G 	4
+#define SLOT_G 	5
 
 /* Rank of the MLWE instance that hides the commitment, which is the number of
  * randomness components beyond those consumed by the Ajtai part and by the
@@ -88,6 +106,17 @@ typedef struct _lnpctproof_t {
 	pcrt_poly_t v[LNP_LAMBDA];		/* The masked openings of the relations. */
 	pcrt_poly_t z[LNP_WIDTH];		/* The masked opening. */
 } lnpctproof_t;
+
+/* A proof that the witness is short. The projection z is published as PROJ
+ * residues; the rest is the same shape as the constant-coefficient proof,
+ * whose machinery ties z back to the commitment. */
+typedef struct _lnprangeproof_t {
+	pcrt_poly_t w[HEIGHT];			/* Ajtai part of the first message. */
+	ulong z[PROJ];					/* The masked projection. */
+	pcrt_poly_t h[LNP_LAMBDA];		/* The aggregated values. */
+	pcrt_poly_t v[LNP_LAMBDA];		/* The masked openings of the relations. */
+	pcrt_poly_t zo[LNP_WIDTH];		/* The masked opening. */
+} lnprangeproof_t;
 
 /*============================================================================*/
 /* Function prototypes                                                        */
@@ -261,5 +290,49 @@ int lnp_ct_verifier(lnpctproof_t *pi, lnpcom_t *com, lnpkey_t *key);
  */
 void lnp_ct_scalars_for_test(ulong mu[LNP_LAMBDA], lnpkey_t *key,
 		lnpcom_t *com);
+
+/**
+ * Sample the projection mask: a ring element whose first PROJ coefficients are
+ * Gaussian of width TAU_PROJ * sqrt(PROJ * DEGREE / 2) and whose remaining
+ * coefficients are zero.
+ *
+ * @param[out] w			- the mask, in CRT representation.
+ * @param[out] raw			- the same mask in coefficient representation.
+ */
+void lnp_sample_proj_mask(pcrt_poly_t w, nmod_poly_t raw);
+
+/**
+ * Prove that the witness in slot SLOT_S is short, by projecting it onto PROJ
+ * coordinates and bounding the projection.
+ *
+ * This certifies a bound weaker than the honest norm by a constant factor,
+ * which is what an approximate range proof does. It is the hypothesis that the
+ * is_bin argument is conditional on.
+ *
+ * @param[out] pi			- the resulting proof.
+ * @param[in] com			- the commitment.
+ * @param[in] s				- the witness, in CRT representation.
+ * @param[in] w				- the projection mask, in coefficient form.
+ * @param[in] g				- the constant-coefficient masks.
+ * @param[in] key			- the commitment key.
+ * @param[in] r				- the commitment randomness.
+ * @return 1 if a transcript was produced, 0 if rejection sampling gave up.
+ */
+int lnp_range_prover(lnprangeproof_t *pi, lnpcom_t *com, pcrt_poly_t s,
+		nmod_poly_t w, pcrt_poly_t g[LNP_LAMBDA], lnpkey_t *key,
+		pcrt_poly_t r[LNP_WIDTH]);
+
+/**
+ * Verify the proof produced by lnp_range_prover.
+ *
+ * @param[in] pi			- the proof.
+ * @param[in] com			- the commitment.
+ * @param[in] key			- the commitment key.
+ * @return 1 if the proof is accepted, 0 otherwise.
+ */
+int lnp_range_verifier(lnprangeproof_t *pi, lnpcom_t *com, lnpkey_t *key);
+
+void lnp_rangeproof_init(lnprangeproof_t *pi);
+void lnp_rangeproof_free(lnprangeproof_t *pi);
 
 #endif /* LNP_H */

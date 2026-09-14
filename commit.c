@@ -21,9 +21,9 @@
 /*============================================================================*/
 
 /* The first square root of -1. */
-#define	P0		3153606543
+#define	P0		499810066026
 /* The second square root of -1. */
-#define P1		752843710
+#define P1		599701561891
 
 /* Polynomial defining the cyclotomic ring. */
 static nmod_poly_t cyclo_poly;
@@ -171,9 +171,9 @@ void commit_setup() {
 
 	// Initialize two factors of the polynomial for CRT representation.
 	nmod_poly_set_coeff_ui(irred[0], DEGCRT, 1);
-	nmod_poly_set_coeff_ui(irred[0], 0, 3153606543);
+	nmod_poly_set_coeff_ui(irred[0], 0, P0);
 	nmod_poly_set_coeff_ui(irred[1], DEGCRT, 1);
-	nmod_poly_set_coeff_ui(irred[1], 0, 752843710);
+	nmod_poly_set_coeff_ui(irred[1], 0, P1);
 
 	nmod_poly_invmod(inv[0], irred[0], irred[1]);
 	nmod_poly_invmod(inv[1], irred[1], irred[0]);
@@ -278,8 +278,13 @@ int commit_norm2_leq(nmod_poly_t r, uint64_t bound) {
 		if (coeff < 0) {
 			coeff = -coeff;
 		}
-		/* Bail out before squaring could overflow the accumulator. */
-		if ((uint64_t) coeff > bound) {
+		/* Bail out before squaring could overflow the accumulator. Comparing
+		 * against bound alone is not enough: bound is a squared norm, so a
+		 * coefficient below it can still square past 2^64. Dividing instead
+		 * of multiplying decides the same question without overflowing. This
+		 * was unreachable while MODP stayed under 2^32, since no centred
+		 * coefficient could then reach the square root of the accumulator. */
+		if (coeff != 0 && (uint64_t) coeff > bound / (uint64_t) coeff) {
 			return 0;
 		}
 		norm += (uint64_t) coeff * coeff;
@@ -358,7 +363,11 @@ void commit_keyfree(commitkey_t *key) {
 // Sample a short polynomial.
 void commit_sample_short(nmod_poly_t r) {
 	uint64_t buf;
-	uint32_t coeff;
+	/* This holds MODP - 1 + d for d in {0, 1, 2}, so it has to be as wide as
+	 * the modulus. It was uint32_t, which silently truncated as soon as MODP
+	 * grew past 2^32 and turned the ternary randomness into coefficients near
+	 * MODP mod 2^32, at which point rejection sampling never accepts. */
+	ulong coeff;
 	int i, j, s;
 
 	nmod_poly_zero(r);
