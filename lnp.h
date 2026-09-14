@@ -95,8 +95,12 @@ typedef struct _lnpmaskcom_t {
 } lnpmaskcom_t;
 
 /* The aggregated values, one set for the whole batch rather than one per
- * message. */
+ * message, and the Ajtai first message that opens the mask commitment. The
+ * latter is what binds the prover to the masks it committed: without it the
+ * rows below are LNP_LAMBDA equations in MASK_WIDTH unknowns, and a prover
+ * could pick any h with zero constant coefficient and solve for z_mask. */
 typedef struct _lnpbatch_t {
+	pcrt_poly_t w[HEIGHT];
 	pcrt_poly_t h[LNP_LAMBDA];
 	pcrt_poly_t v[LNP_LAMBDA];
 } lnpbatch_t;

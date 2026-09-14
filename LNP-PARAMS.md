@@ -279,8 +279,8 @@ above `2^40`, so a uniform element costs 41 bits per coefficient and not 40.
 | modulus, `WIDTH` | `2^31.86`, 3 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 |
 | prover, per proof | 2.59 s | 16.24 s | 7.16 s | 2.92 s |
 | prover, per message | 104 ms | 649 ms | 286 ms | 117 ms |
-| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.7 KB |
-| proof, 25 messages | 1.56 MB | 8.06 MB | 4.61 MB | 2.92 MB |
+| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB |
+| proof, 25 messages | 1.56 MB | 8.06 MB | 4.61 MB | 2.93 MB |
 | against fix-pkc | | 7.9x, 5.2x | 3.2x, 3.0x | **1.2x, 1.9x** |
 
 `is_bin` as first wired in cost 7.9 times the prover and 5.2 times the proof.
@@ -292,7 +292,7 @@ of those openings carried its own mask, its own challenge and its own
 rejection sampling loop. The parameter change by itself accounts for 1.1x,
 measured on the branch after the modulus moved but before B6.
 
-Where the 119.7 KB goes now, per message:
+Where the 119.9 KB goes now, per message:
 
 | | |
 | --- | --- |
@@ -301,7 +301,7 @@ Where the 119.7 KB goes now, per message:
 | first messages | 25.6 KB |
 | product commitment and partial product | 15.4 KB |
 | published projection | 0.5 KB |
-| share of the batch-wide mask commitment, values and opening | 3.4 KB |
+| share of the batch-wide mask commitment, values and opening | 3.6 KB |
 
 ## 5b. Batching it down
 
@@ -329,12 +329,45 @@ that requires the statements to belong to one message, so one set of
 into a commitment of their own, which takes `SLOTS` from 9 to 5, `LNP_WIDTH`
 from 12 to 8, and the aggregated values `h` and `v` from one pair per message
 to one pair for the batch. The mask commitment, the aggregated values and the
-mask opening cost 3.4 KB per message once spread over 25, and remove 72.5, so
-the proof falls by 69.1 KB per message.
+mask opening cost 3.6 KB per message once spread over 25, and remove 72.5, so
+the proof falls by 68.9 KB per message.
 
 The prover gains more than the size does, because the inner products in
 `lnp_bin_first` and `lnp_bin_check` cost `SLOTS` times `LNP_WIDTH`
 multiplications, which falls from 108 to 40.
+
+### The mask commitment has to be opened, and that was missed
+
+Moving the masks into a commitment of their own means that commitment has to
+be opened like any other, and the first version of this change did not do it.
+Neither half of the opening was checked: there was no Ajtai first message and
+so no equation tying `z_mask` to `mcom`, and `z_mask` was never required to be
+short.
+
+That is not a small omission. The batch rows are `LNP_LAMBDA` equations in
+`MASK_WIDTH` unknowns, and the key is in Hermite normal form, so `b2[j]` is
+`e_{1+j}` plus a tail on the last two coordinates. A prover could therefore
+set that tail to zero, choose *any* aggregated values `h` with zero constant
+coefficient, and read off the `z_mask` that satisfies every row by a single
+assignment per row. No lattice problem stands in the way. Since `ct(h_j) = 0`
+is the entire content of the constant-coefficient argument, that argument
+certified nothing.
+
+It was checked by instrumenting the verifier to replace `h` with zero and
+solve the rows for `z_mask`: the consistency test still passed. With the Ajtai
+first message added to `lnpbatch_t` and to the challenge hash, and with the
+norm bound applied to `z_mask`, the same forgery is rejected by both checks
+independently. Two tests now cover it. The first perturbs coordinate 0 of the
+opening, which the Ajtai row reaches and the message rows do not, so it breaks
+only the commitment equation and isolates it. The second supplies a long
+opening; that one is rejected by both checks, and isolating the norm bound the
+way the first isolates the equation would mean exhibiting a long vector in the
+kernel of the whole key, which is the MSIS problem the binding rests on.
+
+The two attack tests did not catch this, because the CRT-mixing attacks are
+rejected by the per-message half of `is_bin`, which was never affected. A test
+suite that covers the attacks you thought of does not cover the ones you
+introduced.
 
 ### The rejection test got noisier
 
@@ -349,7 +382,7 @@ reports medians of interleaved runs rather than single measurements.
 
 The proof is now 14 uniform ring elements and 16 Gaussian ones per message.
 The largest single item is the commitment `p_l`, at six uniform elements or
-30.8 of the 119.7 KB. Two of its five slots hold the garbage terms of the quadratic
+30.8 of the 119.9 KB. Two of its five slots hold the garbage terms of the quadratic
 proof. Those are filled at first-message time and depend on that message's own
 mask, so they look per message; but every message now answers one challenge,
 which is the condition under which LNP22 batches garbage terms across

@@ -195,6 +195,7 @@ static void batch_hash(nmod_poly_t d[2], commitkey_t *key, lnpkey_t *lkey,
 	for (int k = 0; k < NCRT; k++) {
 		for (int i = 0; i < HEIGHT; i++) {
 			hash_poly(&sha, mcom->c1[i][k]);
+			hash_poly(&sha, batch->w[i][k]);
 		}
 		for (int i = 0; i < LNP_LAMBDA; i++) {
 			hash_poly(&sha, mcom->c2[i][k]);

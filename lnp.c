@@ -1316,6 +1316,11 @@ void lnp_mask_commit(lnpmaskcom_t *com, pcrt_poly_t g[LNP_LAMBDA],
 }
 
 void lnp_batch_init(lnpbatch_t *b) {
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(b->w[i][k], MODP);
+		}
+	}
 	for (int i = 0; i < LNP_LAMBDA; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(b->h[i][k], MODP);
@@ -1325,6 +1330,11 @@ void lnp_batch_init(lnpbatch_t *b) {
 }
 
 void lnp_batch_free(lnpbatch_t *b) {
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(b->w[i][k]);
+		}
+	}
 	for (int i = 0; i < LNP_LAMBDA; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(b->h[i][k]);
@@ -1334,6 +1344,11 @@ void lnp_batch_free(lnpbatch_t *b) {
 }
 
 void lnp_batch_zero(lnpbatch_t *b) {
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_zero(b->w[i][k]);
+		}
+	}
 	for (int i = 0; i < LNP_LAMBDA; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_zero(b->h[i][k]);
@@ -1342,13 +1357,17 @@ void lnp_batch_zero(lnpbatch_t *b) {
 	}
 }
 
-/* The mask commitment's contribution to v: <b2[j], y_mask>. */
+/* The mask commitment's Ajtai first message <B1[i], y_mask>, and its
+ * contribution to v, <b2[j], y_mask>. */
 void lnp_batch_first(lnpbatch_t *batch, lnpmaskkey_t *mkey,
 		pcrt_poly_t ym[MASK_WIDTH]) {
 	pcrt_poly_t part;
 
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_init(part[k], MODP);
+	}
+	for (int i = 0; i < HEIGHT; i++) {
+		inner(batch->w[i], mkey->B1[i], ym, MASK_WIDTH);
 	}
 	for (int j = 0; j < LNP_LAMBDA; j++) {
 		inner(part, mkey->b2[j], ym, MASK_WIDTH);
@@ -1378,6 +1397,25 @@ int lnp_batch_check(lnpbatch_t *batch, lnpmaskcom_t *mcom, lnpmaskkey_t *mkey,
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_init(lhs[k], MODP);
 		nmod_poly_init(t[k], MODP);
+	}
+
+	/* The mask opening has to be short and has to open the mask commitment,
+	 * or the rows below constrain nothing: they are LNP_LAMBDA equations in
+	 * MASK_WIDTH unknowns, so a prover free to choose z_mask could pick any h
+	 * with zero constant coefficient and solve for it. Together these two are
+	 * the MSIS binding of the mask commitment. */
+	for (int i = 0; i < MASK_WIDTH; i++) {
+		pcrt_poly_rec(rec, zm[i]);
+		result &= commit_norm2_leq(rec,
+				(uint64_t) 4 * DEGREE * SIGMA_B * SIGMA_B);
+	}
+	for (int i = 0; i < HEIGHT; i++) {
+		inner(lhs, mkey->B1[i], zm, MASK_WIDTH);
+		for (int k = 0; k < NCRT; k++) {
+			pcrt_poly_mulmod(tmp, d[k], mcom->c1[i][k], k);
+			nmod_poly_add(tmp, tmp, batch->w[i][k]);
+			result &= nmod_poly_equal(lhs[k], tmp);
+		}
 	}
 
 	/* The constant coefficient of each aggregated value, which is the whole
@@ -1516,6 +1554,7 @@ static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
 			hash_poly(&sha, com->c1[i][k]);
 			hash_poly(&sha, ajtai[i][k]);
 			hash_poly(&sha, tst_mcom.c1[i][k]);
+			hash_poly(&sha, tst_batch.w[i][k]);
 		}
 		for (int i = 0; i < SLOTS; i++) {
 			hash_poly(&sha, com->c2[i][k]);
@@ -2390,11 +2429,12 @@ static void test_range(flint_rand_t rng) {
 			for (int k = 0; k < NCRT; k++) {
 				nmod_poly_set(m[SLOT_W][k], w[k]);
 			}
-		for (int i = 0; i < LNP_LAMBDA; i++) {
-			lnp_sample_ct_zero(g[i], rng);
-		}
+			for (int i = 0; i < LNP_LAMBDA; i++) {
+				lnp_sample_ct_zero(g[i], rng);
+			}
 			lnp_commit(&com, m, &key, r);
-			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r, rng)) {
+			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F],
+					wraw, g, &key, r, rng)) {
 				break;
 			}
 		}
@@ -2455,15 +2495,108 @@ static void test_range(flint_rand_t rng) {
 			for (int k = 0; k < NCRT; k++) {
 				nmod_poly_set(m[SLOT_W][k], w[k]);
 			}
-		for (int i = 0; i < LNP_LAMBDA; i++) {
-			lnp_sample_ct_zero(g[i], rng);
-		}
+			for (int i = 0; i < LNP_LAMBDA; i++) {
+				lnp_sample_ct_zero(g[i], rng);
+			}
 			lnp_commit(&com, m, &key, r);
-			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r, rng)) {
+			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F],
+					wraw, g, &key, r, rng)) {
 				break;
 			}
 		}
 		pi.zp[5] = nmod_add(pi.zp[5], 1, s->mod);
+		TEST_ASSERT(bin_verify_local(&pi, &ctx_pi, &com, &key) == 0, end);
+	} TEST_END;
+
+	/* The mask commitment is opened by z_mask, and both halves of that opening
+	 * have to be checked. Without them the batch rows are LNP_LAMBDA equations
+	 * in MASK_WIDTH unknowns, and a prover could choose any aggregated values
+	 * with zero constant coefficient and solve for z_mask, which would make
+	 * the constant-coefficient argument vacuous. */
+	TEST_ONCE("is_bin rejects a mask opening that misses the commitment") {
+		nmod_poly_zero(s);
+		nmod_poly_fit_length(s, DEGREE);
+		for (int i = 0; i < DEGREE; i++) {
+			nmod_poly_set_coeff_ui(s, i, i & 1);
+		}
+		for (tries = 0; tries < 64; tries++) {
+			for (int i = 0; i < LNP_WIDTH; i++) {
+				commit_sample_short_crt(r[i]);
+			}
+			for (int i = 0; i < SLOTS; i++) {
+				for (int k = 0; k < NCRT; k++) {
+					nmod_poly_zero(m[i][k]);
+				}
+			}
+			pcrt_poly_reduce(m[SLOT_S][0], s, 0);
+			pcrt_poly_reduce(m[SLOT_S][1], s, 1);
+			lnp_isbin_product(m[SLOT_F], m[SLOT_S]);
+			lnp_sample_proj_mask(w, wraw);
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_set(m[SLOT_W][k], w[k]);
+			}
+			for (int i = 0; i < LNP_LAMBDA; i++) {
+				lnp_sample_ct_zero(g[i], rng);
+			}
+			lnp_commit(&com, m, &key, r);
+			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F],
+					wraw, g, &key, r, rng)) {
+				break;
+			}
+		}
+		/* Coordinate 0 of the randomness is the one the Ajtai row reaches and
+		 * the message rows do not: b2 is zero there while B1 is one. Adding a
+		 * single unit there leaves the rows and the norm bound untouched and
+		 * breaks only the equation that ties z_mask to the commitment. */
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_set_coeff_ui(tst_zm[0][k], 0,
+					nmod_add(nmod_poly_get_coeff_ui(tst_zm[0][k], 0), 1,
+					tst_zm[0][k]->mod));
+		}
+		TEST_ASSERT(bin_verify_local(&pi, &ctx_pi, &com, &key) == 0, end);
+	} TEST_END;
+
+	TEST_ONCE("is_bin rejects a mask opening that is not short") {
+		nmod_poly_zero(s);
+		nmod_poly_fit_length(s, DEGREE);
+		for (int i = 0; i < DEGREE; i++) {
+			nmod_poly_set_coeff_ui(s, i, i & 1);
+		}
+		for (tries = 0; tries < 64; tries++) {
+			for (int i = 0; i < LNP_WIDTH; i++) {
+				commit_sample_short_crt(r[i]);
+			}
+			for (int i = 0; i < SLOTS; i++) {
+				for (int k = 0; k < NCRT; k++) {
+					nmod_poly_zero(m[i][k]);
+				}
+			}
+			pcrt_poly_reduce(m[SLOT_S][0], s, 0);
+			pcrt_poly_reduce(m[SLOT_S][1], s, 1);
+			lnp_isbin_product(m[SLOT_F], m[SLOT_S]);
+			lnp_sample_proj_mask(w, wraw);
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_set(m[SLOT_W][k], w[k]);
+			}
+			for (int i = 0; i < LNP_LAMBDA; i++) {
+				lnp_sample_ct_zero(g[i], rng);
+			}
+			lnp_commit(&com, m, &key, r);
+			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F],
+					wraw, g, &key, r, rng)) {
+				break;
+			}
+		}
+		/* An unbounded opening is what solving the rows for z_mask produces,
+		 * so the norm bound is what makes that solve useless. Both checks
+		 * reject this input; isolating the norm bound the way the test above
+		 * isolates the commitment equation would mean exhibiting a long
+		 * vector in the kernel of the whole key, which is the MSIS problem
+		 * the binding rests on. */
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_scalar_mul_nmod(tst_zm[0][k], tst_zm[0][k],
+					(ulong) 1 << 20);
+		}
 		TEST_ASSERT(bin_verify_local(&pi, &ctx_pi, &com, &key) == 0, end);
 	} TEST_END;
 
