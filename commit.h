@@ -72,6 +72,35 @@ nmod_poly_t *commit_poly();
  */
 nmod_poly_t *commit_irred(int i);
 
+/* Multiply two polynomials modulo the i-th CRT factor.
+ *
+ * @param[out] c		- the resulting polynomial.
+ * @param[in] a			- the first polynomial.
+ * @param[in] b			- the second polynomial.
+ * @param[in] i			- the index of the CRT factor.
+ */
+void pcrt_poly_mulmod(nmod_poly_t c, const nmod_poly_t a, const nmod_poly_t b,
+		int i);
+
+/* Multiply two polynomials in the cyclotomic ring Rp.
+ *
+ * @param[out] c		- the resulting polynomial.
+ * @param[in] a			- the first polynomial.
+ * @param[in] b			- the second polynomial.
+ */
+void commit_poly_mulmod(nmod_poly_t c, const nmod_poly_t a,
+		const nmod_poly_t b);
+
+/* Reduce a polynomial into the i-th CRT component.
+ *
+ * The output may alias the input.
+ *
+ * @param[out] c		- the reduced polynomial.
+ * @param[in] a			- the polynomial to reduce.
+ * @param[in] i			- the index of the CRT factor.
+ */
+void pcrt_poly_reduce(nmod_poly_t c, const nmod_poly_t a, int i);
+
 /* Recover polynomial from CRT representation.
  *
  * @param[in] c 		- the resulting polynomial.
@@ -92,6 +121,17 @@ uint64_t commit_norm2_sqr(nmod_poly_t r);
  * @return The l\infty-norm.
  */
 uint64_t commit_norm_inf(nmod_poly_t r);
+
+/* Test whether the squared l2-norm of a polynomial is at most a bound.
+ *
+ * Unlike commit_norm2_sqr this cannot overflow, so it is safe on input chosen
+ * by a malicious party.
+ *
+ * @param[in] r			- the polynomial to test.
+ * @param[in] bound		- the bound on the squared l2-norm.
+ * @return 1 if the squared l2-norm is at most the bound, 0 otherwise.
+ */
+int commit_norm2_leq(nmod_poly_t r, uint64_t bound);
 
 /**
  * Generate a key pair for the commitment scheme using a PRNG.

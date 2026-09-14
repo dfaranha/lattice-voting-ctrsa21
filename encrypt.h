@@ -10,6 +10,9 @@
  */
 
 #include <flint/flint.h>
+#include <flint/fmpz.h>
+#include <flint/fmpz_mod.h>
+#include <flint/fmpz_poly.h>
 #include <flint/fmpz_mod_poly.h>
 
 /*============================================================================*/

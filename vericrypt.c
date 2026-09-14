@@ -560,17 +560,28 @@ static void bench(flint_rand_t rand) {
 	fmpz_mod_poly_clear(u, *encrypt_modulus_ctx());
 }
 
+/* Select which phases to run: "test", "bench", or neither for both. Keeping
+ * the benchmarks out of a test run matters in practice, since they dominate
+ * the runtime by two orders of magnitude. */
+static int phase_selected(int argc, char *argv[], const char *phase) {
+	return argc < 2 || strcmp(argv[1], phase) == 0;
+}
+
 int main(int argc, char *argv[]) {
 	flint_rand_t rand;
 
 	flint_randinit(rand);
 	encrypt_setup();
 
-	printf("\n** Tests for lattice-based verifiable encryption:\n\n");
-	test(rand);
+	if (phase_selected(argc, argv, "test")) {
+		printf("\n** Tests for lattice-based verifiable encryption:\n\n");
+		test(rand);
+	}
 
-	printf("\n** Benchmarks for lattice-based verifiable encryption:\n\n");
-	bench(rand);
+	if (phase_selected(argc, argv, "bench")) {
+		printf("\n** Benchmarks for lattice-based verifiable encryption:\n\n");
+		bench(rand);
+	}
 
 	encrypt_finish();
 }

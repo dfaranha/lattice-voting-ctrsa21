@@ -485,6 +485,13 @@ static void bench(flint_rand_t rand) {
 	encrypt_keyfree(&pk, &sk);
 }
 
+/* Select which phases to run: "test", "bench", or neither for both. Keeping
+ * the benchmarks out of a test run matters in practice, since they dominate
+ * the runtime by two orders of magnitude. */
+static int phase_selected(int argc, char *argv[], const char *phase) {
+	return argc < 2 || strcmp(argv[1], phase) == 0;
+}
+
 int main(int argc, char *argv[]) {
 	flint_rand_t rand;
 
@@ -492,11 +499,15 @@ int main(int argc, char *argv[]) {
 
 	flint_randinit(rand);
 
-	printf("\n** Tests for lattice-based encryption:\n\n");
-	test(rand);
+	if (phase_selected(argc, argv, "test")) {
+		printf("\n** Tests for lattice-based encryption:\n\n");
+		test(rand);
+	}
 
-	printf("\n** Benchmarks for lattice-based encryption:\n\n");
-	bench(rand);
+	if (phase_selected(argc, argv, "bench")) {
+		printf("\n** Benchmarks for lattice-based encryption:\n\n");
+		bench(rand);
+	}
 
 	encrypt_finish();
 }

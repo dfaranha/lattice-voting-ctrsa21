@@ -15,25 +15,33 @@
 
 #define MSGS        25
 
+/**
+ * Sample a uniformly random double in [0, 1) with 53 bits of precision.
+ *
+ * Rejection sampling must not reuse the Fiat-Shamir stream, so this draws from
+ * the operating system rather than from fastrandombytes.
+ *
+ * @return the sampled value.
+ */
+static double uniform_double(void) {
+	uint64_t bits;
+
+	getrandom(&bits, sizeof(bits), 0);
+	/* Keep the top 53 bits, the precision of the mantissa of a double. */
+	return (double)(bits >> 11) * 0x1.0p-53;
+}
+
 int rej_sampling(nmod_poly_t z[WIDTH][2], nmod_poly_t v[WIDTH][2], uint64_t s2) {
-	double r, M = 1.75;
-	int64_t seed, dot, norm;
-	mpf_t u;
+	double r, u, M = 1.75;
+	int64_t dot, norm;
 	int64_t c0, c1;
 	nmod_poly_t t0, t1;
-	uint8_t buf[8];
-	gmp_randstate_t state;
 	int result;
 
-	mpf_init(u);
 	nmod_poly_init(t0, MODP);
 	nmod_poly_init(t1, MODP);
-	gmp_randinit_mt(state);
 
-	getrandom(buf, sizeof(buf), 0);
-	memcpy(&seed, buf, sizeof(buf));
-	gmp_randseed_ui(state, seed);
-	mpf_urandomb(u, state, mpf_get_default_prec());
+	u = uniform_double();
 
 	norm = dot = 0;
 	for (int i = 0; i < WIDTH; i++) {
@@ -55,9 +63,8 @@ int rej_sampling(nmod_poly_t z[WIDTH][2], nmod_poly_t v[WIDTH][2], uint64_t s2) 
 	r = r / (2.0 * s2);
 	r = exp(r) / M;
 
-	result = mpf_get_d(u) > r;
+	result = u > r;
 
-	mpf_clear(u);
 	nmod_poly_clear(t0);
 	nmod_poly_clear(t1);
 	return result;
@@ -127,8 +134,8 @@ void lin_hash(nmod_poly_t d[2], commitkey_t *key, commit_t x, commit_t y,
 		}
 	}
 	nmod_poly_sub(d[1], d[0], d[1]);
-	nmod_poly_rem(d[0], d[1], *commit_irred(0));
-	nmod_poly_rem(d[1], d[1], *commit_irred(1));
+	pcrt_poly_reduce(d[0], d[1], 0);
+	pcrt_poly_reduce(d[1], d[1], 1);
 }
 
 static void lin_prover(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
@@ -167,11 +174,9 @@ static void lin_prover(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
 		for (int i = 0; i < HEIGHT; i++) {
 			for (int j = 0; j < WIDTH; j++) {
 				for (int k = 0; k < 2; k++) {
-					nmod_poly_mulmod(tmp, key->B1[i][j][k], y[j][k],
-							*commit_irred(k));
+					pcrt_poly_mulmod(tmp, key->B1[i][j][k], y[j][k], k);
 					nmod_poly_add(t[k], t[k], tmp);
-					nmod_poly_mulmod(tmp, key->B1[i][j][k], _y[j][k],
-							*commit_irred(k));
+					pcrt_poly_mulmod(tmp, key->B1[i][j][k], _y[j][k], k);
 					nmod_poly_add(_t[k], _t[k], tmp);
 				}
 			}
@@ -179,11 +184,10 @@ static void lin_prover(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
 
 		for (int i = 0; i < WIDTH; i++) {
 			for (int j = 0; j < 2; j++) {
-				nmod_poly_mulmod(tmp, key->b2[i][j], y[i][j], *commit_irred(j));
-				nmod_poly_mulmod(tmp, tmp, alpha, *commit_irred(j));
+				pcrt_poly_mulmod(tmp, key->b2[i][j], y[i][j], j);
+				pcrt_poly_mulmod(tmp, tmp, alpha, j);
 				nmod_poly_add(u[j], u[j], tmp);
-				nmod_poly_mulmod(tmp, key->b2[i][j], _y[i][j],
-						*commit_irred(j));
+				pcrt_poly_mulmod(tmp, key->b2[i][j], _y[i][j], j);
 				nmod_poly_sub(u[j], u[j], tmp);
 			}
 		}
@@ -194,9 +198,9 @@ static void lin_prover(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
 		/* Prover */
 		for (int i = 0; i < WIDTH; i++) {
 			for (int j = 0; j < 2; j++) {
-				nmod_poly_mulmod(dr[i][j], d[j], r[i][j], *commit_irred(j));
+				pcrt_poly_mulmod(dr[i][j], d[j], r[i][j], j);
 				nmod_poly_add(y[i][j], y[i][j], dr[i][j]);
-				nmod_poly_mulmod(_dr[i][j], d[j], _r[i][j], *commit_irred(j));
+				pcrt_poly_mulmod(_dr[i][j], d[j], _r[i][j], j);
 				nmod_poly_add(_y[i][j], _y[i][j], _dr[i][j]);
 			}
 		}
@@ -243,29 +247,29 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
 	for (int i = 0; i < WIDTH; i++) {
 		pcrt_poly_rec(z[i], y[i]);
 		pcrt_poly_rec(_z[i], _y[i]);
-		assert(commit_norm2_sqr(z[i]) <=
+		/* Soundness checks: these must make verification fail rather than
+		 * abort, and must not be compiled out by NDEBUG. */
+		result &= commit_norm2_leq(z[i],
 				(uint64_t) 4 * DEGREE * SIGMA_C * SIGMA_C);
-		assert(commit_norm2_sqr(_z[i]) <=
+		result &= commit_norm2_leq(_z[i],
 				(uint64_t) 4 * DEGREE * SIGMA_C * SIGMA_C);
 	}
 	/* Verifier computes B1z and B1z'. */
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < WIDTH; j++) {
 			for (int k = 0; k < 2; k++) {
-				nmod_poly_mulmod(tmp, key->B1[i][j][k], y[j][k],
-						*commit_irred(k));
+				pcrt_poly_mulmod(tmp, key->B1[i][j][k], y[j][k], k);
 				nmod_poly_add(v[k], v[k], tmp);
-				nmod_poly_mulmod(tmp, key->B1[i][j][k], _y[j][k],
-						*commit_irred(k));
+				pcrt_poly_mulmod(tmp, key->B1[i][j][k], _y[j][k], k);
 				nmod_poly_add(_v[k], _v[k], tmp);
 			}
 		}
 	}
 	/* Verifier checks that B_1z = t + dc1, B_1z' = t' + dc1'. */
 	for (int j = 0; j < 2; j++) {
-		nmod_poly_mulmod(tmp, _d[j], com.c1[j], *commit_irred(j));
+		pcrt_poly_mulmod(tmp, _d[j], com.c1[j], j);
 		nmod_poly_add(t[j], t[j], tmp);
-		nmod_poly_mulmod(tmp, _d[j], x.c1[j], *commit_irred(j));
+		pcrt_poly_mulmod(tmp, _d[j], x.c1[j], j);
 		nmod_poly_add(_t[j], _t[j], tmp);
 		result &= nmod_poly_equal(t[j], v[j]);
 		result &= nmod_poly_equal(_t[j], _v[j]);
@@ -273,33 +277,33 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
 
 	if (l == 0) {
 		for (int j = 0; j < 2; j++) {
-			nmod_poly_mulmod(t[j], alpha, com.c2[j], *commit_irred(j));
+			pcrt_poly_mulmod(t[j], alpha, com.c2[j], j);
 			nmod_poly_add(t[j], t[j], beta);
 			nmod_poly_sub(t[j], t[j], x.c2[j]);
-			nmod_poly_mulmod(t[j], t[j], _d[j], *commit_irred(j));
+			pcrt_poly_mulmod(t[j], t[j], _d[j], j);
 			nmod_poly_add(t[j], t[j], u[j]);
-			nmod_poly_rem(t[j], t[j], *commit_irred(j));
+			pcrt_poly_reduce(t[j], t[j], j);
 		}
 	}
 	if (l > 0 && l < MSGS - 1) {
 		for (int j = 0; j < 2; j++) {
-			nmod_poly_mulmod(t[j], alpha, com.c2[j], *commit_irred(j));
+			pcrt_poly_mulmod(t[j], alpha, com.c2[j], j);
 			nmod_poly_add(t[j], t[j], beta);
 			nmod_poly_sub(t[j], t[j], x.c2[j]);
-			nmod_poly_mulmod(t[j], t[j], _d[j], *commit_irred(j));
+			pcrt_poly_mulmod(t[j], t[j], _d[j], j);
 			nmod_poly_add(t[j], t[j], u[j]);
 		}
 	}
 	if (l == MSGS - 1) {
 		for (int j = 0; j < 2; j++) {
-			nmod_poly_mulmod(t[j], alpha, com.c2[j], *commit_irred(j));
+			pcrt_poly_mulmod(t[j], alpha, com.c2[j], j);
 			if (MSGS & 1) {
 				nmod_poly_sub(t[j], t[j], beta);
 			} else {
 				nmod_poly_add(t[j], t[j], beta);
 			}
 			nmod_poly_sub(t[j], t[j], x.c2[j]);
-			nmod_poly_mulmod(t[j], t[j], _d[j], *commit_irred(j));
+			pcrt_poly_mulmod(t[j], t[j], _d[j], j);
 			nmod_poly_add(t[j], t[j], u[j]);
 		}
 	}
@@ -308,10 +312,10 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t _y[WIDTH][2],
 	nmod_poly_zero(v[1]);
 	for (int i = 0; i < WIDTH; i++) {
 		for (int j = 0; j < 2; j++) {
-			nmod_poly_mulmod(tmp, key->b2[i][j], y[i][j], *commit_irred(j));
-			nmod_poly_mulmod(tmp, alpha, tmp, *commit_irred(j));
+			pcrt_poly_mulmod(tmp, key->b2[i][j], y[i][j], j);
+			pcrt_poly_mulmod(tmp, alpha, tmp, j);
 			nmod_poly_add(v[j], v[j], tmp);
-			nmod_poly_mulmod(tmp, key->b2[i][j], _y[i][j], *commit_irred(j));
+			pcrt_poly_mulmod(tmp, key->b2[i][j], _y[i][j], j);
 			nmod_poly_sub(v[j], v[j], tmp);
 		}
 	}
@@ -399,48 +403,48 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 
 	/* Prover samples theta_i and computes commitments D_i. */
 	commit_sample_rand(theta[0], rng, DEGREE);
-	nmod_poly_mulmod(t0, theta[0], _m[0], *commit_poly());
+	commit_poly_mulmod(t0, theta[0], _m[0]);
 	for (int j = 0; j < WIDTH; j++) {
 		commit_sample_short_crt(_r[0][j]);
 	}
 	commit_doit(&d[0], t0, key, _r[0]);
 	for (int i = 1; i < MSGS - 1; i++) {
 		commit_sample_rand(theta[i], rng, DEGREE);
-		nmod_poly_mulmod(t0, theta[i - 1], m[i], *commit_poly());
-		nmod_poly_mulmod(t1, theta[i], _m[i], *commit_poly());
+		commit_poly_mulmod(t0, theta[i - 1], m[i]);
+		commit_poly_mulmod(t1, theta[i], _m[i]);
 		nmod_poly_add(t0, t0, t1);
 		for (int j = 0; j < WIDTH; j++) {
 			commit_sample_short_crt(_r[i][j]);
 		}
 		commit_doit(&d[i], t0, key, _r[i]);
 	}
-	nmod_poly_mulmod(t0, theta[MSGS - 2], m[MSGS - 1], *commit_poly());
+	commit_poly_mulmod(t0, theta[MSGS - 2], m[MSGS - 1]);
 	for (int j = 0; j < WIDTH; j++) {
 		commit_sample_short_crt(_r[MSGS - 1][j]);
 	}
 	commit_doit(&d[MSGS - 1], t0, key, _r[MSGS - 1]);
 
 	shuffle_hash(beta, com, d, _m, rho);
-	nmod_poly_mulmod(s[0], theta[0], _m[0], *commit_poly());
-	nmod_poly_mulmod(t0, beta, m[0], *commit_poly());
+	commit_poly_mulmod(s[0], theta[0], _m[0]);
+	commit_poly_mulmod(t0, beta, m[0]);
 	nmod_poly_sub(s[0], s[0], t0);
 	nmod_poly_invmod(t0, _m[0], *commit_poly());
-	nmod_poly_mulmod(s[0], s[0], t0, *commit_poly());
+	commit_poly_mulmod(s[0], s[0], t0);
 	for (int i = 1; i < MSGS - 1; i++) {
-		nmod_poly_mulmod(s[i], theta[i - 1], m[i], *commit_poly());
-		nmod_poly_mulmod(t0, theta[i], _m[i], *commit_poly());
+		commit_poly_mulmod(s[i], theta[i - 1], m[i]);
+		commit_poly_mulmod(t0, theta[i], _m[i]);
 		nmod_poly_add(s[i], s[i], t0);
-		nmod_poly_mulmod(t0, s[i - 1], m[i], *commit_poly());
+		commit_poly_mulmod(t0, s[i - 1], m[i]);
 		nmod_poly_sub(s[i], s[i], t0);
 		nmod_poly_invmod(t0, _m[i], *commit_poly());
-		nmod_poly_mulmod(s[i], s[i], t0, *commit_poly());
+		commit_poly_mulmod(s[i], s[i], t0);
 	}
 
 	for (int l = 0; l < MSGS; l++) {
 		if (l < MSGS - 1) {
-			nmod_poly_mulmod(t0, s[l], _m[l], *commit_poly());
+			commit_poly_mulmod(t0, s[l], _m[l]);
 		} else {
-			nmod_poly_mulmod(t0, beta, _m[l], *commit_poly());
+			commit_poly_mulmod(t0, beta, _m[l]);
 		}
 
 		if (l == 0) {
@@ -480,9 +484,9 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 	/* Now verify each \Prod_LIN instance, one for each commitment. */
 	for (int l = 0; l < MSGS; l++) {
 		if (l < MSGS - 1) {
-			nmod_poly_mulmod(t0, s[l], _m[l], *commit_poly());
+			commit_poly_mulmod(t0, s[l], _m[l]);
 		} else {
-			nmod_poly_mulmod(t0, beta, _m[l], *commit_poly());
+			commit_poly_mulmod(t0, beta, _m[l]);
 		}
 
 		if (l == 0) {
@@ -536,8 +540,8 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	} while (flag == 0);
 
 	/* Verifier shifts the commitments by rho. */
-	nmod_poly_rem(t0, rho, *commit_irred(0));
-	nmod_poly_rem(t1, rho, *commit_irred(1));
+	pcrt_poly_reduce(t0, rho, 0);
+	pcrt_poly_reduce(t1, rho, 1);
 	for (int i = 0; i < MSGS; i++) {
 		nmod_poly_sub(com[i].c2[0], com[i].c2[0], t0);
 		nmod_poly_sub(com[i].c2[1], com[i].c2[1], t1);
@@ -675,11 +679,9 @@ static void bench(flint_rand_t rand) {
 		}
 	}
 
-	for (int i = 0; i < MSGS; i++) {
-		for (int j = 0; j < WIDTH; j++) {
-			commit_sample_short_crt(r[i][j]);
-		}
-	}
+	/* The randomness must stay the one the commitments were formed with:
+	 * resampling it here would benchmark a proof whose witness does not match
+	 * its statement, and a verifier that always rejects. */
 	commit_sample_rand(beta, rand, DEGREE);
 	commit_sample_rand(alpha, rand, DEGREE);
 
@@ -724,16 +726,27 @@ static void bench(flint_rand_t rand) {
 	commit_keyfree(&key);
 }
 
+/* Select which phases to run: "test", "bench", or neither for both. Keeping
+ * the benchmarks out of a test run matters in practice, since they dominate
+ * the runtime by two orders of magnitude. */
+static int phase_selected(int argc, char *argv[], const char *phase) {
+	return argc < 2 || strcmp(argv[1], phase) == 0;
+}
+
 int main(int argc, char *argv[]) {
 	flint_rand_t rand;
 
 	flint_randinit(rand);
 
-	printf("\n** Tests for lattice-based shuffle proof:\n\n");
-	test(rand);
+	if (phase_selected(argc, argv, "test")) {
+		printf("\n** Tests for lattice-based shuffle proof:\n\n");
+		test(rand);
+	}
 
-	printf("\n** Benchmarks for lattice-based shuffle proof:\n\n");
-	bench(rand);
+	if (phase_selected(argc, argv, "bench")) {
+		printf("\n** Benchmarks for lattice-based shuffle proof:\n\n");
+		bench(rand);
+	}
 
 	flint_randclear(rand);
 }
