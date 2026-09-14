@@ -49,9 +49,9 @@ allocate; `commit_free`, `commit_keyfree`, `encrypt_free`, `encrypt_keyfree` and
 `vericrypt_doit`, allocate nothing and may be called repeatedly on the same
 object.
 
-WARNING: This is an academic proof of concept, and in particular has not received code review. This implementation is NOT ready for any type of production use.
-
 ## Third-party code
 
 `vcl/` vendors Agner Fog's Vector Class Library, used by the constant-time
 discrete Gaussian sampler in `gaussian_ct.cpp` (by Raymond K. Zhao).
+
+**WARNING**: This is an academic proof of concept, and in particular has not received code review. This implementation is NOT ready for any type of production use.
