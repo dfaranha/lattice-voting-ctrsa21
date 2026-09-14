@@ -42,14 +42,16 @@ separately: slot 2 commits the coefficient of `c`, and slot 3 commits *sigma
 of* the coefficient of `sigma(c)`, so that applying `sigma` to its `u` recovers
 a term multiplied by `sigma(c)` rather than by `c`.
 
-**B3, the constant coefficient** (`lnp_ct_prover`, `lnp_ct_verifier`). Proves
+**B3, the constant coefficient** (now `lnp_bin_setup`, `lnp_bin_check` and
+`lnp_batch_check`, after the merges of section 5b). Proves
 that the constant coefficient of a committed value is zero, which is what turns
 the product relation above into `is_bin`. For each of `LNP_LAMBDA` masks `g_i`,
 sampled uniformly subject to `ct(g_i) = 0`, the prover publishes
 `h_i = g_i + mu_i * f` for a scalar `mu_i`, and the verifier checks
 `ct(h_i) = 0`. Tying `h_i` back to the committed values is linear, so it needs
-no garbage terms: with `B_i = b2[SLOT_G + i] + mu_i * b2[SLOT_F]`, the value
-`T_i - h_i` is a commitment to zero under `B_i`.
+no garbage terms: with `B_i` the sum of the mask commitment's `b2[i]` and
+`mu_i * b2[SLOT_F]`, the value `T_i - h_i` is a commitment to zero under
+`B_i`.
 
 Two orderings carry the whole argument. The scalars are derived from the
 commitment alone, so the masks are fixed before them; and `h` is absorbed into
@@ -122,6 +124,7 @@ This is also why the construction wants to be used on many claims at once: the
 `LNP_LAMBDA` masks are paid for once regardless of how many constant
 coefficients are being proven zero, so proving `is_bin` for all `MSGS`
 permutation elements together costs the same four masks as proving it for one.
+Section 5b is that observation collected.
 
 ## 4. B5, the approximate range proof, and the modulus it forced
 
@@ -250,54 +253,108 @@ Measured on the same machine, three full proofs at `MSGS = 25`:
 
 **7.2 times slower.** Three sub-proofs per message, and the range proof's
 rejection sampling retries about 3.8 times, each retry recommitting and
-re-running the product proof. Nothing here has been optimised; the obvious
-first move is to stop re-running the product proof on a range rejection, since
-only the mask needs to be fresh.
+re-running the product proof. Nothing here had been optimised at this point;
+sections 5a and 5b supersede these figures, and the number below is 117 ms.
 
-For scale, the paper reports 33 ms per vote. The parameter change alone
-accounts for a factor of about three of the gap, and `is_bin` for the rest.
+For scale, the paper reports 33 ms per vote.
 
 ## 5a. Measured against fix-pkc
 
-Time is wall clock on one machine, median of three runs of three full proofs at
-`MSGS = 25`. Size is counted from the transmitted structures, since nothing in
-this repository serialises a proof; a uniform ring element is `DEGREE` times
-`ceil(log2 p)` bits and a Gaussian one `DEGREE` times `ceil(log2 12 sigma)`.
+Both quantities are measured on one footing. Time is the invariant-TSC cycle
+count the benchmark harness itself reports for one full proof at `MSGS = 25`,
+median of twelve rounds in which every binary runs back to back with
+`fix-pkc`; the ratio is taken within each round, so that thermal drift cancels
+instead of landing on whichever binary happened to run while the machine was
+hot. This laptop's TSC ticks at its 1.80 GHz base clock whatever the core is
+doing, so a throttled run genuinely costs more ticks, and the seconds are
+ticks over 1.8e9.
 
-| | fix-pkc | lnp |
-| --- | --- | --- |
-| modulus, WIDTH | `2^31.86`, 3 | `2^40`, 4 |
-| prover, per proof | 2.15 s | 17.55 s |
-| prover, per message | 0.086 s | 0.702 s |
-| proof, per message | 65.5 KB | 338.0 KB |
-| proof, 25 messages | 1.64 MB | 8.45 MB |
+Size is counted from the transmitted structures, since nothing here serialises
+a proof: a uniform ring element costs `DEGREE` times `ceil(log2 p)` bits and a
+Gaussian one `DEGREE` times `ceil(log2 12 sigma)`. Note that `MODP` is thirteen
+above `2^40`, so a uniform element costs 41 bits per coefficient and not 40.
 
-**8.2 times slower and 5.2 times larger.** The time splits cleanly: measuring
-the branch after the parameter change but before B6 gives 2.37 s, so the
-parameters account for 1.10x and `is_bin` for 7.4x.
+| | fix-pkc | lnp at `a63d9b3` | lnp at `d3491d0` | lnp now |
+| --- | --- | --- | --- | --- |
+| modulus, `WIDTH` | `2^31.86`, 3 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 |
+| prover, per proof | 2.59 s | 16.24 s | 7.16 s | 2.92 s |
+| prover, per message | 104 ms | 649 ms | 286 ms | 117 ms |
+| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.7 KB |
+| proof, 25 messages | 1.56 MB | 8.06 MB | 4.61 MB | 2.92 MB |
+| against fix-pkc | | 7.9x, 5.2x | 3.2x, 3.0x | **1.2x, 1.9x** |
 
-Where the 338 KB goes, per message:
+`is_bin` as first wired in cost 7.9 times the prover and 5.2 times the proof.
+Batching it, which is section 5b, brought that to **1.2 times the prover and
+1.9 times the proof**. Almost all of the gap was redundancy rather than the
+argument: at `a63d9b3` the same commitment was opened four times, once by the
+shuffle's linear proof and once by each of the three sub-proofs, and every one
+of those openings carried its own mask, its own challenge and its own
+rejection sampling loop. The parameter change by itself accounts for 1.1x,
+measured on the branch after the modulus moved but before B6.
+
+Where the 119.7 KB goes now, per message:
 
 | | |
 | --- | --- |
-| sigma commitment, one Ajtai part and nine message slots | 52.5 KB |
-| the four masked openings | 143.8 KB |
-| first messages and aggregated values | 89.0 KB |
-| product commitment, partial product, projection | 16.3 KB |
+| sigma commitment, one Ajtai part and five message slots | 30.8 KB |
+| the one masked opening, `WIDTH` twice and `LNP_WIDTH` once | 44.0 KB |
+| first messages | 25.6 KB |
+| product commitment and partial product | 15.4 KB |
+| published projection | 0.5 KB |
+| share of the batch-wide mask commitment, values and opening | 3.4 KB |
 
-The largest single item is not the range proof, which is nearly free at 0.5 KB
-for the published projection. It is that **the same commitment is opened four
-times**: once by the linear proof and once by each of the three sub-proofs,
-each costing an Ajtai first message plus `LNP_WIDTH` Gaussian ring elements, or
-36.0 KB. They all open the same randomness. Deriving a single shared challenge
-and sending one opening would save about 108 KB, which is 32 per cent of the
-proof, and would cut the prover similarly since three of the four rejection
-sampling loops would go with it.
+## 5b. Batching it down
 
-That is the first thing to do if these numbers ever need to be defensible.
-Neither the prover nor the proof has been optimised at all: the range proof
-also re-runs the product proof on every rejection, when only its mask needs to
-be fresh.
+`is_bin` as first wired in was three separate sub-proofs per message, each
+with its own mask, its own challenge and its own opening of the same
+commitment under the same randomness, and the shuffle's linear proof opened
+that commitment a fourth time. Five changes removed the redundancy:
+
+1. `bb3f90e` merged the constant-coefficient and range proofs. They were being
+   handed the *same* masks, so the difference of their two aggregated values
+   cancelled `g_j` and revealed a linear function of the witness. Merging
+   them fixed that, and removed one of the two.
+2. `358d91c` put the whole `is_bin` argument under a single opening.
+3. `5ce854b` shared that opening with the shuffle's linear proof, which opens
+   the same commitment under the same randomness.
+4. `d3491d0` derived one challenge over every message, so one rejection test
+   covers the whole batch.
+5. This change gives the batch one set of constant-coefficient masks.
+
+The last one is the only one that exploits the batch rather than the message.
+The aggregation is over scalars: `h_j` is `g_j` plus a scalar combination of
+the statements, and the scalars are drawn after `g_j` is committed. Nothing in
+that requires the statements to belong to one message, so one set of
+`LNP_LAMBDA` masks covers all 25. They moved out of the per-message commitment
+into a commitment of their own, which takes `SLOTS` from 9 to 5, `LNP_WIDTH`
+from 12 to 8, and the aggregated values `h` and `v` from one pair per message
+to one pair for the batch. The mask commitment, the aggregated values and the
+mask opening cost 3.4 KB per message once spread over 25, and remove 72.5, so
+the proof falls by 69.1 KB per message.
+
+The prover gains more than the size does, because the inner products in
+`lnp_bin_first` and `lnp_bin_check` cost `SLOTS` times `LNP_WIDTH`
+multiplications, which falls from 108 to 40.
+
+### The rejection test got noisier
+
+Runs at `a63d9b3` land within 5 per cent of each other. After `d3491d0` the
+spread is nearly a factor of two. One challenge over every message means one
+rejection test over the concatenation of their responses, so the number of
+repetitions is a single geometric draw instead of 25 independent ones that
+average out. The mean fell and the variance rose. That is why the table above
+reports medians of interleaved runs rather than single measurements.
+
+### What is left
+
+The proof is now 14 uniform ring elements and 16 Gaussian ones per message.
+The largest single item is the commitment `p_l`, at six uniform elements or
+30.8 of the 119.7 KB. Two of its five slots hold the garbage terms of the quadratic
+proof. Those are filled at first-message time and depend on that message's own
+mask, so they look per message; but every message now answers one challenge,
+which is the condition under which LNP22 batches garbage terms across
+statements. Whether that applies here has not been checked, and it is the
+obvious next thing to look at.
 
 ## 6. What this changes about the decision
 
@@ -310,15 +367,22 @@ Protocol 1 against that. Both halves of that framing moved. The code came to
 roughly 1400 lines, and the piece that looked hardest, the constant
 coefficient, had a short answer once the reason it was hard was clear. But the
 real price was never the code. It was the modulus, and what the modulus drags
-with it: `WIDTH`, `DIM`, `q` against its 64-bit ceiling, the CRT constants, two
-latent 32-bit assumptions in arithmetic that had been correct for years, and a
-prover seven times slower. Track A would have paid the same price, since
-LaZer's range proof obeys the same arithmetic.
+with it: `WIDTH`, `DIM`, `q` against its 64-bit ceiling, the CRT constants, and
+two latent 32-bit assumptions in arithmetic that had been correct for years.
+Track A would have paid the same price, since LaZer's range proof obeys the
+same arithmetic.
 
-So the decision is no longer Track A against Track B. It is whether fidelity to
-Protocol 1 as published, and not having to review the restatement of Lemma 5 in
-SOUNDNESS.md, is worth a modulus change and a 7x prover. That is a judgement
-about what the artifact is for.
+The prover was the other half of that price, and it is no longer. `is_bin`
+started at 7.9 times `fix-pkc` and batching brought it to 1.2 times, with the
+proof 1.9 times larger; sections 5a and 5b have the numbers. What that cost
+turned out to measure was redundancy in how the sub-proofs were wired, not the
+argument itself.
+
+So the decision is no longer Track A against Track B, and it is no longer a
+question of a 7x prover either. It is whether fidelity to Protocol 1 as
+published, and not having to review the restatement of Lemma 5 in
+SOUNDNESS.md, is worth a modulus change. That is a judgement about what the
+artifact is for.
 
 Finally, none of this is a soundness proof. The extraction argument for the
 product relation divides by `(c - c')(sigma(c) - sigma(c'))` and yields a

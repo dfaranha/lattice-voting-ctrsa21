@@ -30,11 +30,11 @@
 #define LNP_LAMBDA 	4
 
 /* Number of message slots in the multi-slot commitment. Slots 0 to 3 are the
- * is_bin witness, its claimed product and two garbage terms, slot 4 is the
- * projection mask of the range proof, and the remaining LNP_LAMBDA slots hold
- * the masks of the constant-coefficient proof, so that one commitment serves
- * every part of the proof. */
-#define SLOTS 	(5 + LNP_LAMBDA)
+ * is_bin witness, its claimed product and two garbage terms, and slot 4 is the
+ * projection mask of the range proof. The constant-coefficient masks are not
+ * here: one set of them covers every message, so they live in their own
+ * commitment rather than being paid for once per message. */
+#define SLOTS 	5
 
 /* Number of coordinates the approximate range proof projects onto. The
  * projection lemma needs 256 of them for a 2^-128 soundness error. */
@@ -56,9 +56,6 @@
  * of a ring element. */
 #define SLOT_W 	4
 
-/* First slot holding a constant-coefficient mask. */
-#define SLOT_G 	5
-
 /* Rank of the MLWE instance that hides the commitment, which is the number of
  * randomness components beyond those consumed by the Ajtai part and by the
  * message slots. Rank 1 is only about 72 bits; see LNP-PARAMS.md. */
@@ -68,6 +65,9 @@
  * single message slot, a BDLOP key with SLOTS message rows in Hermite normal
  * form needs one randomness component per row on top of the Ajtai part. */
 #define LNP_WIDTH 	(HEIGHT + SLOTS + LNP_RANK)
+
+/* Width of the randomness of the batch-mask commitment. */
+#define MASK_WIDTH 	(HEIGHT + LNP_LAMBDA + LNP_RANK)
 
 /*============================================================================*/
 /* Type definitions                                                           */
@@ -79,6 +79,27 @@ typedef struct _lnpkey_t {
 	pcrt_poly_t B1[HEIGHT][LNP_WIDTH];
 	pcrt_poly_t b2[SLOTS][LNP_WIDTH];
 } lnpkey_t;
+
+/* The key and commitment holding the constant-coefficient masks. There is one
+ * of each for the whole batch, which is the point: the scalar aggregation pays
+ * for LNP_LAMBDA masks however many statements it covers, so paying for them
+ * once per message was waste. */
+typedef struct _lnpmaskkey_t {
+	pcrt_poly_t B1[HEIGHT][MASK_WIDTH];
+	pcrt_poly_t b2[LNP_LAMBDA][MASK_WIDTH];
+} lnpmaskkey_t;
+
+typedef struct _lnpmaskcom_t {
+	pcrt_poly_t c1[HEIGHT];
+	pcrt_poly_t c2[LNP_LAMBDA];
+} lnpmaskcom_t;
+
+/* The aggregated values, one set for the whole batch rather than one per
+ * message. */
+typedef struct _lnpbatch_t {
+	pcrt_poly_t h[LNP_LAMBDA];
+	pcrt_poly_t v[LNP_LAMBDA];
+} lnpbatch_t;
 
 /* A commitment to SLOTS messages under one randomness vector. */
 typedef struct _lnpcom_t {
@@ -103,8 +124,6 @@ typedef struct _lnpproof_t {
 typedef struct _lnpbinproof_t {
 	pcrt_poly_t t;					/* Product relation's masked term. */
 	ulong zp[PROJ];					/* The masked projection. */
-	pcrt_poly_t h[LNP_LAMBDA];		/* The aggregated values. */
-	pcrt_poly_t v[LNP_LAMBDA];		/* The masked openings of the relations. */
 } lnpbinproof_t;
 
 /* What the setup phase derives from the commitment and the projection. It is
@@ -250,7 +269,7 @@ void lnp_sample_proj_mask(pcrt_poly_t w, nmod_poly_t raw);
  * trying to adapt its masks to them.
  */
 void lnp_scalars_for_test(ulong nu[LNP_LAMBDA], lnpkey_t *key, lnpcom_t *com,
-		ulong z[PROJ]);
+		lnpmaskcom_t *mcom, ulong z[PROJ]);
 
 /**
  * Initialise and free the combined is_bin proof.
@@ -259,51 +278,73 @@ void lnp_binproof_init(lnpbinproof_t *pi);
 void lnp_binproof_free(lnpbinproof_t *pi);
 
 /*
- * The is_bin argument in phases, so that it can share one masked opening with
- * whatever else opens the same commitment. The linear proof of the shuffle
- * opens exactly this commitment under exactly this randomness, so running the
- * two as separate protocols meant masking the randomness twice and sending two
- * Ajtai first messages and two responses. Split like this, the caller supplies
- * the mask, absorbs both sets of first messages into one challenge, and sends
- * one response that answers both.
+ * The is_bin argument, batched. One challenge and one opening are shared with
+ * the linear proof of the shuffle, and one set of LNP_LAMBDA masks covers
+ * every message, so the aggregated values h and v are accumulated across the
+ * batch rather than produced per message.
  *
- * The order is setup, then first, then the caller's challenge, then check.
+ * The order is: commit the masks, then per message setup and first, then the
+ * caller's challenge, then per message check, then the batch check.
  */
 
 /**
- * Everything that does not depend on the mask: the projection, its scalars and
- * public multipliers, and the aggregated values.
- *
- * @return 1 if a transcript can be produced, 0 if the projection was rejected,
- *         in which case the caller must recommit with a fresh mask.
+ * Initialise, generate and free the batch-mask key and commitment.
  */
-int lnp_bin_setup(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
-		pcrt_poly_t s, pcrt_poly_t f, nmod_poly_t w,
-		pcrt_poly_t g[LNP_LAMBDA], lnpkey_t *key);
+void lnp_maskkey_init(lnpmaskkey_t *key);
+void lnp_maskkey_gen(lnpmaskkey_t *key, flint_rand_t rand);
+void lnp_maskkey_free(lnpmaskkey_t *key);
+void lnp_maskcom_init(lnpmaskcom_t *com);
+void lnp_maskcom_free(lnpmaskcom_t *com);
+void lnp_mask_commit(lnpmaskcom_t *com, pcrt_poly_t g[LNP_LAMBDA],
+		lnpmaskkey_t *key, pcrt_poly_t r[MASK_WIDTH]);
+
+void lnp_batch_init(lnpbatch_t *b);
+void lnp_batch_free(lnpbatch_t *b);
+void lnp_batch_zero(lnpbatch_t *b);
+
+/**
+ * Everything for one message that does not depend on the mask, accumulating
+ * this message's share of the aggregated values h.
+ *
+ * @return 1 if a transcript can be produced, 0 if the projection was rejected.
+ */
+int lnp_bin_setup(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpbatch_t *batch,
+		lnpcom_t *com, lnpmaskcom_t *mcom, pcrt_poly_t s, pcrt_poly_t f,
+		nmod_poly_t w, lnpkey_t *key);
 
 /**
  * Rebuild the public part of the setup, for the verifier.
  */
 void lnp_bin_public(lnpbinctx_t *ctx, lnpbinproof_t *pi, lnpcom_t *com,
-		lnpkey_t *key);
+		lnpmaskcom_t *mcom, lnpkey_t *key);
 
 /**
- * The mask-dependent first messages. Fills the garbage slots of the
- * commitment, so it must run before anything that hashes them.
+ * This message's mask-dependent first messages, accumulating its share of v.
  */
-void lnp_bin_first(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
-		pcrt_poly_t s, lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH],
+void lnp_bin_first(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpbatch_t *batch,
+		lnpcom_t *com, pcrt_poly_t s, lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH],
 		pcrt_poly_t y[LNP_WIDTH]);
 
 /**
- * Check the argument against a challenge and an opening the caller owns.
+ * Check this message's product relation, and accumulate its share of the
+ * aggregated relation into acc.
  */
 int lnp_bin_check(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
-		lnpkey_t *key, pcrt_poly_t d, pcrt_poly_t z[LNP_WIDTH]);
+		lnpkey_t *key, pcrt_poly_t d, pcrt_poly_t z[LNP_WIDTH],
+		pcrt_poly_t acc[LNP_LAMBDA]);
 
 /**
- * Initialise and free the context.
+ * The batch-wide check, once every message has contributed.
  */
+int lnp_batch_check(lnpbatch_t *batch, lnpmaskcom_t *mcom, lnpmaskkey_t *mkey,
+		pcrt_poly_t d, pcrt_poly_t zm[MASK_WIDTH], pcrt_poly_t acc[LNP_LAMBDA]);
+
+/**
+ * The batch-mask commitment's contribution to the first message.
+ */
+void lnp_batch_first(lnpbatch_t *batch, lnpmaskkey_t *mkey,
+		pcrt_poly_t ym[MASK_WIDTH]);
+
 void lnp_binctx_init(lnpbinctx_t *ctx);
 void lnp_binctx_free(lnpbinctx_t *ctx);
 
