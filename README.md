@@ -64,8 +64,8 @@ is the input commitments and the shuffled list, is not included.
 
 Five things the table is worth reading for.
 
-**The published parameters give about 73 bits, not the 100 claimed in the
-paper.** `master`, `nocrt` and `fix-pkc` are all limited by the hiding property
+**The published parameters give about 73 bits as per latest estimates, not the 100 claimed in the
+paper at the time.** `master`, `nocrt` and `fix-pkc` are all limited by the hiding property
 of the commitment, which is MLWE of rank `WIDTH - HEIGHT - 1`, and at
 `WIDTH = 3` that rank is 1. Binding and encryption are comfortable; hiding is
 not. `balanced-params` exists to fix this, and does, at `WIDTH = 4`.
