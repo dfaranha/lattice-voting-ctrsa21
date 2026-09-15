@@ -30,12 +30,12 @@
  * quote was for the modulus before B5 raised it. */
 #define LNP_LAMBDA 	4
 
-/* Number of message slots in the multi-slot commitment. Slots 0 to 3 are the
- * is_bin witness, its claimed product and two garbage terms, and slot 4 is the
- * projection mask of the range proof. The constant-coefficient masks are not
- * here: one set of them covers every message, so they live in their own
- * commitment rather than being paid for once per message. */
-#define SLOTS 	5
+/* Number of message slots in the multi-slot commitment: the is_bin witness,
+ * its claimed product, and the projection mask of the range proof. Neither the
+ * constant-coefficient masks nor the quadratic proof's garbage terms are here.
+ * One set of each covers the whole batch, so they live in commitments of their
+ * own rather than being paid for once per message. */
+#define SLOTS 	3
 
 /* Number of coordinates the approximate range proof projects onto. The
  * projection lemma needs 256 of them for a 2^-128 soundness error. */
@@ -55,7 +55,7 @@
 
 /* Slot holding the projection mask, packed into the first PROJ coefficients
  * of a ring element. */
-#define SLOT_W 	4
+#define SLOT_W 	2
 
 /* Rank of the MLWE instance that hides the commitment, which is the number of
  * randomness components beyond those consumed by the Ajtai part and by the
@@ -69,6 +69,14 @@
 
 /* Width of the randomness of the batch-mask commitment. */
 #define MASK_WIDTH 	(HEIGHT + LNP_LAMBDA + LNP_RANK)
+
+/* The quadratic proof needs two garbage terms to cancel the challenge-linear
+ * part of its expansion. Batched, one pair serves every message, so they get a
+ * commitment of their own with two message rows. It cannot share the mask
+ * commitment: that one has to be fixed before the projection scalars are
+ * derived, whereas these depend on the batching challenge, which cannot be
+ * drawn until every message's commitment exists. */
+#define GARB_WIDTH 	(HEIGHT + 2 + LNP_RANK)
 
 /*============================================================================*/
 /* Type definitions                                                           */
@@ -95,15 +103,29 @@ typedef struct _lnpmaskcom_t {
 	pcrt_poly_t c2[LNP_LAMBDA];
 } lnpmaskcom_t;
 
+/* The key and commitment holding the batched garbage terms. */
+typedef struct _lnpgarbkey_t {
+	pcrt_poly_t B1[HEIGHT][GARB_WIDTH];
+	pcrt_poly_t b2[2][GARB_WIDTH];
+} lnpgarbkey_t;
+
+typedef struct _lnpgarbcom_t {
+	pcrt_poly_t c1[HEIGHT];
+	pcrt_poly_t c2[2];
+} lnpgarbcom_t;
+
 /* The aggregated values, one set for the whole batch rather than one per
  * message, and the Ajtai first message that opens the mask commitment. The
  * latter is what binds the prover to the masks it committed: without it the
  * rows below are LNP_LAMBDA equations in MASK_WIDTH unknowns, and a prover
  * could pick any h with zero constant coefficient and solve for z_mask. */
 typedef struct _lnpbatch_t {
-	pcrt_poly_t w[HEIGHT];
+	pcrt_poly_t w[HEIGHT];			/* Ajtai first message of the masks. */
 	pcrt_poly_t h[LNP_LAMBDA];
 	pcrt_poly_t v[LNP_LAMBDA];
+	pcrt_poly_t gw[HEIGHT];			/* Ajtai first message of the garbage. */
+	pcrt_poly_t T;					/* The batched challenge-free term. */
+	pcrt_poly_t acc;				/* Verifier-side accumulator for T. */
 } lnpbatch_t;
 
 /* A commitment to SLOTS messages under one randomness vector. */
@@ -127,7 +149,6 @@ typedef struct _lnpproof_t {
  * one randomness, so they share a single mask, a single challenge and a single
  * masked opening z, instead of carrying one each. */
 typedef struct _lnpbinproof_t {
-	pcrt_poly_t t;					/* Product relation's masked term. */
 	ulong zp[PROJ];					/* The masked projection. */
 } lnpbinproof_t;
 
@@ -202,31 +223,14 @@ void lnp_proof_free(lnpproof_t *pi);
 void lnp_commit(lnpcom_t *com, pcrt_poly_t m[SLOTS], lnpkey_t *key,
 		pcrt_poly_t r[LNP_WIDTH]);
 
-/**
- * Prove that the committed messages satisfy m[0] * m[1] = m[2].
- *
- * Slot 3 carries the garbage term, so the caller supplies its randomness but
- * not its message: the prover computes it. The commitment passed in must
- * already hold slots 0 to 2.
- *
- * @param[out] pi			- the resulting proof.
- * @param[in,out] com		- the commitment, whose garbage slot is filled in.
- * @param[in] m				- the three messages, in CRT representation.
- * @param[in] key			- the commitment key.
- * @param[in] r				- the commitment randomness, in CRT representation.
+/*
+ * The standalone quadratic proof that used to live here is gone. It needed
+ * four slots, three for its messages and one for its garbage term, and SLOTS
+ * is 3 now that the garbage terms are batched. The technique it demonstrated
+ * is exercised in its real form by the is_bin tests, which drive the same
+ * expansion through lnp_bin_first and lnp_bin_check.
  */
-void lnp_quad_prover(lnpproof_t *pi, lnpcom_t *com, pcrt_poly_t m[3],
-		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]);
 
-/**
- * Verify a proof that the committed messages satisfy m[0] * m[1] = m[2].
- *
- * @param[in] pi			- the proof.
- * @param[in] com			- the commitment.
- * @param[in] key			- the commitment key.
- * @return 1 if the proof is accepted, 0 otherwise.
- */
-int lnp_quad_verifier(lnpproof_t *pi, lnpcom_t *com, lnpkey_t *key);
 
 /**
  * Return the polynomial 1 + X + ... + X^(DEGREE-1) in CRT representation.
@@ -308,6 +312,24 @@ void lnp_batch_free(lnpbatch_t *b);
 void lnp_batch_zero(lnpbatch_t *b);
 
 /**
+ * Initialise, generate and free the garbage-term key and commitment.
+ */
+void lnp_garbkey_init(lnpgarbkey_t *key);
+void lnp_garbkey_gen(lnpgarbkey_t *key, flint_rand_t rand);
+void lnp_garbkey_free(lnpgarbkey_t *key);
+void lnp_garbcom_init(lnpgarbcom_t *com);
+void lnp_garbcom_free(lnpgarbcom_t *com);
+void lnp_garb_commit(lnpgarbcom_t *com, pcrt_poly_t g[2], lnpgarbkey_t *key,
+		pcrt_poly_t r[GARB_WIDTH]);
+
+/**
+ * The garbage commitment's Ajtai first message, and the mask terms of the
+ * batched challenge-free term T.
+ */
+void lnp_garb_first(lnpbatch_t *batch, lnpgarbkey_t *gkey,
+		pcrt_poly_t yg[GARB_WIDTH]);
+
+/**
  * Everything for one message that does not depend on the mask, accumulating
  * this message's share of the aggregated values h.
  *
@@ -324,25 +346,33 @@ void lnp_bin_public(lnpbinctx_t *ctx, lnpbinproof_t *pi, lnpcom_t *com,
 		lnpmaskcom_t *mcom, lnpkey_t *key);
 
 /**
- * This message's mask-dependent first messages, accumulating its share of v.
+ * This message's mask-dependent first messages, accumulating its share of v,
+ * its rho-weighted share of the two batched garbage terms, and its share of
+ * the batched challenge-free term T.
+ *
+ * @param[in] rho			- this message's batching challenge.
+ * @param[in,out] garb		- the two garbage accumulators for the batch.
  */
-void lnp_bin_first(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpbatch_t *batch,
-		lnpcom_t *com, pcrt_poly_t s, lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH],
-		pcrt_poly_t y[LNP_WIDTH]);
+void lnp_bin_first(lnpbinctx_t *ctx, lnpbatch_t *batch, lnpcom_t *com,
+		pcrt_poly_t s, lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH],
+		pcrt_poly_t y[LNP_WIDTH], pcrt_poly_t rho, pcrt_poly_t garb[2]);
 
 /**
- * Check this message's product relation, and accumulate its share of the
- * aggregated relation into acc.
+ * Accumulate this message's share of the two aggregated relations: the
+ * rho-weighted quadratic terms into batch->acc, and the range and
+ * constant-coefficient rows into acc.
  */
-int lnp_bin_check(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
-		lnpkey_t *key, pcrt_poly_t d, pcrt_poly_t z[LNP_WIDTH],
-		pcrt_poly_t acc[LNP_LAMBDA]);
+int lnp_bin_check(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpbatch_t *batch,
+		lnpcom_t *com, lnpkey_t *key, pcrt_poly_t d, pcrt_poly_t z[LNP_WIDTH],
+		pcrt_poly_t acc[LNP_LAMBDA], pcrt_poly_t rho);
 
 /**
  * The batch-wide check, once every message has contributed.
  */
 int lnp_batch_check(lnpbatch_t *batch, lnpmaskcom_t *mcom, lnpmaskkey_t *mkey,
-		pcrt_poly_t d, pcrt_poly_t zm[MASK_WIDTH], pcrt_poly_t acc[LNP_LAMBDA]);
+		lnpgarbcom_t *gcom, lnpgarbkey_t *gkey, pcrt_poly_t d,
+		pcrt_poly_t zm[MASK_WIDTH], pcrt_poly_t zg[GARB_WIDTH],
+		pcrt_poly_t acc[LNP_LAMBDA]);
 
 /**
  * The batch-mask commitment's contribution to the first message.

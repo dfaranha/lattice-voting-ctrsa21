@@ -6,6 +6,7 @@
 #include "lnp.h"
 #include "test.h"
 #include "bench.h"
+#include "serial.h"
 #include "assert.h"
 #include "fastrandombytes.h"
 #include "sha.h"
@@ -190,6 +191,91 @@ typedef struct _isbin_t {
  * drawn at SIGMA_B, wide enough for a term sqrt(MSGS) times longer than one
  * message's.
  */
+/* Index of a message whose committed product the prover should corrupt, or -1
+ * for none. The quadratic relation is proven for the batch rather than per
+ * message, so the only way to see that the aggregation is load-bearing is to
+ * break one message of a real batch; the two CRT-mixing attacks cannot show
+ * it, because they compute their products honestly and are caught by the
+ * constant-coefficient half instead. Inert unless a test sets it. */
+static int break_product = -1;
+
+/* Set by the size test: round-trip the proof through its serialisation before
+ * verifying, and record how many bytes it took. */
+static int measure_proof = 0;
+static size_t proof_bytes = 0;
+
+/*
+ * The batching challenge, one ring element per message. It has to be drawn
+ * after every message's commitment, because the garbage terms of the quadratic
+ * proof are weighted by it, and before those garbage terms are committed,
+ * because a prover that knew it could adapt them. That ordering is why it is a
+ * separate hash from batch_hash rather than part of it.
+ */
+static void rho_hash(nmod_poly_t rho[MSGS][2], commitkey_t *key,
+		lnpkey_t *lkey, commit_t com[MSGS], lnpcom_t p[MSGS],
+		lnpmaskcom_t *mcom) {
+	SHA256Context sha;
+	uint8_t hash[SHA256HashSize];
+	uint32_t buf;
+	nmod_poly_t c;
+
+	SHA256Reset(&sha);
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int j = 0; j < WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				hash_poly(&sha, key->B1[i][j][k]);
+			}
+		}
+		for (int j = 0; j < LNP_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				hash_poly(&sha, lkey->B1[i][j][k]);
+			}
+		}
+	}
+	for (int k = 0; k < NCRT; k++) {
+		for (int i = 0; i < HEIGHT; i++) {
+			hash_poly(&sha, mcom->c1[i][k]);
+		}
+		for (int i = 0; i < LNP_LAMBDA; i++) {
+			hash_poly(&sha, mcom->c2[i][k]);
+		}
+	}
+	for (int l = 0; l < MSGS; l++) {
+		for (int k = 0; k < NCRT; k++) {
+			hash_poly(&sha, com[l].c1[k]);
+			hash_poly(&sha, com[l].c2[k]);
+			for (int i = 0; i < HEIGHT; i++) {
+				hash_poly(&sha, p[l].c1[i][k]);
+			}
+			for (int i = 0; i < SLOTS; i++) {
+				hash_poly(&sha, p[l].c2[i][k]);
+			}
+		}
+	}
+	SHA256Result(&sha, hash);
+
+	/* Same shape as the opening challenge, so that differences of distinct
+	 * challenges are short enough for Lemma 1 to make them invertible. */
+	nmod_poly_init(c, MODP);
+	fastrandombytes_setseed(hash);
+	for (int l = 0; l < MSGS; l++) {
+		nmod_poly_zero(c);
+		nmod_poly_fit_length(c, DEGREE);
+		for (int i = 0; i < NONZERO; i++) {
+			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			buf = buf % DEGREE;
+			while (nmod_poly_get_coeff_ui(c, buf) != 0) {
+				fastrandombytes((unsigned char *)&buf, sizeof(buf));
+				buf = buf % DEGREE;
+			}
+			nmod_poly_set_coeff_ui(c, buf, 1);
+		}
+		pcrt_poly_reduce(rho[l][0], c, 0);
+		pcrt_poly_reduce(rho[l][1], c, 1);
+	}
+	nmod_poly_clear(c);
+}
+
 /* One challenge for the whole batch. It absorbs every commitment and every
  * first message, so no message's transcript can be replayed against another's,
  * and so the single opening each message sends answers a challenge that
@@ -198,7 +284,8 @@ static void batch_hash(nmod_poly_t d[2], commitkey_t *key, lnpkey_t *lkey,
 		commit_t com[MSGS], lnpcom_t p[MSGS], commit_t dc[MSGS],
 		nmod_poly_t t[MSGS][2], nmod_poly_t tp[MSGS][2],
 		nmod_poly_t _t[MSGS][2], nmod_poly_t u[MSGS][2], isbin_t ib[MSGS],
-		nmod_poly_t beta, lnpmaskcom_t *mcom, lnpbatch_t *batch) {
+		nmod_poly_t beta, lnpmaskcom_t *mcom, lnpgarbcom_t *gcom,
+		lnpbatch_t *batch) {
 	SHA256Context sha;
 	uint8_t hash[SHA256HashSize];
 	uint32_t buf;
@@ -227,12 +314,18 @@ static void batch_hash(nmod_poly_t d[2], commitkey_t *key, lnpkey_t *lkey,
 		for (int i = 0; i < HEIGHT; i++) {
 			hash_poly(&sha, mcom->c1[i][k]);
 			hash_poly(&sha, batch->w[i][k]);
+			hash_poly(&sha, gcom->c1[i][k]);
+			hash_poly(&sha, batch->gw[i][k]);
 		}
 		for (int i = 0; i < LNP_LAMBDA; i++) {
 			hash_poly(&sha, mcom->c2[i][k]);
 			hash_poly(&sha, batch->h[i][k]);
 			hash_poly(&sha, batch->v[i][k]);
 		}
+		for (int i = 0; i < 2; i++) {
+			hash_poly(&sha, gcom->c2[i][k]);
+		}
+		hash_poly(&sha, batch->T[k]);
 	}
 	for (int l = 0; l < MSGS; l++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -250,7 +343,6 @@ static void batch_hash(nmod_poly_t d[2], commitkey_t *key, lnpkey_t *lkey,
 			hash_poly(&sha, tp[l][k]);
 			hash_poly(&sha, _t[l][k]);
 			hash_poly(&sha, u[l][k]);
-			hash_poly(&sha, ib[l].all.t[k]);
 		}
 		SHA256Input(&sha, (const uint8_t *)ib[l].all.zp,
 				PROJ * sizeof(ulong));
@@ -281,7 +373,8 @@ static void lin_first(nmod_poly_t y[WIDTH][2], nmod_poly_t w[LNP_WIDTH][2],
 		nmod_poly_t _t[2], nmod_poly_t u[2], lnpcom_t *p,
 		commitkey_t *key, lnpkey_t *lkey, nmod_poly_t alpha,
 		nmod_poly_t gamma, nmod_poly_t s[LNP_WIDTH][2], isbin_t *ib,
-		nmod_poly_t sig[2], lnpbatch_t *batch) {
+		nmod_poly_t sig[2], lnpbatch_t *batch, nmod_poly_t rho[2],
+		pcrt_poly_t garb[2]) {
 	nmod_poly_t tmp, a[2], g[2];
 
 	nmod_poly_init(tmp, MODP);
@@ -339,7 +432,7 @@ static void lin_first(nmod_poly_t y[WIDTH][2], nmod_poly_t w[LNP_WIDTH][2],
 	}
 
 	/* The is_bin first messages ride on the same mask. */
-	lnp_bin_first(&ib->all, &ib->ctx, batch, p, sig, lkey, s, w);
+	lnp_bin_first(&ib->ctx, batch, p, sig, lkey, s, w, rho, garb);
 
 	nmod_poly_clear(tmp);
 	for (int i = 0; i < NCRT; i++) {
@@ -396,7 +489,8 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t w[LNP_WIDTH][2],
 		nmod_poly_t u[2], commit_t x, lnpcom_t *p, commit_t _x,
 		commitkey_t *key, lnpkey_t *lkey, nmod_poly_t alpha,
 		nmod_poly_t gamma, nmod_poly_t beta, isbin_t *ib,
-		nmod_poly_t _d[2], lnpmaskcom_t *mcom, pcrt_poly_t acc[LNP_LAMBDA]) {
+		nmod_poly_t _d[2], lnpmaskcom_t *mcom, pcrt_poly_t acc[LNP_LAMBDA],
+		lnpbatch_t *batch, nmod_poly_t rho[2]) {
 	nmod_poly_t tmp, a[2], g[2], b[2];
 	nmod_poly_t v[2], vp[2], _v[2], lhs[2], rhs[2];
 	nmod_poly_t z[WIDTH], zp[LNP_WIDTH], _z[WIDTH];
@@ -432,7 +526,8 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t w[LNP_WIDTH][2],
 
 	/* The same opening w answers the is_bin argument, whose aggregated half is
 	 * settled once for the batch. */
-	result &= lnp_bin_check(&ib->all, &ib->ctx, p, lkey, _d, w, acc);
+	result &= lnp_bin_check(&ib->all, &ib->ctx, batch, p, lkey, _d, w, acc,
+			rho);
 
 	/* Verifier checks norms, reconstructing from CRT representation. These are
 	 * soundness checks and must make verification fail, so they are ordinary
@@ -659,7 +754,9 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 		commitkey_t *key, lnpkey_t *lkey, lnpmaskkey_t *mkey,
 		lnpmaskcom_t *mcom, lnpbatch_t *batch,
 		nmod_poly_t mr[MASK_WIDTH][2], nmod_poly_t zm[MASK_WIDTH][2],
-		flint_rand_t rng) {
+		lnpgarbkey_t *gkey, lnpgarbcom_t *gcom,
+		nmod_poly_t gr[GARB_WIDTH][2], nmod_poly_t zg[GARB_WIDTH][2],
+		nmod_poly_t bch[MSGS][2], flint_rand_t rng) {
 	nmod_poly_t beta, alpha, gamma, pub, t0, t1;
 	nmod_poly_t a[MSGS], b[MSGS], theta[MSGS], _r[MSGS][WIDTH][2];
 	nmod_poly_t sig[MSGS][2];
@@ -793,6 +890,16 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 					nmod_poly_set(msg[SLOT_S][k], sig[l][k]);
 				}
 				lnp_isbin_product(msg[SLOT_F], msg[SLOT_S]);
+				if (l == break_product) {
+					/* Test-only. Break the product on one message of the
+					 * batch while leaving its constant coefficient alone, so
+					 * that only the batched quadratic relation can notice. */
+					for (int k = 0; k < NCRT; k++) {
+						nmod_poly_set_coeff_ui(msg[SLOT_F][k], 1,
+								nmod_add(nmod_poly_get_coeff_ui(
+								msg[SLOT_F][k], 1), 1, msg[SLOT_F][k]->mod));
+					}
+				}
 				lnp_sample_proj_mask(wc, wraw);
 				for (int k = 0; k < NCRT; k++) {
 					nmod_poly_set(msg[SLOT_W][k], wc[k]);
@@ -832,6 +939,8 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 			nmod_poly_init(dch[k], MODP);
 		}
 		nmod_poly_t ym[MASK_WIDTH][2], cm[MASK_WIDTH][2];
+		nmod_poly_t yg[GARB_WIDTH][2], cg[GARB_WIDTH][2];
+		pcrt_poly_t garb[2];
 
 		for (int i = 0; i < MASK_WIDTH; i++) {
 			for (int k = 0; k < NCRT; k++) {
@@ -839,6 +948,21 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 				nmod_poly_init(cm[i][k], MODP);
 			}
 		}
+		for (int i = 0; i < GARB_WIDTH; i++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_init(yg[i][k], MODP);
+				nmod_poly_init(cg[i][k], MODP);
+			}
+		}
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(garb[0][k], MODP);
+			nmod_poly_init(garb[1][k], MODP);
+		}
+
+		/* Every commitment exists now, so the batching challenge can be
+		 * drawn. The garbage terms below are weighted by it. */
+		rho_hash(bch, key, lkey, com, p, mcom);
+
 		do {
 			dot = norm = 0;
 			for (int j = 0; j < LNP_LAMBDA; j++) {
@@ -846,18 +970,31 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 					nmod_poly_zero(batch->v[j][k]);
 				}
 			}
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_zero(batch->T[k]);
+				nmod_poly_zero(garb[0][k]);
+				nmod_poly_zero(garb[1][k]);
+			}
 			for (int i = 0; i < MASK_WIDTH; i++) {
 				commit_sample_gauss_batch_crt(ym[i]);
+			}
+			for (int i = 0; i < GARB_WIDTH; i++) {
+				commit_sample_gauss_batch_crt(yg[i]);
 			}
 			for (int l = 0; l < MSGS; l++) {
 				shuffle_coeffs(alpha, gamma, pub, l, s, _m, beta, tau, rho);
 				lin_first(y[l], w[l], _y[l], t[l], tp[l], _t[l], u[l],
 						&p[l], key, lkey, alpha, gamma, pr[l], &ib[l],
-						sig[l], batch);
+						sig[l], batch, bch[l], garb);
 			}
+			/* The garbage terms are complete only once every message has
+			 * contributed, so they are committed here rather than inside the
+			 * per-message loop. */
+			lnp_garb_commit(gcom, garb, gkey, gr);
+			lnp_garb_first(batch, gkey, yg);
 			lnp_batch_first(batch, mkey, ym);
 			batch_hash(dch, key, lkey, com, p, d, t, tp, _t, u, ib, beta,
-					mcom, batch);
+					mcom, gcom, batch);
 			for (int l = 0; l < MSGS; l++) {
 				lin_respond(y[l], w[l], _y[l], dch, r[l], pr[l], _r[l],
 						&dot, &norm);
@@ -868,7 +1005,14 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 					nmod_poly_add(zm[i][k], ym[i][k], cm[i][k]);
 				}
 			}
+			for (int i = 0; i < GARB_WIDTH; i++) {
+				for (int k = 0; k < NCRT; k++) {
+					pcrt_poly_mulmod(cg[i][k], dch[k], gr[i][k], k);
+					nmod_poly_add(zg[i][k], yg[i][k], cg[i][k]);
+				}
+			}
 			commit_rej_accumulate(&dot, &norm, zm, cm, MASK_WIDTH);
+			commit_rej_accumulate(&dot, &norm, zg, cg, GARB_WIDTH);
 			rej = commit_rej_decide(dot, norm, sigma_sqr);
 		} while (rej);
 		for (int i = 0; i < MASK_WIDTH; i++) {
@@ -876,6 +1020,16 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 				nmod_poly_clear(ym[i][k]);
 				nmod_poly_clear(cm[i][k]);
 			}
+		}
+		for (int i = 0; i < GARB_WIDTH; i++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_clear(yg[i][k]);
+				nmod_poly_clear(cg[i][k]);
+			}
+		}
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(garb[0][k]);
+			nmod_poly_clear(garb[1][k]);
 		}
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(dch[k]);
@@ -911,7 +1065,8 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 		isbin_t ib[MSGS], nmod_poly_t _m[MSGS], nmod_poly_t tau,
 		nmod_poly_t rho, commitkey_t *key, lnpkey_t *lkey,
 		lnpmaskkey_t *mkey, lnpmaskcom_t *mcom, lnpbatch_t *batch,
-		nmod_poly_t zm[MASK_WIDTH][2]) {
+		nmod_poly_t zm[MASK_WIDTH][2], lnpgarbkey_t *gkey, lnpgarbcom_t *gcom,
+		nmod_poly_t zg[GARB_WIDTH][2], nmod_poly_t bch[MSGS][2]) {
 	int result = 1;
 	nmod_poly_t beta, alpha, gamma, pub, dch[NCRT];
 	pcrt_poly_t acc[LNP_LAMBDA];
@@ -933,8 +1088,13 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 	for (int l = 0; l < MSGS; l++) {
 		lnp_bin_public(&ib[l].ctx, &ib[l].all, &p[l], mcom, lkey);
 	}
-	batch_hash(dch, key, lkey, com, p, d, t, tp, _t, u, ib, beta, mcom,
+	batch_hash(dch, key, lkey, com, p, d, t, tp, _t, u, ib, beta, mcom, gcom,
 			batch);
+	/* Every message adds its rho-weighted share of the quadratic relation to
+	 * this, and lnp_batch_check settles the total. */
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_zero(batch->acc[k]);
+	}
 	/* Now verify each \Prod_LIN instance, one for each commitment. */
 	for (int l = 0; l < MSGS; l++) {
 		shuffle_coeffs(alpha, gamma, pub, l, s, _m, beta, tau, rho);
@@ -944,10 +1104,10 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 		result &=
 				lin_verifier(y[l], w[l], _y[l], t[l], tp[l], _t[l],
 				u[l], com[l], &p[l], d[l], key, lkey, alpha, gamma, pub,
-				&ib[l], dch, mcom, acc);
+				&ib[l], dch, mcom, acc, batch, bch[l]);
 	}
 
-	result &= lnp_batch_check(batch, mcom, mkey, dch, zm, acc);
+	result &= lnp_batch_check(batch, mcom, mkey, gcom, gkey, dch, zm, zg, acc);
 
 	nmod_poly_clear(beta);
 	nmod_poly_clear(alpha);
@@ -978,6 +1138,125 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
  * @param[in] rng			- the random number generator.
  * @return 1 if the proof verifies, 0 otherwise.
  */
+/*
+ * Serialising the proof, so that its size is measured rather than modelled.
+ *
+ * Pointers to every part the prover sends, gathered so that one walk can both
+ * pack and unpack them. Exactly one of the writer and the reader is non-NULL,
+ * which is what keeps the two directions from drifting apart: there is only
+ * one list, and both directions read it.
+ *
+ * What is absent matters as much as what is present. The commitments com[] and
+ * the shuffled list _m[] are the statement, and the three keys are public
+ * parameters, so none of them is counted.
+ */
+typedef struct _proof_t {
+	nmod_poly_t (*y)[WIDTH][2];
+	nmod_poly_t (*_y)[WIDTH][2];
+	nmod_poly_t (*w)[LNP_WIDTH][2];
+	nmod_poly_t (*t)[2];
+	nmod_poly_t (*tp)[2];
+	nmod_poly_t (*_t)[2];
+	nmod_poly_t (*u)[2];
+	commit_t *d;
+	nmod_poly_t *s;
+	lnpcom_t *p;
+	isbin_t *ib;
+	lnpmaskcom_t *mcom;
+	lnpgarbcom_t *gcom;
+	lnpbatch_t *batch;
+	nmod_poly_t (*zm)[2];
+	nmod_poly_t (*zg)[2];
+} proof_t;
+
+static void walk_uniform(bitwriter_t *w, bitreader_t *r, nmod_poly_t a[2]) {
+	if (w != NULL) {
+		serial_put_uniform(w, a);
+	} else {
+		serial_get_uniform(r, a);
+	}
+}
+
+static void walk_gauss(bitwriter_t *w, bitreader_t *r, nmod_poly_t a[2],
+		ulong sigma) {
+	if (w != NULL) {
+		serial_put_gauss(w, a, sigma);
+	} else {
+		serial_get_gauss(r, a, sigma);
+	}
+}
+
+static void proof_walk(proof_t *pf, bitwriter_t *w, bitreader_t *r) {
+	for (int l = 0; l < MSGS; l++) {
+		for (int i = 0; i < WIDTH; i++) {
+			walk_gauss(w, r, pf->y[l][i], SIGMA_B);
+			walk_gauss(w, r, pf->_y[l][i], SIGMA_B);
+		}
+		for (int i = 0; i < LNP_WIDTH; i++) {
+			walk_gauss(w, r, pf->w[l][i], SIGMA_B);
+		}
+		walk_uniform(w, r, pf->t[l]);
+		walk_uniform(w, r, pf->tp[l]);
+		walk_uniform(w, r, pf->_t[l]);
+		walk_uniform(w, r, pf->u[l]);
+		walk_uniform(w, r, pf->d[l].c1);
+		walk_uniform(w, r, pf->d[l].c2);
+		for (int i = 0; i < HEIGHT; i++) {
+			walk_uniform(w, r, pf->p[l].c1[i]);
+		}
+		for (int i = 0; i < SLOTS; i++) {
+			walk_uniform(w, r, pf->p[l].c2[i]);
+		}
+		if (w != NULL) {
+			serial_put_proj(w, pf->ib[l].all.zp, PROJ, SIGMA_P);
+		} else {
+			serial_get_proj(r, pf->ib[l].all.zp, PROJ, SIGMA_P);
+		}
+	}
+	/* s[l] is a single ring element per message, held separately. */
+	for (int l = 0; l < MSGS; l++) {
+		nmod_poly_t crt[2];
+
+		if (w != NULL) {
+			nmod_poly_init(crt[0], MODP);
+			nmod_poly_init(crt[1], MODP);
+			pcrt_poly_reduce(crt[0], pf->s[l], 0);
+			pcrt_poly_reduce(crt[1], pf->s[l], 1);
+			serial_put_uniform(w, crt);
+			nmod_poly_clear(crt[0]);
+			nmod_poly_clear(crt[1]);
+		} else {
+			nmod_poly_init(crt[0], MODP);
+			nmod_poly_init(crt[1], MODP);
+			serial_get_uniform(r, crt);
+			pcrt_poly_rec(pf->s[l], crt);
+			nmod_poly_clear(crt[0]);
+			nmod_poly_clear(crt[1]);
+		}
+	}
+	for (int i = 0; i < HEIGHT; i++) {
+		walk_uniform(w, r, pf->mcom->c1[i]);
+		walk_uniform(w, r, pf->batch->w[i]);
+		walk_uniform(w, r, pf->gcom->c1[i]);
+		walk_uniform(w, r, pf->batch->gw[i]);
+	}
+	for (int i = 0; i < LNP_LAMBDA; i++) {
+		walk_uniform(w, r, pf->mcom->c2[i]);
+		walk_uniform(w, r, pf->batch->h[i]);
+		walk_uniform(w, r, pf->batch->v[i]);
+	}
+	for (int i = 0; i < 2; i++) {
+		walk_uniform(w, r, pf->gcom->c2[i]);
+	}
+	walk_uniform(w, r, pf->batch->T);
+	for (int i = 0; i < MASK_WIDTH; i++) {
+		walk_gauss(w, r, pf->zm[i], SIGMA_B);
+	}
+	for (int i = 0; i < GARB_WIDTH; i++) {
+		walk_gauss(w, r, pf->zg[i], SIGMA_B);
+	}
+}
+
 static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		nmod_poly_t sigma[MSGS], nmod_poly_t r[MSGS][WIDTH][2],
 		commitkey_t *key, lnpkey_t *lkey, flint_rand_t rng) {
@@ -989,8 +1268,12 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	static nmod_poly_t pr[MSGS][LNP_WIDTH][2];
 	static nmod_poly_t w[MSGS][LNP_WIDTH][2];
 	static nmod_poly_t mr[MASK_WIDTH][2], zm[MASK_WIDTH][2];
+	static nmod_poly_t gr[GARB_WIDTH][2], zg[GARB_WIDTH][2];
+	static nmod_poly_t bch[MSGS][2];
 	lnpmaskkey_t mkey;
 	lnpmaskcom_t mcom;
+	lnpgarbkey_t gkey;
+	lnpgarbcom_t gcom;
 	lnpbatch_t batch;
 	nmod_poly_t tau, rho, s[MSGS], u[MSGS][2];
 	nmod_poly_t y[MSGS][WIDTH][2], _y[MSGS][WIDTH][2];
@@ -1002,6 +1285,9 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	lnp_maskkey_init(&mkey);
 	lnp_maskkey_gen(&mkey, rng);
 	lnp_maskcom_init(&mcom);
+	lnp_garbkey_init(&gkey);
+	lnp_garbkey_gen(&gkey, rng);
+	lnp_garbcom_init(&gcom);
 	lnp_batch_init(&batch);
 	for (int i = 0; i < MASK_WIDTH; i++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -1009,6 +1295,18 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 			nmod_poly_init(zm[i][k], MODP);
 		}
 		commit_sample_short_crt(mr[i]);
+	}
+	for (int i = 0; i < GARB_WIDTH; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(gr[i][k], MODP);
+			nmod_poly_init(zg[i][k], MODP);
+		}
+		commit_sample_short_crt(gr[i]);
+	}
+	for (int l = 0; l < MSGS; l++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(bch[l][k], MODP);
+		}
 	}
 	for (int i = 0; i < SLOTS; i++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -1061,10 +1359,32 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	commit_sample_rand(rho, rng, DEGCRT);
 
 	shuffle_prover(y, w, _y, t, tp, _t, u, d, s, com, p, ib, m, _m, sigma,
-			r, pr, tau, rho, key, lkey, &mkey, &mcom, &batch, mr, zm, rng);
+			r, pr, tau, rho, key, lkey, &mkey, &mcom, &batch, mr, zm,
+			&gkey, &gcom, gr, zg, bch, rng);
+
+	/* Round-trip the proof through its serialisation before verifying it, so
+	 * that the measured size is the size of something that actually verifies
+	 * and not just a count of struct fields. Verification then runs on the
+	 * decoded values, so any loss shows up as a failure. */
+	if (measure_proof) {
+		static uint8_t buf[12 << 20];
+		bitwriter_t bw;
+		bitreader_t br;
+		proof_t pf = { y, _y, w, t, tp, _t, u, d, s, p, ib, &mcom, &gcom,
+				&batch, zm, zg };
+
+		serial_writer_init(&bw, buf, sizeof(buf));
+		proof_walk(&pf, &bw, NULL);
+		assert(!bw.overflow);
+		proof_bytes = serial_bytes(&bw);
+		serial_reader_init(&br, buf, sizeof(buf));
+		proof_walk(&pf, NULL, &br);
+		assert(!br.overflow);
+	}
 
 	result = shuffle_verifier(y, w, _y, t, tp, _t, u, d, s, com, p, ib, _m,
-			tau, rho, key, lkey, &mkey, &mcom, &batch, zm);
+			tau, rho, key, lkey, &mkey, &mcom, &batch, zm, &gkey, &gcom,
+			zg, bch);
 
 	nmod_poly_clear(tau);
 	nmod_poly_clear(rho);
@@ -1079,8 +1399,21 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 			nmod_poly_clear(zm[i][k]);
 		}
 	}
+	for (int i = 0; i < GARB_WIDTH; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(gr[i][k]);
+			nmod_poly_clear(zg[i][k]);
+		}
+	}
+	for (int l = 0; l < MSGS; l++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(bch[l][k]);
+		}
+	}
 	lnp_maskkey_free(&mkey);
 	lnp_maskcom_free(&mcom);
+	lnp_garbkey_free(&gkey);
+	lnp_garbcom_free(&gcom);
 	lnp_batch_free(&batch);
 	for (int i = 0; i < MSGS; i++) {
 		commit_free(&d[i]);
@@ -1220,6 +1553,29 @@ static void test(flint_rand_t rand) {
 		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey, rand) == 1, end);
 	} TEST_END;
 
+	/* Both of the next two need an honest witness, so they run before
+	 * sigma is CRT-mixed in place below. */
+	TEST_ONCE("proof survives serialisation, and measures what it should") {
+		measure_proof = 1;
+		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey, rand) == 1, end);
+		measure_proof = 0;
+		printf("\n    %zu bytes, %.1f KB per message\n", proof_bytes,
+				proof_bytes / 1024.0 / MSGS);
+		/* The figure quoted in LNP-PARAMS.md, to within the padding of the
+		 * final byte. If this drifts, one of the two is wrong. */
+		TEST_ASSERT(proof_bytes / 1024.0 / MSGS < 101.0, end);
+		TEST_ASSERT(proof_bytes / 1024.0 / MSGS > 100.0, end);
+	} TEST_END;
+
+	TEST_ONCE("batched quadratic rejects one message with a wrong product") {
+		/* The corruption leaves the constant coefficient alone, so the
+		 * constant-coefficient and range halves still pass and only the
+		 * batched quadratic relation can reject. */
+		break_product = 3;
+		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey, rand) == 0, end);
+		break_product = -1;
+	} TEST_END;
+
 	/* Mount the attack of Section 4.1: the output list is obtained from the
 	 * input list by swapping the first CRT component of two messages. It is
 	 * therefore *not* a permutation of the input over R_p, yet the product
@@ -1271,6 +1627,7 @@ static void test(flint_rand_t rand) {
 		TEST_ASSERT(commit_norm2_leq(sigma[0], (uint64_t) DEGREE) == 0, end);
 		TEST_ASSERT(commit_norm2_leq(sigma[1], (uint64_t) DEGREE) == 0, end);
 	} TEST_END;
+
 
 	TEST_ONCE("shuffle proof rejects the CRT-mixing attack on sigma") {
 		TEST_ASSERT(run(com, m, am, sigma, r, &key, &lkey, rand) == 0, end);

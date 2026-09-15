@@ -36,63 +36,6 @@ static void hash_poly(SHA256Context *sha, nmod_poly_t p) {
 	SHA256Input(sha, (const uint8_t *)buf, sizeof(buf));
 }
 
-/* Derive the Fiat-Shamir challenge from the key, the statement and the whole
- * first message. Slot 3 of the commitment carries the garbage term and belongs
- * to the first message, so it must be absorbed too: leaving it out would let a
- * prover pick it after seeing the challenge. */
-static void quad_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
-		pcrt_poly_t w[HEIGHT], pcrt_poly_t t) {
-	SHA256Context sha;
-	uint8_t hash[SHA256HashSize];
-	uint32_t buf;
-	nmod_poly_t c;
-
-	SHA256Reset(&sha);
-	for (int i = 0; i < HEIGHT; i++) {
-		for (int j = 0; j < LNP_WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->B1[i][j][k]);
-			}
-		}
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int j = 0; j < LNP_WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->b2[i][j][k]);
-			}
-		}
-	}
-	for (int k = 0; k < NCRT; k++) {
-		for (int i = 0; i < HEIGHT; i++) {
-			hash_poly(&sha, com->c1[i][k]);
-			hash_poly(&sha, w[i][k]);
-		}
-		for (int i = 0; i < SLOTS; i++) {
-			hash_poly(&sha, com->c2[i][k]);
-		}
-		hash_poly(&sha, t[k]);
-	}
-	SHA256Result(&sha, hash);
-
-	/* Sample a challenge with NONZERO coefficients set, as commit.c does, then
-	 * reduce it into CRT representation. */
-	nmod_poly_init(c, MODP);
-	fastrandombytes_setseed(hash);
-	nmod_poly_fit_length(c, DEGREE);
-	for (int i = 0; i < NONZERO; i++) {
-		fastrandombytes((unsigned char *)&buf, sizeof(buf));
-		buf = buf % DEGREE;
-		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
-			buf = buf % DEGREE;
-		}
-		nmod_poly_set_coeff_ui(c, buf, 1);
-	}
-	pcrt_poly_reduce(d[0], c, 0);
-	pcrt_poly_reduce(d[1], c, 1);
-	nmod_poly_clear(c);
-}
-
 /* Inner product <b, x> over CRT-represented vectors. */
 static void inner(pcrt_poly_t out, pcrt_poly_t b[], pcrt_poly_t x[], int len) {
 	nmod_poly_t tmp;
@@ -342,163 +285,6 @@ void lnp_auto_crt(pcrt_poly_t c, pcrt_poly_t a, slong k) {
  * holds. What is left, v_0 v_1 + v_3, is fixed before the challenge and is
  * sent as t, masked by the fresh v_3.
  */
-void lnp_quad_prover(lnpproof_t *pi, lnpcom_t *com, pcrt_poly_t m[3],
-		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]) {
-	pcrt_poly_t y[LNP_WIDTH], cr[LNP_WIDTH], v[SLOTS], d, g;
-	nmod_poly_t tmp;
-	int rej;
-	/* sigma_C = 11 * nu * beta * sqrt(k * N), as in the shuffle proof. */
-	uint64_t sigma_sqr = 11 * NONZERO * BETA;
-
-	sigma_sqr = (uint64_t) SIGMA_B * SIGMA_B;
-
-	nmod_poly_init(tmp, MODP);
-	for (int i = 0; i < LNP_WIDTH; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(y[i][k], MODP);
-			nmod_poly_init(cr[i][k], MODP);
-		}
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(v[i][k], MODP);
-		}
-	}
-	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_init(d[k], MODP);
-		nmod_poly_init(g[k], MODP);
-	}
-
-	do {
-		for (int i = 0; i < LNP_WIDTH; i++) {
-			commit_sample_gauss_batch_crt(y[i]);
-		}
-		for (int i = 0; i < HEIGHT; i++) {
-			inner(pi->w[i], key->B1[i], y, LNP_WIDTH);
-		}
-		for (int i = 0; i < SLOTS; i++) {
-			inner(v[i], key->b2[i], y, LNP_WIDTH);
-		}
-
-		/* G = v_2 - v_0 * m_1 - v_1 * m_0. */
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_set(g[k], v[2][k]);
-			pcrt_poly_mulmod(tmp, v[0][k], m[1][k], k);
-			nmod_poly_sub(g[k], g[k], tmp);
-			pcrt_poly_mulmod(tmp, v[1][k], m[0][k], k);
-			nmod_poly_sub(g[k], g[k], tmp);
-		}
-		/* Commit the garbage term in slot 3, under the same randomness. */
-		inner(com->c2[3], key->b2[3], r, LNP_WIDTH);
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_add(com->c2[3][k], com->c2[3][k], g[k]);
-		}
-		/* t = v_0 * v_1 + v_3. */
-		for (int k = 0; k < NCRT; k++) {
-			pcrt_poly_mulmod(pi->t[k], v[0][k], v[1][k], k);
-			nmod_poly_add(pi->t[k], pi->t[k], v[3][k]);
-		}
-
-		quad_hash(d, key, com, pi->w, pi->t);
-
-		for (int i = 0; i < LNP_WIDTH; i++) {
-			for (int k = 0; k < NCRT; k++) {
-				pcrt_poly_mulmod(cr[i][k], d[k], r[i][k], k);
-				nmod_poly_add(pi->z[i][k], y[i][k], cr[i][k]);
-			}
-		}
-		rej = commit_rej_sampling(pi->z, cr, sigma_sqr, LNP_WIDTH);
-	} while (rej);
-
-	nmod_poly_clear(tmp);
-	for (int i = 0; i < LNP_WIDTH; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(y[i][k]);
-			nmod_poly_clear(cr[i][k]);
-		}
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(v[i][k]);
-		}
-	}
-	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_clear(d[k]);
-		nmod_poly_clear(g[k]);
-	}
-}
-
-int lnp_quad_verifier(lnpproof_t *pi, lnpcom_t *com, lnpkey_t *key) {
-	pcrt_poly_t d, u[SLOTS], lhs, rhs;
-	nmod_poly_t tmp, rec;
-	int result = 1;
-
-	nmod_poly_init(tmp, MODP);
-	nmod_poly_init(rec, MODP);
-	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_init(d[k], MODP);
-		nmod_poly_init(lhs[k], MODP);
-		nmod_poly_init(rhs[k], MODP);
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(u[i][k], MODP);
-		}
-	}
-
-	quad_hash(d, key, com, pi->w, pi->t);
-
-	/* The masked opening must be short, or the binding reduction says nothing.
-	 * This is a soundness check, so it is an ordinary check and not an
-	 * assertion that vanishes under NDEBUG. */
-	for (int i = 0; i < LNP_WIDTH; i++) {
-		pcrt_poly_rec(rec, pi->z[i]);
-		result &= commit_norm2_leq(rec,
-				(uint64_t) 4 * DEGREE * SIGMA_B * SIGMA_B);
-	}
-
-	/* B1 * z = w + c * c1. */
-	for (int i = 0; i < HEIGHT; i++) {
-		inner(lhs, key->B1[i], pi->z, LNP_WIDTH);
-		for (int k = 0; k < NCRT; k++) {
-			pcrt_poly_mulmod(tmp, d[k], com->c1[i][k], k);
-			nmod_poly_add(rhs[k], pi->w[i][k], tmp);
-			result &= nmod_poly_equal(lhs[k], rhs[k]);
-		}
-	}
-
-	/* u_j = <b2[j], z> - c * c2[j]. */
-	for (int i = 0; i < SLOTS; i++) {
-		inner(u[i], key->b2[i], pi->z, LNP_WIDTH);
-		for (int k = 0; k < NCRT; k++) {
-			pcrt_poly_mulmod(tmp, d[k], com->c2[i][k], k);
-			nmod_poly_sub(u[i][k], u[i][k], tmp);
-		}
-	}
-
-	/* u_0 * u_1 + c * u_2 + u_3 = t. */
-	for (int k = 0; k < NCRT; k++) {
-		pcrt_poly_mulmod(lhs[k], u[0][k], u[1][k], k);
-		pcrt_poly_mulmod(tmp, d[k], u[2][k], k);
-		nmod_poly_add(lhs[k], lhs[k], tmp);
-		nmod_poly_add(lhs[k], lhs[k], u[3][k]);
-		result &= nmod_poly_equal(lhs[k], pi->t[k]);
-	}
-
-	nmod_poly_clear(tmp);
-	nmod_poly_clear(rec);
-	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_clear(d[k]);
-		nmod_poly_clear(lhs[k]);
-		nmod_poly_clear(rhs[k]);
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(u[i][k]);
-		}
-	}
-	return result;
-}
 
 
 /*============================================================================*/
@@ -888,43 +674,6 @@ void lnp_sample_ct_zero(pcrt_poly_t g, flint_rand_t rand) {
  * coefficient. */
 
 
-static void ct_scalars(ulong mu[LNP_LAMBDA], lnpkey_t *key, lnpcom_t *com) {
-	SHA256Context sha;
-	uint8_t hash[SHA256HashSize];
-	uint64_t buf;
-
-	SHA256Reset(&sha);
-	for (int i = 0; i < HEIGHT; i++) {
-		for (int j = 0; j < LNP_WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->B1[i][j][k]);
-			}
-		}
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int j = 0; j < LNP_WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->b2[i][j][k]);
-			}
-		}
-	}
-	for (int k = 0; k < NCRT; k++) {
-		for (int i = 0; i < HEIGHT; i++) {
-			hash_poly(&sha, com->c1[i][k]);
-		}
-		for (int i = 0; i < SLOTS; i++) {
-			hash_poly(&sha, com->c2[i][k]);
-		}
-	}
-	SHA256Result(&sha, hash);
-
-	fastrandombytes_setseed(hash);
-	for (int i = 0; i < LNP_LAMBDA; i++) {
-		fastrandombytes((unsigned char *)&buf, sizeof(buf));
-		mu[i] = buf % MODP;
-	}
-}
-
 
 
 
@@ -950,15 +699,11 @@ void lnp_binctx_free(lnpbinctx_t *ctx) {
 }
 
 void lnp_binproof_init(lnpbinproof_t *pi) {
-	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_init(pi->t[k], MODP);
-	}
+	(void) pi;
 }
 
 void lnp_binproof_free(lnpbinproof_t *pi) {
-	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_clear(pi->t[k]);
-	}
+	(void) pi;
 }
 
 void lnp_bin_public(lnpbinctx_t *ctx, lnpbinproof_t *pi, lnpcom_t *com,
@@ -1034,63 +779,65 @@ int lnp_bin_setup(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpbatch_t *batch,
 	return ok;
 }
 
-void lnp_bin_first(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpbatch_t *batch,
-		lnpcom_t *com, pcrt_poly_t s, lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH],
-		pcrt_poly_t y[LNP_WIDTH]) {
-	pcrt_poly_t vq[SLOTS], b[LNP_WIDTH], g1, g2, sv0, ss, one, part;
+/* This message's mask-dependent half. The garbage terms are no longer
+ * committed per message: each message contributes its rho-weighted share to
+ * the two batch-wide accumulators instead, and its share of the batched
+ * challenge-free term T. The second garbage term is weighted by sigma(rho)
+ * rather than rho, because the verifier's identity applies sigma to that row,
+ * and sigma(sigma(rho) g2) is rho sigma(g2). */
+void lnp_bin_first(lnpbinctx_t *ctx, lnpbatch_t *batch, lnpcom_t *com,
+		pcrt_poly_t s, lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH],
+		pcrt_poly_t y[LNP_WIDTH], pcrt_poly_t rho, pcrt_poly_t garb[2]) {
+	pcrt_poly_t v0, v1, b[LNP_WIDTH], g1, g2, sv0, ss, one, part, srho;
 	nmod_poly_t tmp;
 	const slong minus1 = 2 * DEGREE - 1;
 
+	(void) r;
 	nmod_poly_init(tmp, MODP);
-	for (int i = 0; i < SLOTS; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(vq[i][k], MODP);
-		}
-	}
 	for (int i = 0; i < LNP_WIDTH; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(b[i][k], MODP);
 		}
 	}
 	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_init(v0[k], MODP);
+		nmod_poly_init(v1[k], MODP);
 		nmod_poly_init(g1[k], MODP);
-		nmod_poly_init(part[k], MODP);
 		nmod_poly_init(g2[k], MODP);
 		nmod_poly_init(sv0[k], MODP);
 		nmod_poly_init(ss[k], MODP);
 		nmod_poly_init(one[k], MODP);
-		nmod_poly_zero(pi->t[k]);
+		nmod_poly_init(part[k], MODP);
+		nmod_poly_init(srho[k], MODP);
 	}
 	lnp_ones(one);
 	lnp_auto_crt(ss, s, minus1);
+	lnp_auto_crt(srho, rho, minus1);
 
-	for (int i = 0; i < SLOTS; i++) {
-		inner(vq[i], key->b2[i], y, LNP_WIDTH);
-	}
-	lnp_auto_crt(sv0, vq[0], minus1);
+	inner(v0, key->b2[SLOT_S], y, LNP_WIDTH);
+	inner(v1, key->b2[SLOT_F], y, LNP_WIDTH);
+	lnp_auto_crt(sv0, v0, minus1);
+
+	/* g1 = -sigma(v0) (s - 1), g2 = sigma(v1 - v0 sigma(s)). */
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_sub(tmp, s[k], one[k]);
 		pcrt_poly_mulmod(g1[k], sv0[k], tmp, k);
 		nmod_poly_neg(g1[k], g1[k]);
-		pcrt_poly_mulmod(tmp, vq[0][k], ss[k], k);
-		nmod_poly_sub(g2[k], vq[1][k], tmp);
+		pcrt_poly_mulmod(tmp, v0[k], ss[k], k);
+		nmod_poly_sub(g2[k], v1[k], tmp);
 	}
 	lnp_auto_crt(g2, g2, minus1);
-	inner(com->c2[2], key->b2[2], r, LNP_WIDTH);
-	inner(com->c2[3], key->b2[3], r, LNP_WIDTH);
 	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_add(com->c2[2][k], com->c2[2][k], g1[k]);
-		nmod_poly_add(com->c2[3][k], com->c2[3][k], g2[k]);
+		pcrt_poly_mulmod(tmp, rho[k], g1[k], k);
+		nmod_poly_add(garb[0][k], garb[0][k], tmp);
+		pcrt_poly_mulmod(tmp, srho[k], g2[k], k);
+		nmod_poly_add(garb[1][k], garb[1][k], tmp);
+		/* T gets rho * sigma(v0) * v0. */
+		pcrt_poly_mulmod(tmp, sv0[k], v0[k], k);
+		pcrt_poly_mulmod(tmp, rho[k], tmp, k);
+		nmod_poly_add(batch->T[k], batch->T[k], tmp);
 	}
-	lnp_auto_crt(sv0, vq[3], minus1);
-	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_add(pi->t[k], vq[2][k], sv0[k]);
-	}
-	lnp_auto_crt(sv0, vq[0], minus1);
-	for (int k = 0; k < NCRT; k++) {
-		pcrt_poly_mulmod(tmp, sv0[k], vq[0][k], k);
-		nmod_poly_add(pi->t[k], pi->t[k], tmp);
-	}
+
 	for (int j = 0; j < LNP_LAMBDA; j++) {
 		range_row(b, NULL, key, com, ctx->P[j], ctx->M[j], ctx->nu[j]);
 		inner(part, b, y, LNP_WIDTH);
@@ -1100,36 +847,37 @@ void lnp_bin_first(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpbatch_t *batch,
 	}
 
 	nmod_poly_clear(tmp);
-	for (int i = 0; i < SLOTS; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(vq[i][k]);
-		}
-	}
 	for (int i = 0; i < LNP_WIDTH; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(b[i][k]);
 		}
 	}
 	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_clear(v0[k]);
+		nmod_poly_clear(v1[k]);
 		nmod_poly_clear(g1[k]);
-		nmod_poly_clear(part[k]);
 		nmod_poly_clear(g2[k]);
 		nmod_poly_clear(sv0[k]);
 		nmod_poly_clear(ss[k]);
 		nmod_poly_clear(one[k]);
+		nmod_poly_clear(part[k]);
+		nmod_poly_clear(srho[k]);
 	}
 }
 
-int lnp_bin_check(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
-		lnpkey_t *key, pcrt_poly_t d, pcrt_poly_t z[LNP_WIDTH],
-		pcrt_poly_t acc[LNP_LAMBDA]) {
-	pcrt_poly_t sd, u[SLOTS], su, lhs, rhs, one, t, zc, b[LNP_WIDTH];
-	nmod_poly_t tmp, rec;
+/* This message's share of the two aggregated relations. The quadratic part is
+ * no longer checked here: with the garbage terms batched, only the sum over
+ * messages closes, so each message adds its rho-weighted quadratic terms to
+ * batch->acc and lnp_batch_check compares the total against T. */
+int lnp_bin_check(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpbatch_t *batch,
+		lnpcom_t *com, lnpkey_t *key, pcrt_poly_t d, pcrt_poly_t z[LNP_WIDTH],
+		pcrt_poly_t acc[LNP_LAMBDA], pcrt_poly_t rho) {
+	pcrt_poly_t sd, u[SLOTS], su, lhs, one, t, zc, b[LNP_WIDTH];
+	nmod_poly_t tmp;
 	int result = 1;
 	const slong minus1 = 2 * DEGREE - 1;
 
 	nmod_poly_init(tmp, MODP);
-	nmod_poly_init(rec, MODP);
 	for (int i = 0; i < LNP_WIDTH; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(b[i][k], MODP);
@@ -1139,7 +887,6 @@ int lnp_bin_check(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 		nmod_poly_init(sd[k], MODP);
 		nmod_poly_init(su[k], MODP);
 		nmod_poly_init(lhs[k], MODP);
-		nmod_poly_init(rhs[k], MODP);
 		nmod_poly_init(one[k], MODP);
 		nmod_poly_init(t[k], MODP);
 		nmod_poly_init(zc[k], MODP);
@@ -1163,19 +910,17 @@ int lnp_bin_check(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 			nmod_poly_sub(u[i][k], u[i][k], tmp);
 		}
 	}
-	lnp_auto_crt(su, u[0], minus1);
+	/* rho * [ sigma(u0) (u0 + d) + sigma(d) u1 ], the part of the quadratic
+	 * identity that stays per message. */
+	lnp_auto_crt(su, u[SLOT_S], minus1);
 	for (int k = 0; k < NCRT; k++) {
 		pcrt_poly_mulmod(tmp, d[k], one[k], k);
-		nmod_poly_add(rhs[k], u[0][k], tmp);
-		pcrt_poly_mulmod(lhs[k], su[k], rhs[k], k);
-		pcrt_poly_mulmod(tmp, sd[k], u[1][k], k);
+		nmod_poly_add(lhs[k], u[SLOT_S][k], tmp);
+		pcrt_poly_mulmod(lhs[k], su[k], lhs[k], k);
+		pcrt_poly_mulmod(tmp, sd[k], u[SLOT_F][k], k);
 		nmod_poly_add(lhs[k], lhs[k], tmp);
-		nmod_poly_add(lhs[k], lhs[k], u[2][k]);
-	}
-	lnp_auto_crt(su, u[3], minus1);
-	for (int k = 0; k < NCRT; k++) {
-		nmod_poly_add(lhs[k], lhs[k], su[k]);
-		result &= nmod_poly_equal(lhs[k], pi->t[k]);
+		pcrt_poly_mulmod(lhs[k], rho[k], lhs[k], k);
+		nmod_poly_add(batch->acc[k], batch->acc[k], lhs[k]);
 	}
 
 	/* This message's share of sum_l [<B_lj, z_l> - c (T_lj - Z_lj)], which the
@@ -1193,7 +938,6 @@ int lnp_bin_check(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 	}
 
 	nmod_poly_clear(tmp);
-	nmod_poly_clear(rec);
 	for (int i = 0; i < LNP_WIDTH; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(b[i][k]);
@@ -1203,7 +947,6 @@ int lnp_bin_check(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 		nmod_poly_clear(sd[k]);
 		nmod_poly_clear(su[k]);
 		nmod_poly_clear(lhs[k]);
-		nmod_poly_clear(rhs[k]);
 		nmod_poly_clear(one[k]);
 		nmod_poly_clear(t[k]);
 		nmod_poly_clear(zc[k]);
@@ -1316,11 +1059,142 @@ void lnp_mask_commit(lnpmaskcom_t *com, pcrt_poly_t g[LNP_LAMBDA],
 	}
 }
 
+void lnp_garbkey_init(lnpgarbkey_t *key) {
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int j = 0; j < GARB_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_init(key->B1[i][j][k], MODP);
+			}
+		}
+	}
+	for (int i = 0; i < 2; i++) {
+		for (int j = 0; j < GARB_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_init(key->b2[i][j][k], MODP);
+			}
+		}
+	}
+}
+
+void lnp_garbkey_free(lnpgarbkey_t *key) {
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int j = 0; j < GARB_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_clear(key->B1[i][j][k]);
+			}
+		}
+	}
+	for (int i = 0; i < 2; i++) {
+		for (int j = 0; j < GARB_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_clear(key->b2[i][j][k]);
+			}
+		}
+	}
+}
+
+void lnp_garbkey_gen(lnpgarbkey_t *key, flint_rand_t rand) {
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int j = 0; j < GARB_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_zero(key->B1[i][j][k]);
+				if (i == j) {
+					nmod_poly_set_coeff_ui(key->B1[i][j][k], 0, 1);
+				} else if (j >= HEIGHT) {
+					commit_sample_rand(key->B1[i][j][k], rand, DEGCRT);
+				}
+			}
+		}
+	}
+	for (int i = 0; i < 2; i++) {
+		for (int j = 0; j < GARB_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_zero(key->b2[i][j][k]);
+				if (j == HEIGHT + i) {
+					nmod_poly_set_coeff_ui(key->b2[i][j][k], 0, 1);
+				} else if (j >= HEIGHT + 2) {
+					commit_sample_rand(key->b2[i][j][k], rand, DEGCRT);
+				}
+			}
+		}
+	}
+}
+
+void lnp_garbcom_init(lnpgarbcom_t *com) {
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(com->c1[i][k], MODP);
+		}
+	}
+	for (int i = 0; i < 2; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(com->c2[i][k], MODP);
+		}
+	}
+}
+
+void lnp_garbcom_free(lnpgarbcom_t *com) {
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(com->c1[i][k]);
+		}
+	}
+	for (int i = 0; i < 2; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(com->c2[i][k]);
+		}
+	}
+}
+
+void lnp_garb_commit(lnpgarbcom_t *com, pcrt_poly_t g[2], lnpgarbkey_t *key,
+		pcrt_poly_t r[GARB_WIDTH]) {
+	for (int i = 0; i < HEIGHT; i++) {
+		inner(com->c1[i], key->B1[i], r, GARB_WIDTH);
+	}
+	for (int i = 0; i < 2; i++) {
+		inner(com->c2[i], key->b2[i], r, GARB_WIDTH);
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_add(com->c2[i][k], com->c2[i][k], g[i][k]);
+		}
+	}
+}
+
+/* The garbage commitment's Ajtai first message, and the two mask terms of the
+ * batched challenge-free term: T gets V_2 + sigma(V_3) once for the batch,
+ * where V_i is the mask's contribution to garbage row i. */
+void lnp_garb_first(lnpbatch_t *batch, lnpgarbkey_t *gkey,
+		pcrt_poly_t yg[GARB_WIDTH]) {
+	pcrt_poly_t v2, v3;
+	const slong minus1 = 2 * DEGREE - 1;
+
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_init(v2[k], MODP);
+		nmod_poly_init(v3[k], MODP);
+	}
+	for (int i = 0; i < HEIGHT; i++) {
+		inner(batch->gw[i], gkey->B1[i], yg, GARB_WIDTH);
+	}
+	inner(v2, gkey->b2[0], yg, GARB_WIDTH);
+	inner(v3, gkey->b2[1], yg, GARB_WIDTH);
+	lnp_auto_crt(v3, v3, minus1);
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_add(batch->T[k], batch->T[k], v2[k]);
+		nmod_poly_add(batch->T[k], batch->T[k], v3[k]);
+		nmod_poly_clear(v2[k]);
+		nmod_poly_clear(v3[k]);
+	}
+}
+
 void lnp_batch_init(lnpbatch_t *b) {
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(b->w[i][k], MODP);
+			nmod_poly_init(b->gw[i][k], MODP);
 		}
+	}
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_init(b->T[k], MODP);
+		nmod_poly_init(b->acc[k], MODP);
 	}
 	for (int i = 0; i < LNP_LAMBDA; i++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -1334,7 +1208,12 @@ void lnp_batch_free(lnpbatch_t *b) {
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(b->w[i][k]);
+			nmod_poly_clear(b->gw[i][k]);
 		}
+	}
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_clear(b->T[k]);
+		nmod_poly_clear(b->acc[k]);
 	}
 	for (int i = 0; i < LNP_LAMBDA; i++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -1348,7 +1227,12 @@ void lnp_batch_zero(lnpbatch_t *b) {
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_zero(b->w[i][k]);
+			nmod_poly_zero(b->gw[i][k]);
 		}
+	}
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_zero(b->T[k]);
+		nmod_poly_zero(b->acc[k]);
 	}
 	for (int i = 0; i < LNP_LAMBDA; i++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -1387,7 +1271,8 @@ void lnp_batch_first(lnpbatch_t *batch, lnpmaskkey_t *mkey,
  * commitment's own term and the comparison against v_j.
  */
 int lnp_batch_check(lnpbatch_t *batch, lnpmaskcom_t *mcom, lnpmaskkey_t *mkey,
-		pcrt_poly_t d, pcrt_poly_t zm[MASK_WIDTH],
+		lnpgarbcom_t *gcom, lnpgarbkey_t *gkey, pcrt_poly_t d,
+		pcrt_poly_t zm[MASK_WIDTH], pcrt_poly_t zg[GARB_WIDTH],
 		pcrt_poly_t acc[LNP_LAMBDA]) {
 	pcrt_poly_t lhs, t;
 	nmod_poly_t tmp, rec;
@@ -1416,6 +1301,52 @@ int lnp_batch_check(lnpbatch_t *batch, lnpmaskcom_t *mcom, lnpmaskkey_t *mkey,
 			pcrt_poly_mulmod(tmp, d[k], mcom->c1[i][k], k);
 			nmod_poly_add(tmp, tmp, batch->w[i][k]);
 			result &= nmod_poly_equal(lhs[k], tmp);
+		}
+	}
+
+	/* The garbage commitment is opened the same way, and for the same reason:
+	 * the batched quadratic identity below is one equation in GARB_WIDTH
+	 * unknowns without it. */
+	for (int i = 0; i < GARB_WIDTH; i++) {
+		pcrt_poly_rec(rec, zg[i]);
+		result &= commit_norm2_leq(rec,
+				(uint64_t) 4 * DEGREE * SIGMA_B * SIGMA_B);
+	}
+	for (int i = 0; i < HEIGHT; i++) {
+		inner(lhs, gkey->B1[i], zg, GARB_WIDTH);
+		for (int k = 0; k < NCRT; k++) {
+			pcrt_poly_mulmod(tmp, d[k], gcom->c1[i][k], k);
+			nmod_poly_add(tmp, tmp, batch->gw[i][k]);
+			result &= nmod_poly_equal(lhs[k], tmp);
+		}
+	}
+
+	/* The batched quadratic relation: every message has added its rho-weighted
+	 * share to acc, and what remains is the garbage commitment's own two rows,
+	 * U2 + sigma(U3), against the batched challenge-free term T. */
+	{
+		pcrt_poly_t u2, u3;
+		const slong minus1 = 2 * DEGREE - 1;
+
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(u2[k], MODP);
+			nmod_poly_init(u3[k], MODP);
+		}
+		inner(u2, gkey->b2[0], zg, GARB_WIDTH);
+		inner(u3, gkey->b2[1], zg, GARB_WIDTH);
+		for (int k = 0; k < NCRT; k++) {
+			pcrt_poly_mulmod(tmp, d[k], gcom->c2[0][k], k);
+			nmod_poly_sub(u2[k], u2[k], tmp);
+			pcrt_poly_mulmod(tmp, d[k], gcom->c2[1][k], k);
+			nmod_poly_sub(u3[k], u3[k], tmp);
+		}
+		lnp_auto_crt(u3, u3, minus1);
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_add(lhs[k], batch->acc[k], u2[k]);
+			nmod_poly_add(lhs[k], lhs[k], u3[k]);
+			result &= nmod_poly_equal(lhs[k], batch->T[k]);
+			nmod_poly_clear(u2[k]);
+			nmod_poly_clear(u3[k]);
 		}
 	}
 
@@ -1503,6 +1434,9 @@ static ulong const_coeff(pcrt_poly_t a) {
  * that they exercise the same path as the real caller. */
 static lnpmaskkey_t tst_mkey;
 static lnpmaskcom_t tst_mcom;
+static lnpgarbkey_t tst_gkey;
+static lnpgarbcom_t tst_gcom;
+static pcrt_poly_t tst_zg[GARB_WIDTH], tst_rg[GARB_WIDTH], tst_rho;
 static lnpbatch_t tst_batch;
 static pcrt_poly_t tst_z[LNP_WIDTH], tst_zm[MASK_WIDTH], tst_ajtai[HEIGHT];
 static pcrt_poly_t tst_mr[MASK_WIDTH];
@@ -1515,6 +1449,18 @@ static void tst_setup(flint_rand_t rng) {
 	lnp_maskkey_init(&tst_mkey);
 	lnp_maskkey_gen(&tst_mkey, rng);
 	lnp_maskcom_init(&tst_mcom);
+	lnp_garbkey_init(&tst_gkey);
+	lnp_garbkey_gen(&tst_gkey, rng);
+	lnp_garbcom_init(&tst_gcom);
+	for (int i = 0; i < GARB_WIDTH; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(tst_zg[i][k], MODP);
+			nmod_poly_init(tst_rg[i][k], MODP);
+		}
+	}
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_init(tst_rho[k], MODP);
+	}
 	lnp_batch_init(&tst_batch);
 	for (int i = 0; i < LNP_WIDTH; i++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -1565,7 +1511,14 @@ static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
 			hash_poly(&sha, tst_batch.h[i][k]);
 			hash_poly(&sha, tst_batch.v[i][k]);
 		}
-		hash_poly(&sha, pi->t[k]);
+		for (int i = 0; i < HEIGHT; i++) {
+			hash_poly(&sha, tst_gcom.c1[i][k]);
+			hash_poly(&sha, tst_batch.gw[i][k]);
+		}
+		for (int i = 0; i < 2; i++) {
+			hash_poly(&sha, tst_gcom.c2[i][k]);
+		}
+		hash_poly(&sha, tst_batch.T[k]);
 	}
 	SHA256Input(&sha, (const uint8_t *)pi->zp, PROJ * sizeof(ulong));
 	SHA256Result(&sha, hash);
@@ -1587,16 +1540,68 @@ static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
 	nmod_poly_clear(c);
 }
 
+/* The batching challenge. It has to be drawn after every message's commitment,
+ * because the garbage terms are weighted by it, and before the garbage terms
+ * are committed, because a prover that knew it could adapt them. */
+static void tst_rho_hash(pcrt_poly_t rho, lnpkey_t *key, lnpcom_t *com) {
+	SHA256Context sha;
+	uint8_t hash[SHA256HashSize];
+	nmod_poly_t c;
+
+	SHA256Reset(&sha);
+	for (int k = 0; k < NCRT; k++) {
+		for (int i = 0; i < HEIGHT; i++) {
+			hash_poly(&sha, com->c1[i][k]);
+			hash_poly(&sha, tst_mcom.c1[i][k]);
+		}
+		for (int i = 0; i < SLOTS; i++) {
+			hash_poly(&sha, com->c2[i][k]);
+		}
+		for (int i = 0; i < LNP_LAMBDA; i++) {
+			hash_poly(&sha, tst_mcom.c2[i][k]);
+		}
+		for (int i = 0; i < LNP_WIDTH; i++) {
+			hash_poly(&sha, key->b2[0][i][k]);
+		}
+	}
+	SHA256Result(&sha, hash);
+
+	/* Same shape as the opening challenge: NONZERO ones in DEGREE positions.
+	 * Differences of distinct challenges are then short enough for Lemma 1 to
+	 * make them invertible, which is what the aggregation needs. */
+	nmod_poly_init(c, MODP);
+	fastrandombytes_setseed(hash);
+	nmod_poly_fit_length(c, DEGREE);
+	for (int i = 0; i < NONZERO; i++) {
+		uint32_t buf;
+
+		fastrandombytes((unsigned char *)&buf, sizeof(buf));
+		buf = buf % DEGREE;
+		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
+			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			buf = buf % DEGREE;
+		}
+		nmod_poly_set_coeff_ui(c, buf, 1);
+	}
+	pcrt_poly_reduce(rho[0], c, 0);
+	pcrt_poly_reduce(rho[1], c, 1);
+	nmod_poly_clear(c);
+}
+
 static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 		pcrt_poly_t s, pcrt_poly_t f, nmod_poly_t w, pcrt_poly_t g[LNP_LAMBDA],
 		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH], flint_rand_t rng) {
 	pcrt_poly_t y[LNP_WIDTH], cr[LNP_WIDTH], ym[MASK_WIDTH], cm[MASK_WIDTH], d;
+	pcrt_poly_t yg[GARB_WIDTH], cg[GARB_WIDTH], garb[2];
 	int64_t dot, norm;
 	int rej, ok;
 
 	tst_setup(rng);
 	for (int i = 0; i < MASK_WIDTH; i++) {
 		commit_sample_short_crt(tst_mr[i]);
+	}
+	for (int i = 0; i < GARB_WIDTH; i++) {
+		commit_sample_short_crt(tst_rg[i]);
 	}
 	lnp_mask_commit(&tst_mcom, g, &tst_mkey, tst_mr);
 
@@ -1612,8 +1617,16 @@ static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 			nmod_poly_init(cm[i][k], MODP);
 		}
 	}
+	for (int i = 0; i < GARB_WIDTH; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(yg[i][k], MODP);
+			nmod_poly_init(cg[i][k], MODP);
+		}
+	}
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_init(d[k], MODP);
+		nmod_poly_init(garb[0][k], MODP);
+		nmod_poly_init(garb[1][k], MODP);
 	}
 
 	lnp_batch_zero(&tst_batch);
@@ -1625,11 +1638,21 @@ static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 		}
 	}
 
+	/* The batching challenge comes after every message's commitment and before
+	 * the garbage terms, which depend on it. With a batch of one there is
+	 * still a rho, so that this path exercises what the shuffle does. */
+	tst_rho_hash(tst_rho, key, com);
+
 	do {
 		for (int j = 0; j < LNP_LAMBDA; j++) {
 			for (int k = 0; k < NCRT; k++) {
 				nmod_poly_zero(tst_batch.v[j][k]);
 			}
+		}
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_zero(tst_batch.T[k]);
+			nmod_poly_zero(garb[0][k]);
+			nmod_poly_zero(garb[1][k]);
 		}
 		for (int i = 0; i < LNP_WIDTH; i++) {
 			commit_sample_gauss_batch_crt(y[i]);
@@ -1637,7 +1660,12 @@ static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 		for (int i = 0; i < MASK_WIDTH; i++) {
 			commit_sample_gauss_batch_crt(ym[i]);
 		}
-		lnp_bin_first(pi, ctx, &tst_batch, com, s, key, r, y);
+		for (int i = 0; i < GARB_WIDTH; i++) {
+			commit_sample_gauss_batch_crt(yg[i]);
+		}
+		lnp_bin_first(ctx, &tst_batch, com, s, key, r, y, tst_rho, garb);
+		lnp_garb_commit(&tst_gcom, garb, &tst_gkey, tst_rg);
+		lnp_garb_first(&tst_batch, &tst_gkey, yg);
 		lnp_batch_first(&tst_batch, &tst_mkey, ym);
 		for (int i = 0; i < HEIGHT; i++) {
 			inner(tst_ajtai[i], key->B1[i], y, LNP_WIDTH);
@@ -1656,8 +1684,15 @@ static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 				nmod_poly_add(tst_zm[i][k], ym[i][k], cm[i][k]);
 			}
 		}
+		for (int i = 0; i < GARB_WIDTH; i++) {
+			for (int k = 0; k < NCRT; k++) {
+				pcrt_poly_mulmod(cg[i][k], d[k], tst_rg[i][k], k);
+				nmod_poly_add(tst_zg[i][k], yg[i][k], cg[i][k]);
+			}
+		}
 		commit_rej_accumulate(&dot, &norm, tst_z, cr, LNP_WIDTH);
 		commit_rej_accumulate(&dot, &norm, tst_zm, cm, MASK_WIDTH);
+		commit_rej_accumulate(&dot, &norm, tst_zg, cg, GARB_WIDTH);
 		rej = commit_rej_decide(dot, norm, (uint64_t) SIGMA_B * SIGMA_B);
 	} while (rej);
 
@@ -1673,8 +1708,16 @@ static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 			nmod_poly_clear(cm[i][k]);
 		}
 	}
+	for (int i = 0; i < GARB_WIDTH; i++) {
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(yg[i][k]);
+			nmod_poly_clear(cg[i][k]);
+		}
+	}
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_clear(d[k]);
+		nmod_poly_clear(garb[0][k]);
+		nmod_poly_clear(garb[1][k]);
 	}
 	return ok;
 }
@@ -1712,8 +1755,15 @@ static int bin_verify_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 			result &= nmod_poly_equal(lhs[k], rhs[k]);
 		}
 	}
-	result &= lnp_bin_check(pi, ctx, com, key, d, tst_z, acc);
-	result &= lnp_batch_check(&tst_batch, &tst_mcom, &tst_mkey, d, tst_zm, acc);
+	/* The verifier zeroes the quadratic accumulator, then every message adds
+	 * its rho-weighted share before the batch check settles it. */
+	for (int k = 0; k < NCRT; k++) {
+		nmod_poly_zero(tst_batch.acc[k]);
+	}
+	result &= lnp_bin_check(pi, ctx, &tst_batch, com, key, d, tst_z, acc,
+			tst_rho);
+	result &= lnp_batch_check(&tst_batch, &tst_mcom, &tst_mkey, &tst_gcom,
+			&tst_gkey, d, tst_zm, tst_zg, acc);
 
 	nmod_poly_clear(rec);
 	nmod_poly_clear(tmp);
@@ -1938,98 +1988,6 @@ static void test_auto(flint_rand_t rng) {
 	}
 }
 
-static void test_quad(flint_rand_t rng) {
-	lnpkey_t key;
-	lnpcom_t com;
-	lnpproof_t pi;
-	pcrt_poly_t r[LNP_WIDTH], m[SLOTS];
-	nmod_poly_t a, b;
-
-	lnp_keyinit(&key);
-	lnp_com_init(&com);
-	lnp_proof_init(&pi);
-	lnp_keygen(&key, rng);
-	nmod_poly_init(a, MODP);
-	nmod_poly_init(b, MODP);
-	for (int i = 0; i < LNP_WIDTH; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(r[i][k], MODP);
-		}
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_init(m[i][k], MODP);
-		}
-	}
-
-	TEST_BEGIN("quadratic proof accepts an honest product") {
-		for (int i = 0; i < LNP_WIDTH; i++) {
-			commit_sample_short_crt(r[i]);
-		}
-		commit_sample_rand_crt(m[0], rng);
-		commit_sample_rand_crt(m[1], rng);
-		for (int k = 0; k < NCRT; k++) {
-			pcrt_poly_mulmod(m[2][k], m[0][k], m[1][k], k);
-			nmod_poly_zero(m[3][k]);
-		}
-		lnp_commit(&com, m, &key, r);
-		lnp_quad_prover(&pi, &com, m, &key, r);
-		TEST_ASSERT(lnp_quad_verifier(&pi, &com, &key) == 1, end);
-	} TEST_END;
-
-	TEST_BEGIN("quadratic proof rejects a wrong product") {
-		for (int i = 0; i < LNP_WIDTH; i++) {
-			commit_sample_short_crt(r[i]);
-		}
-		commit_sample_rand_crt(m[0], rng);
-		commit_sample_rand_crt(m[1], rng);
-		for (int k = 0; k < NCRT; k++) {
-			pcrt_poly_mulmod(m[2][k], m[0][k], m[1][k], k);
-			/* Claim a product that is off by one. */
-			nmod_poly_set_coeff_ui(m[2][k], 0,
-					nmod_add(nmod_poly_get_coeff_ui(m[2][k], 0), 1, m[2][k]->mod));
-			nmod_poly_zero(m[3][k]);
-		}
-		lnp_commit(&com, m, &key, r);
-		lnp_quad_prover(&pi, &com, m, &key, r);
-		TEST_ASSERT(lnp_quad_verifier(&pi, &com, &key) == 0, end);
-	} TEST_END;
-
-	TEST_BEGIN("quadratic proof rejects a tampered opening") {
-		for (int i = 0; i < LNP_WIDTH; i++) {
-			commit_sample_short_crt(r[i]);
-		}
-		commit_sample_rand_crt(m[0], rng);
-		commit_sample_rand_crt(m[1], rng);
-		for (int k = 0; k < NCRT; k++) {
-			pcrt_poly_mulmod(m[2][k], m[0][k], m[1][k], k);
-			nmod_poly_zero(m[3][k]);
-		}
-		lnp_commit(&com, m, &key, r);
-		lnp_quad_prover(&pi, &com, m, &key, r);
-		nmod_poly_set_coeff_ui(pi.z[0][0], 0,
-				nmod_add(nmod_poly_get_coeff_ui(pi.z[0][0], 0), 1,
-				pi.z[0][0]->mod));
-		TEST_ASSERT(lnp_quad_verifier(&pi, &com, &key) == 0, end);
-	} TEST_END;
-
-  end:
-	nmod_poly_clear(a);
-	nmod_poly_clear(b);
-	for (int i = 0; i < LNP_WIDTH; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(r[i][k]);
-		}
-	}
-	for (int i = 0; i < SLOTS; i++) {
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_clear(m[i][k]);
-		}
-	}
-	lnp_keyfree(&key);
-	lnp_com_free(&com);
-	lnp_proof_free(&pi);
-}
 
 static void test_isbin(flint_rand_t rng) {
 	lnpkey_t key;
@@ -2637,8 +2595,7 @@ int main(int argc, char *argv[]) {
 	if (phase_selected(argc, argv, "test")) {
 		printf("\n** Tests for the LNP proof machinery:\n\n");
 		test_auto(rand);
-		test_quad(rand);
-		test_isbin(rand);
+			test_isbin(rand);
 		test_adaptive(rand);
 		test_isbin_full(rand);
 		test_range(rand);

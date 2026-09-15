@@ -283,11 +283,19 @@ need to be extended accordingly.
    original proof, and the new response is smaller, but the concrete hardness
    has not been recomputed.
 4. **Zero-knowledge sketched only**, as noted in Section 9.
-5. **The window in Section 8 has no slack to spare.** Any change to `n`, `q`,
+5. **The batching aggregations are not analysed.** The implementation proves
+   `is_bin` for every message at once, aggregating the constant-coefficient
+   and range relations by random scalars and the quadratic relations by random
+   ring elements `rho_l`. The scalar aggregation contributes
+   `p^-LNP_LAMBDA`, which is accounted for; the `rho` aggregation contributes
+   a term that is not. Its challenge set is the one used for openings, so
+   differences are invertible, but no bound has been written down. Section 5b
+   of LNP-PARAMS.md has the construction.
+6. **The window in Section 8 has no slack to spare.** Any change to `n`, `q`,
    `NONZERO`, `M` or the encoding `g` invalidates the budget and must be
    rechecked.
 
 The implementation is tested against both attacks it is meant to stop, and the
 verifier was instrumented to confirm each is rejected by the intended check
-rather than incidentally; but tests cannot establish any of the five points
+rather than incidentally; but tests cannot establish any of the six points
 above.

@@ -289,19 +289,27 @@ heat the machine within itself, and since the TSC ticks at a fixed rate
 whatever the core does, a throttled run genuinely costs more ticks. That
 penalises the slower binary more, and inflated this ratio to 1.40.
 
-Size is counted from the transmitted structures, since nothing here serialises
-a proof: a uniform ring element costs `DEGREE` times `ceil(log2 p)` bits and a
-Gaussian one `DEGREE` times `ceil(log2 12 sigma)`. Note that `MODP` is 141
-above `2^40`, so a uniform element costs 41 bits per coefficient and not 40.
+Size is now **measured**. `serial.c` packs every value the prover sends, at
+`ceil(log2 p)` bits per coefficient for a uniform ring element and
+`ceil(log2 12 sigma)` for a Gaussian one, and `shuffle.c` round-trips an
+honest proof through it and verifies the decoded values before reporting the
+byte count. So the figure is the size of something that verifies, not a count
+of struct fields. It comes to 2575104 bytes, or 100.6 KB per message, which is
+what the hand-maintained model in earlier versions of this section also said.
 
-| | fix-pkc | lnp at `a63d9b3` | lnp at `d3491d0` | lnp now |
-| --- | --- | --- | --- | --- |
-| modulus, `WIDTH` | `2^31.86`, 3 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 |
-| prover, per proof | 2.19 s | 14.99 s | 5.68 s | 2.77 s |
-| prover, per message | 88 ms | 600 ms | 227 ms | 111 ms |
-| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB |
-| proof, 25 messages | 1.56 MB | 8.06 MB | 4.61 MB | 2.93 MB |
-| against fix-pkc | | 6.8x, 5.2x | 2.6x, 3.0x | **1.28x, 1.9x** |
+Two details the packing makes concrete. `MODP` is 141 above `2^40`, so a
+uniform coefficient costs 41 bits and not 40. And a Gaussian element has to be
+reconstructed from its CRT components before packing, because only the
+reconstructed polynomial is short: the components of a short element are not.
+
+| | fix-pkc | `a63d9b3` | `d3491d0` | `7d2f639` | now |
+| --- | --- | --- | --- | --- | --- |
+| modulus, `WIDTH` | `2^31.86`, 3 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 |
+| prover, per proof | 2.19 s | 14.99 s | 5.68 s | 2.77 s | see below |
+| prover, per message | 88 ms | 600 ms | 227 ms | 111 ms | see below |
+| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 100.6 KB |
+| proof, 25 messages | 1.56 MB | 8.06 MB | 4.61 MB | 2.93 MB | 2.46 MB |
+| against fix-pkc | | 6.8x, 5.2x | 2.6x, 3.0x | 1.28x, 1.9x | **~1.1x, 1.57x** |
 
 `is_bin` as first wired in cost 6.8 times the prover and 5.2 times the
 proof. Batching it, which is section 5b, brought that to **1.28 times the
@@ -311,19 +319,20 @@ once by the shuffle's linear proof and once by each of the three sub-proofs,
 and every one of those openings carried its own mask, its own challenge and
 its own rejection sampling loop.
 
-The last column includes the mask-commitment opening added in `472edfc`, which
-costs 1.04x on its own, within the noise of these measurements.
+The `7d2f639` column includes the mask-commitment opening added in `472edfc`,
+which costs 1.04x on its own, within the noise of these measurements. The last
+column adds the batching of the quadratic proof's garbage terms.
 
-Where the 119.9 KB goes now, per message:
+Where the 100.6 KB goes now, per message:
 
 | | |
 | --- | --- |
-| sigma commitment, one Ajtai part and five message slots | 30.8 KB |
-| the one masked opening, `WIDTH` twice and `LNP_WIDTH` once | 44.0 KB |
-| first messages | 25.6 KB |
+| sigma commitment, one Ajtai part and three message slots | 20.5 KB |
+| the one masked opening, `WIDTH` twice and `LNP_WIDTH` once | 38.5 KB |
+| first messages | 20.5 KB |
 | product commitment and partial product | 15.4 KB |
 | published projection | 0.5 KB |
-| share of the batch-wide mask commitment, values and opening | 3.6 KB |
+| share of the two batch-wide commitments and their openings | 5.2 KB |
 
 ## 5b. Batching it down
 
@@ -408,14 +417,24 @@ measuring the mean rather than the median costs in method.
 
 ### What is left
 
-The proof is now 14 uniform ring elements and 16 Gaussian ones per message.
-The largest single item is the commitment `p_l`, at six uniform elements or
-30.8 of the 119.9 KB. Two of its five slots hold the garbage terms of the quadratic
-proof. Those are filled at first-message time and depend on that message's own
-mask, so they look per message; but every message now answers one challenge,
-which is the condition under which LNP22 batches garbage terms across
-statements. Whether that applies here has not been checked, and it is the
-obvious next thing to look at.
+The garbage terms are batched now, which was the last idea on this list, so
+the proof is 11 uniform ring elements and 14 Gaussian ones per message.
+
+The largest single item is the masked opening, 38.5 KB for `WIDTH` twice and
+`LNP_WIDTH` once. Shrinking that means shrinking `LNP_WIDTH`, which is
+`HEIGHT + SLOTS + LNP_RANK`, and none of the three has slack left: the
+witness, the product and the projection mask are all genuinely per message,
+and `LNP_RANK` is 2 because rank 1 does not reach the hiding target. So the
+per-message part looks close to done, and what remains is the modulus and the
+ring degree.
+
+What the batching adds and nobody has accounted for is a soundness term. The
+weights `rho_l` are drawn from the same set as the opening challenge, so
+differences are invertible by Lemma 1 and the error should be small, but that
+is an expectation rather than a derivation. The tests show the aggregation is
+not vacuous, in that breaking one message of twenty-five is caught, which is a
+different statement from a bound on the cheating probability. Section 10 of
+SOUNDNESS.md lists it.
 
 ## 5c. What batching cost the parameters
 

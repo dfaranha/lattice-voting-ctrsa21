@@ -80,8 +80,11 @@ The slots:
 | --- | --- |
 | `SLOT_S` = 0 | the witness `s`, claimed binary |
 | `SLOT_F` = 1 | `f`, the product whose constant coefficient is claimed zero |
-| 2, 3 | the garbage terms of the quadratic proof |
-| `SLOT_W` = 4 | the projection mask, packed into the first `PROJ` coefficients |
+| `SLOT_W` = 2 | the projection mask, packed into the first `PROJ` coefficients |
+
+The garbage terms of the quadratic proof used to occupy two more slots here.
+They are batched now, and live in a commitment of their own; section 6 has
+the reason and the shape.
 
 An opening is a vector `z = y + d r` for a challenge `d` and mask `y`, and the
 verifier checks `<B1[i], z> = w_i + d c1[i]` against the Ajtai first message
@@ -126,21 +129,21 @@ g1 = -sigma(v_0) * (s - 1)
 g2 = sigma( v_1 - v_0 * sigma(s) )
 ```
 
-into them, chosen so that their contribution cancels the challenge-linear part
-exactly. What survives is the challenge-free term
+chosen so that their contribution cancels the challenge-linear part exactly.
+What survives is a challenge-free term
 
 ```
 t = v_2 + sigma(v_3) + sigma(v_0) * v_0
 ```
 
-which the prover sends, and the verifier recomputes the whole expansion from
-`u_0 .. u_3` and checks it equals `t`. The exact identity is the loop in
-`lnp_bin_check` that builds `lhs` and compares it against `pi->t`; the two
-halves are `lnp_bin_first` for the prover and that loop for the verifier.
+against which the verifier checks the whole expansion recomputed from
+`u_0 .. u_3`. Section 6 describes how `g1`, `g2` and `t` are shared across the
+batch rather than paid for per message; the shape of the identity is the same
+either way.
 
 Note that the garbage terms depend on the mask, so they are part of the proof
-rather than of the statement: `lnp_bin_first` writes `com->c2[2]` and
-`com->c2[3]` when it runs, after the rest of the commitment is fixed.
+rather than of the statement: they are computed when the mask is drawn, after
+the rest of the commitment is fixed.
 
 ### 4.2 The constant coefficient is zero
 
@@ -244,8 +247,8 @@ randomness, so it shares the opening too: `lin_first` in `shuffle.c` drives
 ## 6. Batching across messages
 
 The shuffle proves `is_bin` for all `MSGS` permutation elements at once, and
-the aggregation is over scalars, so it does not care whether the claims being
-aggregated belong to one message or many. Three things follow.
+the aggregation does not care whether the claims being aggregated belong to
+one message or many. Four things follow.
 
 **One challenge.** `batch_hash` derives a single challenge over every message's
 first messages. This is forced, not merely convenient: the verifier can only
@@ -258,6 +261,37 @@ concatenation of every response; testing each message separately would multiply
 the abort probabilities. The masked term is therefore `sqrt(MSGS)` times longer
 than for a single message, so the masks widen from `SIGMA_C` to
 `SIGMA_B = SIGMA_C sqrt(MSGS)`, and the verifier's norm bounds widen with them.
+
+**One set of garbage terms.** The quadratic proof's two garbage terms are also
+paid for once. Weighting message `l` by a batching challenge `rho_l` and
+summing, the per-message identities close as one:
+
+```
+sum_l rho_l [ sigma(u_l0)(u_l0 + d) + sigma(d) u_l1 ] + U_2 + sigma(U_3) = T
+```
+
+where `U_2`, `U_3` open a single garbage commitment holding
+
+```
+G1 = sum_l rho_l       g1_l
+G2 = sum_l sigma(rho_l) g2_l
+T  = sum_l rho_l sigma(v_l0) v_l0  +  V_2 + sigma(V_3)
+```
+
+The `sigma(rho_l)` on the second accumulator is the one detail that is easy to
+get wrong: the verifier's identity applies `sigma` to that row, and
+`sigma(sigma(rho_l) g2_l)` is `rho_l sigma(g2_l)`, which is what the expansion
+needs. Weighting both by `rho_l` does not close.
+
+`rho` has to be drawn after every message's commitment, since the garbage
+terms are weighted by it, and before those terms are committed, since a prover
+that knew it could adapt them. That is a separate hash from the one producing
+the opening challenge, and it is why the garbage terms cannot share the mask
+commitment: that one is fixed earlier still, before the projection scalars are
+derived.
+
+Batching them takes `SLOTS` from 5 to 3 and `LNP_WIDTH` from 8 to 6, and drops
+the per-message `t`, at the cost of one commitment for the batch.
 
 **One set of masks.** The `LNP_LAMBDA` masks `g_j` are paid for once for the
 whole batch, not once per message. They live in their own commitment,
@@ -304,14 +338,20 @@ Most of the soundness is carried by what is fixed before what. In order:
    that will be applied to them.
 3. The prover publishes the projection `z_p`, and `proj_public` derives
    `P_j`, `M_j`, `Z_j` from it.
-4. The aggregated values `h_j` are computed and, with the first messages,
-   hashed by `batch_hash` into the challenge `d`. So `h` is fixed before `d`.
-5. Responses are computed, one rejection test is run over all of them, and the
-   verifier checks norms, the Ajtai equations, the product identity, the
-   constant coefficients and the batch rows.
+4. `rho_hash` draws the batching challenge over every commitment. So every
+   message's commitment is fixed before the weights applied to it.
+5. The masks are drawn, the garbage terms are formed with those weights and
+   committed, and the aggregated values `h_j`, the batched term `T` and the
+   first messages are hashed by `batch_hash` into the challenge `d`. So the
+   garbage is fixed after `rho` and before `d`.
+6. Responses are computed, one rejection test is run over all of them, and the
+   verifier checks norms, the Ajtai equations of all three commitments, the
+   batched product identity, the constant coefficients and the batch rows.
 
-Steps 2 and 4 are each tested by a test that plays a prover trying to violate
-them.
+Step 2 is tested by a test that plays a prover reading the scalars and then
+adapting its masks to them. Step 5 is tested by breaking one message's product
+in a batch of 25 while leaving its constant coefficient alone, which only the
+batched quadratic relation can catch.
 
 ## 8. Where it lives
 
@@ -320,13 +360,14 @@ them.
 | `lnp_auto`, `lnp_auto_crt`, `lnp_auto_swaps` | the automorphisms, in both representations |
 | `lnp_keyinit`, `lnp_keygen`, `lnp_commit` | the multi-slot commitment |
 | `lnp_isbin_product`, `lnp_ones` | `f = sigma(s)(s-1)` and the all-ones element |
-| `lnp_quad_prover`, `lnp_quad_verifier` | the standalone quadratic proof, kept as a tested reference |
 | `lnp_sample_proj_mask`, `proj_seed`, `proj_pass`, `proj_scalars`, `proj_public` | the projection and its public multipliers |
 | `lnp_bin_setup` | projection, scalars, and this message's share of `h` |
 | `lnp_bin_first` | garbage terms, the challenge-free term `t`, and this message's share of `v` |
 | `lnp_bin_public` | what the verifier rebuilds rather than receives |
 | `lnp_bin_check` | per-message checks, and accumulation into `acc` |
 | `lnp_maskkey_*`, `lnp_mask_commit`, `lnp_batch_*` | the batch-wide masks and the final rows |
+| `lnp_garbkey_*`, `lnp_garb_commit`, `lnp_garb_first` | the batch-wide garbage terms |
+| `rho_hash` in `shuffle.c` | the batching challenge |
 
 The split into `setup` / `first` / `check` exists so that the caller owns the
 mask and the challenge: `shuffle.c` runs every message's setup, then every
@@ -340,7 +381,7 @@ response.
 | `DEGREE` | 1024 | ring degree |
 | `MODP` | `2^40 + 141` | set by the range proof's no-wraparound condition |
 | `LNP_LAMBDA` | 4 | `p^-4` is about `2^-160` |
-| `SLOTS` | 5 | witness, product, two garbage, projection mask |
+| `SLOTS` | 3 | witness, product, projection mask |
 | `LNP_RANK` | 2 | rank 1 hiding is only 73 bits |
 | `PROJ` | 256 | the projection lemma's requirement for `2^-128` |
 | `TAU_PROJ` | 9 | about 3.8 repetitions, bound 1.78x inside the ceiling |

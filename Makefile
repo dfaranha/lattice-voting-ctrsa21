@@ -69,8 +69,8 @@ encrypt: encrypt.c encrypt.h ${TEST} ${BENCH} ${INCLUDES}
 vericrypt: vericrypt.c encrypt.o ${TEST} ${BENCH} ${INCLUDES} gaussian_e.o
 	${CPP} ${CFLAGS} -DMAIN vericrypt.c encrypt.o sha224-256.c gaussian_e.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
-shuffle: shuffle.c commit.c commit.h lnp.c lnp.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o
-	${CPP} ${CFLAGS} commit.c lnp.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
+shuffle: shuffle.c commit.c commit.h lnp.c lnp.h serial.c serial.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o
+	${CPP} ${CFLAGS} commit.c lnp.c serial.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
 lnp: lnp.c lnp.h commit.c commit.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o
 	${CPP} ${CFLAGS} -DLNP_MAIN commit.c lnp.c sha224-256.c gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
