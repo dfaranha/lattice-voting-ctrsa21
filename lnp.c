@@ -1266,7 +1266,13 @@ void lnp_batch_first(lnpbatch_t *batch, lnpmaskkey_t *mkey,
 }
 
 /*
- * The batch check. Every message has contributed its share of
+ * The batch check. The first messages w, gw, v and T are not transmitted, so
+ * what used to be four comparisons here are now the definitions that recover
+ * them; the comparison happens once, when the caller rebuilds the digest over
+ * them. What remains a check here is what the digest cannot catch: the norm
+ * bounds, and that each aggregated value has zero constant coefficient.
+ *
+ * Every message has contributed its share of
  * sum_l [<B_lj, z_l> - c (T_lj - Z_lj)] to acc, so what remains is the mask
  * commitment's own term and the comparison against v_j.
  */
@@ -1299,8 +1305,7 @@ int lnp_batch_check(lnpbatch_t *batch, lnpmaskcom_t *mcom, lnpmaskkey_t *mkey,
 		inner(lhs, mkey->B1[i], zm, MASK_WIDTH);
 		for (int k = 0; k < NCRT; k++) {
 			pcrt_poly_mulmod(tmp, d[k], mcom->c1[i][k], k);
-			nmod_poly_add(tmp, tmp, batch->w[i][k]);
-			result &= nmod_poly_equal(lhs[k], tmp);
+			nmod_poly_sub(batch->w[i][k], lhs[k], tmp);
 		}
 	}
 
@@ -1316,8 +1321,7 @@ int lnp_batch_check(lnpbatch_t *batch, lnpmaskcom_t *mcom, lnpmaskkey_t *mkey,
 		inner(lhs, gkey->B1[i], zg, GARB_WIDTH);
 		for (int k = 0; k < NCRT; k++) {
 			pcrt_poly_mulmod(tmp, d[k], gcom->c1[i][k], k);
-			nmod_poly_add(tmp, tmp, batch->gw[i][k]);
-			result &= nmod_poly_equal(lhs[k], tmp);
+			nmod_poly_sub(batch->gw[i][k], lhs[k], tmp);
 		}
 	}
 
@@ -1344,7 +1348,7 @@ int lnp_batch_check(lnpbatch_t *batch, lnpmaskcom_t *mcom, lnpmaskkey_t *mkey,
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_add(lhs[k], batch->acc[k], u2[k]);
 			nmod_poly_add(lhs[k], lhs[k], u3[k]);
-			result &= nmod_poly_equal(lhs[k], batch->T[k]);
+			nmod_poly_set(batch->T[k], lhs[k]);
 			nmod_poly_clear(u2[k]);
 			nmod_poly_clear(u3[k]);
 		}
@@ -1364,7 +1368,7 @@ int lnp_batch_check(lnpbatch_t *batch, lnpmaskcom_t *mcom, lnpmaskkey_t *mkey,
 			pcrt_poly_mulmod(tmp, d[k], t[k], k);
 			nmod_poly_sub(lhs[k], lhs[k], tmp);
 			nmod_poly_add(lhs[k], lhs[k], acc[j][k]);
-			result &= nmod_poly_equal(lhs[k], batch->v[j][k]);
+			nmod_poly_set(batch->v[j][k], lhs[k]);
 		}
 	}
 

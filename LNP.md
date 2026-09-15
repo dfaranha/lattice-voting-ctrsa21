@@ -87,8 +87,13 @@ They are batched now, and live in a commitment of their own; section 6 has
 the reason and the shape.
 
 An opening is a vector `z = y + d r` for a challenge `d` and mask `y`, and the
-verifier checks `<B1[i], z> = w_i + d c1[i]` against the Ajtai first message
-`w_i`, plus a norm bound on `z`. Those two together are the binding.
+relation `<B1[i], z> = w_i + d c1[i]` ties it to the Ajtai first message `w_i`.
+That relation plus a norm bound on `z` is the binding.
+
+The first message is not transmitted. The verifier reads that relation the
+other way, `w_i = <B1[i], z> - d c1[i]`, recovers every first message in the
+proof this way, and checks them all at once by rebuilding the digest the
+challenge came from. Section 5e of `LNP-PARAMS.md` has the accounting.
 
 ## 4. The three claims
 

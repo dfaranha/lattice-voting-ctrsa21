@@ -179,3 +179,11 @@ void serial_get_proj(bitreader_t *r, ulong *z, int len, ulong sigma) {
 		z[i] = (v == MODP) ? 0 : v;
 	}
 }
+
+void serial_put_byte(bitwriter_t *w, uint8_t v) {
+	put_bits(w, v, 8);
+}
+
+uint8_t serial_get_byte(bitreader_t *r) {
+	return (uint8_t) get_bits(r, 8);
+}

@@ -315,8 +315,8 @@ reconstructed polynomial is short: the components of a short element are not.
 | modulus, `WIDTH` | `2^31.86`, 3 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 |
 | prover, per message | 88 ms | 600 ms | 227 ms | 111 ms | 109 ms | 248 ms |
 | prover against fix-pkc | 1.00x | 6.8x | 2.6x | 1.28x | 1.11x | **2.43x** |
-| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 100.6 KB | 183.7 KB |
-| proof against fix-pkc | 1.00x | 5.2x | 3.0x | 1.9x | 1.57x | **2.87x** |
+| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 100.6 KB | 139.9 KB |
+| proof against fix-pkc | 1.00x | 5.2x | 3.0x | 1.9x | 1.57x | **2.19x** |
 
 The ratios are the comparable quantity. Each was taken against `fix-pkc` in
 its own bracketed session, and the milliseconds come from whichever session
@@ -626,6 +626,47 @@ doubling of the degree would need 834138 against the same 741455 and would not
 close. A further increase therefore needs a larger modulus, which would in turn
 lower MSIS binding, or a smaller `TAU_PROJ`, which costs rejection-sampling
 repetitions. Neither is needed at 2048.
+
+## 5e. Not sending the first messages
+
+The proof was carrying every first message: `t`, `tp`, `_t` and `u` for each
+of the 25 messages, and `w`, `gw`, `v[LNP_LAMBDA]` and `T` for the batch.
+None of them needs to be sent.
+
+Each is determined by the equation that used to check it. The verifier knows
+the challenge, the response and the commitment, so `t = B1 z - d c1` rather
+than `B1 z = t + d c1`, and the same inversion applies to all eight. What the
+proof carries instead is the digest the challenge was derived from, 32 bytes
+however large the ring is. The verifier derives the challenge from it, rebuilds
+every first message from its equation, rebuilds the digest over them, and
+compares. That one comparison replaces eight equality checks, and it is
+equivalent: the digest reproduces exactly when every one of those equations
+held, and finding a response that hashes to a chosen digest is a preimage
+problem.
+
+This is the standard shape of a Fiat-Shamir proof and should have been the
+shape from the start. It is worth 43.8 KB per message, from 183.7 to 139.9,
+with no effect on any parameter and none on security.
+
+What stays is what the digest cannot certify: the norm bounds on the openings,
+and that each aggregated value `h_j` has zero constant coefficient. `h` itself
+also stays in the proof, because unlike `v` it is chosen by the prover and
+there is no equation to recover it from.
+
+### It is the check that rejects
+
+A rebuilt digest is a weak-looking check, so it is worth showing it does the
+work. Instrumenting the verifier to report the two halves separately, on the
+three tests that must reject:
+
+| | everything but the digest | digest |
+| --- | --- | --- |
+| one message's product broken | passes | **rejects** |
+| CRT-mixed message list | passes | **rejects** |
+| CRT-mixed sigma | rejects | rejects |
+
+In two of the three the digest is the only thing that rejects. The norm and
+constant-coefficient checks catch the third.
 
 ## 6. What this changes about the decision
 

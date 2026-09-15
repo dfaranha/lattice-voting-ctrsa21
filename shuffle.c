@@ -279,6 +279,33 @@ static void rho_hash(nmod_poly_t rho[MSGS][2], commitkey_t *key,
 	nmod_poly_clear(c);
 }
 
+/* The challenge is a deterministic function of the digest, which is what lets
+ * the proof carry the digest instead of every first message: the verifier
+ * derives the challenge from it, rebuilds the first messages from the
+ * verification equations, and re-derives the digest to check it matches. */
+static void challenge_from_hash(nmod_poly_t d[2],
+		const uint8_t hash[SHA256HashSize]) {
+	uint32_t buf;
+
+	fastrandombytes_setseed((uint8_t *) hash);
+	for (int i = 0; i < 2; i++) {
+		nmod_poly_zero(d[i]);
+		nmod_poly_fit_length(d[i], DEGREE);
+		for (int j = 0; j < NONZERO; j++) {
+			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			buf = buf % DEGREE;
+			while (nmod_poly_get_coeff_ui(d[i], buf) != 0) {
+				fastrandombytes((unsigned char *)&buf, sizeof(buf));
+				buf = buf % DEGREE;
+			}
+			nmod_poly_set_coeff_ui(d[i], buf, 1);
+		}
+	}
+	nmod_poly_sub(d[1], d[0], d[1]);
+	pcrt_poly_reduce(d[0], d[1], 0);
+	pcrt_poly_reduce(d[1], d[1], 1);
+}
+
 /* One challenge for the whole batch. It absorbs every commitment and every
  * first message, so no message's transcript can be replayed against another's,
  * and so the single opening each message sends answers a challenge that
@@ -288,10 +315,9 @@ static void batch_hash(nmod_poly_t d[2], commitkey_t *key, lnpkey_t *lkey,
 		nmod_poly_t t[MSGS][2], nmod_poly_t tp[MSGS][2],
 		nmod_poly_t _t[MSGS][2], nmod_poly_t u[MSGS][2], isbin_t ib[MSGS],
 		nmod_poly_t beta, lnpmaskcom_t *mcom, lnpgarbcom_t *gcom,
-		lnpbatch_t *batch) {
+		lnpbatch_t *batch, uint8_t *digest) {
 	SHA256Context sha;
 	uint8_t hash[SHA256HashSize];
-	uint32_t buf;
 
 	SHA256Reset(&sha);
 	for (int i = 0; i < HEIGHT; i++) {
@@ -351,24 +377,10 @@ static void batch_hash(nmod_poly_t d[2], commitkey_t *key, lnpkey_t *lkey,
 				PROJ * sizeof(ulong));
 	}
 	SHA256Result(&sha, hash);
-
-	fastrandombytes_setseed(hash);
-	for (int i = 0; i < 2; i++) {
-		nmod_poly_zero(d[i]);
-		nmod_poly_fit_length(d[i], DEGREE);
-		for (int j = 0; j < NONZERO; j++) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
-			buf = buf % DEGREE;
-			while (nmod_poly_get_coeff_ui(d[i], buf) != 0) {
-				fastrandombytes((unsigned char *)&buf, sizeof(buf));
-				buf = buf % DEGREE;
-			}
-			nmod_poly_set_coeff_ui(d[i], buf, 1);
-		}
+	if (digest != NULL) {
+		memcpy(digest, hash, SHA256HashSize);
 	}
-	nmod_poly_sub(d[1], d[0], d[1]);
-	pcrt_poly_reduce(d[0], d[1], 0);
-	pcrt_poly_reduce(d[1], d[1], 1);
+	challenge_from_hash(d, hash);
 }
 
 static void lin_first(nmod_poly_t y[WIDTH][2], nmod_poly_t w[LNP_WIDTH][2],
@@ -567,17 +579,16 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t w[LNP_WIDTH][2],
 			}
 		}
 	}
-	/* Verifier checks that B1z = t + d[x], B1z_p = t_p + d[p], B1z' = t' + d[x']. */
+	/* The Ajtai first messages are not transmitted. Each is recovered from the
+	 * equation that used to check it, t = B1z - d[x] and so on, and the check
+	 * happens once at the end when the digest is rebuilt over them. */
 	for (int j = 0; j < NCRT; j++) {
 		pcrt_poly_mulmod(tmp, _d[j], x.c1[j], j);
-		nmod_poly_add(lhs[j], t[j], tmp);
-		result &= nmod_poly_equal(lhs[j], v[j]);
+		nmod_poly_sub(t[j], v[j], tmp);
 		pcrt_poly_mulmod(tmp, _d[j], p->c1[0][j], j);
-		nmod_poly_add(lhs[j], tp[j], tmp);
-		result &= nmod_poly_equal(lhs[j], vp[j]);
+		nmod_poly_sub(tp[j], vp[j], tmp);
 		pcrt_poly_mulmod(tmp, _d[j], _x.c1[j], j);
-		nmod_poly_add(lhs[j], _t[j], tmp);
-		result &= nmod_poly_equal(lhs[j], _v[j]);
+		nmod_poly_sub(_t[j], _v[j], tmp);
 	}
 
 	/* Verifier checks the linear relation
@@ -590,7 +601,6 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t w[LNP_WIDTH][2],
 		nmod_poly_sub(lhs[j], lhs[j], _x.c2[j]);
 		nmod_poly_add(lhs[j], lhs[j], b[j]);
 		pcrt_poly_mulmod(lhs[j], lhs[j], _d[j], j);
-		nmod_poly_add(lhs[j], lhs[j], u[j]);
 		nmod_poly_zero(rhs[j]);
 	}
 
@@ -610,8 +620,9 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t w[LNP_WIDTH][2],
 			nmod_poly_add(rhs[j], rhs[j], tmp);
 		}
 	}
+	/* u = <b2 side> - d * <c2 side>, again a definition rather than a check. */
 	for (int j = 0; j < NCRT; j++) {
-		result &= nmod_poly_equal(lhs[j], rhs[j]);
+		nmod_poly_sub(u[j], rhs[j], lhs[j]);
 	}
 
 	nmod_poly_clear(tmp);
@@ -759,7 +770,8 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 		nmod_poly_t mr[MASK_WIDTH][2], nmod_poly_t zm[MASK_WIDTH][2],
 		lnpgarbkey_t *gkey, lnpgarbcom_t *gcom,
 		nmod_poly_t gr[GARB_WIDTH][2], nmod_poly_t zg[GARB_WIDTH][2],
-		nmod_poly_t bch[MSGS][2], flint_rand_t rng) {
+		nmod_poly_t bch[MSGS][2], uint8_t digest[SHA256HashSize],
+		flint_rand_t rng) {
 	nmod_poly_t beta, alpha, gamma, pub, t0, t1;
 	nmod_poly_t a[MSGS], b[MSGS], theta[MSGS], _r[MSGS][WIDTH][2];
 	nmod_poly_t sig[MSGS][2];
@@ -997,7 +1009,7 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 			lnp_garb_first(batch, gkey, yg);
 			lnp_batch_first(batch, mkey, ym);
 			batch_hash(dch, key, lkey, com, p, d, t, tp, _t, u, ib, beta,
-					mcom, gcom, batch);
+					mcom, gcom, batch, digest);
 			for (int l = 0; l < MSGS; l++) {
 				lin_respond(y[l], w[l], _y[l], dch, r[l], pr[l], _r[l],
 						&dot, &norm);
@@ -1069,7 +1081,8 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 		nmod_poly_t rho, commitkey_t *key, lnpkey_t *lkey,
 		lnpmaskkey_t *mkey, lnpmaskcom_t *mcom, lnpbatch_t *batch,
 		nmod_poly_t zm[MASK_WIDTH][2], lnpgarbkey_t *gkey, lnpgarbcom_t *gcom,
-		nmod_poly_t zg[GARB_WIDTH][2], nmod_poly_t bch[MSGS][2]) {
+		nmod_poly_t zg[GARB_WIDTH][2], nmod_poly_t bch[MSGS][2],
+		const uint8_t digest[SHA256HashSize]) {
 	int result = 1;
 	nmod_poly_t beta, alpha, gamma, pub, dch[NCRT];
 	pcrt_poly_t acc[LNP_LAMBDA];
@@ -1091,8 +1104,10 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 	for (int l = 0; l < MSGS; l++) {
 		lnp_bin_public(&ib[l].ctx, &ib[l].all, &p[l], mcom, lkey);
 	}
-	batch_hash(dch, key, lkey, com, p, d, t, tp, _t, u, ib, beta, mcom, gcom,
-			batch);
+	/* The proof carries the digest, not the first messages. Derive the
+	 * challenge from it; the calls below rebuild every first message from its
+	 * verification equation, and the digest is rebuilt over them at the end. */
+	challenge_from_hash(dch, digest);
 	/* Every message adds its rho-weighted share of the quadratic relation to
 	 * this, and lnp_batch_check settles the total. */
 	for (int k = 0; k < NCRT; k++) {
@@ -1111,6 +1126,24 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 	}
 
 	result &= lnp_batch_check(batch, mcom, mkey, gcom, gkey, dch, zm, zg, acc);
+
+	/* One comparison replaces every first-message check: rebuilding the digest
+	 * over the recovered first messages reproduces it exactly when each of
+	 * those equations held, and not otherwise. */
+	{
+		uint8_t rebuilt[SHA256HashSize];
+		nmod_poly_t ignored[2];
+
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(ignored[k], MODP);
+		}
+		batch_hash(ignored, key, lkey, com, p, d, t, tp, _t, u, ib, beta,
+				mcom, gcom, batch, rebuilt);
+		result &= (memcmp(rebuilt, digest, SHA256HashSize) == 0);
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(ignored[k]);
+		}
+	}
 
 	nmod_poly_clear(beta);
 	nmod_poly_clear(alpha);
@@ -1170,7 +1203,16 @@ typedef struct _proof_t {
 	lnpbatch_t *batch;
 	nmod_poly_t (*zm)[2];
 	nmod_poly_t (*zg)[2];
+	uint8_t *digest;
 } proof_t;
+
+static void put_byte(bitwriter_t *w, uint8_t v) {
+	serial_put_byte(w, v);
+}
+
+static uint8_t get_byte(bitreader_t *r) {
+	return serial_get_byte(r);
+}
 
 static void walk_uniform(bitwriter_t *w, bitreader_t *r, nmod_poly_t a[2]) {
 	if (w != NULL) {
@@ -1198,10 +1240,9 @@ static void proof_walk(proof_t *pf, bitwriter_t *w, bitreader_t *r) {
 		for (int i = 0; i < LNP_WIDTH; i++) {
 			walk_gauss(w, r, pf->w[l][i], SIGMA_B);
 		}
-		walk_uniform(w, r, pf->t[l]);
-		walk_uniform(w, r, pf->tp[l]);
-		walk_uniform(w, r, pf->_t[l]);
-		walk_uniform(w, r, pf->u[l]);
+		/* t, tp, _t and u are the first messages. They are not transmitted:
+		 * the verifier recovers each from its verification equation and
+		 * checks the digest instead. */
 		walk_uniform(w, r, pf->d[l].c1);
 		walk_uniform(w, r, pf->d[l].c2);
 		for (int i = 0; i < HEIGHT; i++) {
@@ -1239,19 +1280,28 @@ static void proof_walk(proof_t *pf, bitwriter_t *w, bitreader_t *r) {
 	}
 	for (int i = 0; i < HEIGHT; i++) {
 		walk_uniform(w, r, pf->mcom->c1[i]);
-		walk_uniform(w, r, pf->batch->w[i]);
 		walk_uniform(w, r, pf->gcom->c1[i]);
-		walk_uniform(w, r, pf->batch->gw[i]);
 	}
 	for (int i = 0; i < LNP_LAMBDA; i++) {
 		walk_uniform(w, r, pf->mcom->c2[i]);
+		/* h is prover-chosen and not recoverable, so unlike v it stays. */
 		walk_uniform(w, r, pf->batch->h[i]);
-		walk_uniform(w, r, pf->batch->v[i]);
 	}
 	for (int i = 0; i < 2; i++) {
 		walk_uniform(w, r, pf->gcom->c2[i]);
 	}
-	walk_uniform(w, r, pf->batch->T);
+	/* batch->w, batch->gw, batch->v and batch->T are first messages, and go
+	 * the same way as the per-message ones. In their place the proof carries
+	 * the digest, which is 32 bytes however large the ring is. */
+	if (w != NULL) {
+		for (int i = 0; i < SHA256HashSize; i++) {
+			put_byte(w, pf->digest[i]);
+		}
+	} else {
+		for (int i = 0; i < SHA256HashSize; i++) {
+			pf->digest[i] = get_byte(r);
+		}
+	}
 	for (int i = 0; i < MASK_WIDTH; i++) {
 		walk_gauss(w, r, pf->zm[i], SIGMA_B);
 	}
@@ -1273,6 +1323,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	static nmod_poly_t mr[MASK_WIDTH][2], zm[MASK_WIDTH][2];
 	static nmod_poly_t gr[GARB_WIDTH][2], zg[GARB_WIDTH][2];
 	static nmod_poly_t bch[MSGS][2];
+	uint8_t digest[SHA256HashSize];
 	lnpmaskkey_t mkey;
 	lnpmaskcom_t mcom;
 	lnpgarbkey_t gkey;
@@ -1363,7 +1414,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 
 	shuffle_prover(y, w, _y, t, tp, _t, u, d, s, com, p, ib, m, _m, sigma,
 			r, pr, tau, rho, key, lkey, &mkey, &mcom, &batch, mr, zm,
-			&gkey, &gcom, gr, zg, bch, rng);
+			&gkey, &gcom, gr, zg, bch, digest, rng);
 
 	/* Round-trip the proof through its serialisation before verifying it, so
 	 * that the measured size is the size of something that actually verifies
@@ -1374,7 +1425,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		bitwriter_t bw;
 		bitreader_t br;
 		proof_t pf = { y, _y, w, t, tp, _t, u, d, s, p, ib, &mcom, &gcom,
-				&batch, zm, zg };
+				&batch, zm, zg, digest };
 
 		serial_writer_init(&bw, buf, sizeof(buf));
 		proof_walk(&pf, &bw, NULL);
@@ -1387,7 +1438,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 
 	result = shuffle_verifier(y, w, _y, t, tp, _t, u, d, s, com, p, ib, _m,
 			tau, rho, key, lkey, &mkey, &mcom, &batch, zm, &gkey, &gcom,
-			zg, bch);
+			zg, bch, digest);
 
 	nmod_poly_clear(tau);
 	nmod_poly_clear(rho);
@@ -1570,11 +1621,16 @@ static void test(flint_rand_t rand) {
 			 * instead of silently changing the published size. */
 			size_t bu = serial_bits_uniform();
 			size_t bg = serial_bits_gauss(SIGMA_B);
-			size_t per = (4 + 2 + 1 + HEIGHT + SLOTS) * DEGREE * bu
+			/* The first messages are gone: per message that is t, tp, _t
+			 * and u, and for the batch w, gw, v and T, replaced by the
+			 * digest. What is left per message is the product commitment,
+			 * the partial product and the sigma commitment. */
+			size_t per = (2 + 1 + HEIGHT + SLOTS) * DEGREE * bu
 					+ (2 * WIDTH + LNP_WIDTH) * DEGREE * bg
 					+ PROJ * serial_bits_gauss(SIGMA_P);
-			size_t shared = (4 * HEIGHT + 3 * LNP_LAMBDA + 2 + 1) * DEGREE * bu
-					+ (MASK_WIDTH + GARB_WIDTH) * DEGREE * bg;
+			size_t shared = (2 * HEIGHT + 2 * LNP_LAMBDA + 2) * DEGREE * bu
+					+ (MASK_WIDTH + GARB_WIDTH) * DEGREE * bg
+					+ SHA256HashSize * 8;
 
 			TEST_ASSERT(proof_bytes == (MSGS * per + shared + 7) / 8, end);
 		}

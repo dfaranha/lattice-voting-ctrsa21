@@ -91,4 +91,10 @@ void serial_get_gauss(bitreader_t *r, nmod_poly_t a[2], ulong sigma);
 void serial_put_proj(bitwriter_t *w, const ulong *z, int len, ulong sigma);
 void serial_get_proj(bitreader_t *r, ulong *z, int len, ulong sigma);
 
+/**
+ * Pack and unpack one raw byte, for the Fiat-Shamir digest.
+ */
+void serial_put_byte(bitwriter_t *w, uint8_t v);
+uint8_t serial_get_byte(bitreader_t *r);
+
 #endif /* !SERIAL_H */
