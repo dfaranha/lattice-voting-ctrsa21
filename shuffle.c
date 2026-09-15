@@ -5,6 +5,7 @@
 #include "commit.h"
 #include "test.h"
 #include "bench.h"
+#include "serial.h"
 #include "assert.h"
 #include "fastrandombytes.h"
 #include "sha.h"
@@ -549,6 +550,83 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 	return result;
 }
 
+/*
+ * Serialising the proof, so that its size is measured rather than modelled.
+ *
+ * Pointers to every part the prover sends, gathered so that one walk can both
+ * pack and unpack them. Exactly one of the writer and the reader is non-NULL,
+ * which is what keeps the two directions from drifting apart.
+ *
+ * What is absent matters as much as what is present. The commitments com[] and
+ * the shuffled list _m[] are the statement, and the key is a public parameter,
+ * so none of them is counted. Neither are the first messages t, _t and u: the
+ * verifier recovers those from the equations, and the proof carries the
+ * 32-byte digest in their place.
+ */
+typedef struct _proof_t {
+	nmod_poly_t (*y)[WIDTH][2];
+	nmod_poly_t (*_y)[WIDTH][2];
+	commit_t *d;
+	nmod_poly_t *s;
+	uint8_t (*digest)[SHA256HashSize];
+} proof_t;
+
+static void walk_uniform(bitwriter_t *w, bitreader_t *r, nmod_poly_t a[2]) {
+	if (w != NULL) {
+		serial_put_uniform(w, a);
+	} else {
+		serial_get_uniform(r, a);
+	}
+}
+
+static void walk_gauss(bitwriter_t *w, bitreader_t *r, nmod_poly_t a[2],
+		ulong sigma) {
+	if (w != NULL) {
+		serial_put_gauss(w, a, sigma);
+	} else {
+		serial_get_gauss(r, a, sigma);
+	}
+}
+
+static void proof_walk(proof_t *pf, bitwriter_t *w, bitreader_t *r) {
+	nmod_poly_t crt[2];
+
+	nmod_poly_init(crt[0], MODP);
+	nmod_poly_init(crt[1], MODP);
+	for (int l = 0; l < MSGS; l++) {
+		for (int i = 0; i < WIDTH; i++) {
+			walk_gauss(w, r, pf->y[l][i], SIGMA_C);
+			walk_gauss(w, r, pf->_y[l][i], SIGMA_C);
+		}
+		walk_uniform(w, r, pf->d[l].c1);
+		walk_uniform(w, r, pf->d[l].c2);
+		/* s is held in coefficient representation, so it is converted rather
+		 * than walked directly; the cost is the same DEGREE coefficients. */
+		if (w != NULL) {
+			pcrt_poly_reduce(crt[0], pf->s[l], 0);
+			pcrt_poly_reduce(crt[1], pf->s[l], 1);
+			serial_put_uniform(w, crt);
+		} else {
+			serial_get_uniform(r, crt);
+			pcrt_poly_rec(pf->s[l], crt);
+		}
+		for (int i = 0; i < SHA256HashSize; i++) {
+			if (w != NULL) {
+				serial_put_byte(w, pf->digest[l][i]);
+			} else {
+				pf->digest[l][i] = serial_get_byte(r);
+			}
+		}
+	}
+	nmod_poly_clear(crt[0]);
+	nmod_poly_clear(crt[1]);
+}
+
+/* Set by the size test: round-trip the proof through its serialisation before
+ * verifying, and record how many bytes it took. */
+static int measure_proof = 0;
+static size_t proof_bytes = 0;
+
 static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		nmod_poly_t r[MSGS][WIDTH][2], commitkey_t *key, flint_rand_t rng) {
 	int flag, result = 1;
@@ -595,6 +673,22 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	static uint8_t digest[MSGS][SHA256HashSize];
 
 	shuffle_prover(y, _y, t, _t, u, d, s, com, m, _m, r, rho, key, digest, rng);
+
+	/* Round-trip the proof through its serialisation before verifying it, so
+	 * that the measured size is the size of something that actually verifies
+	 * and not just a count of struct fields. */
+	if (measure_proof) {
+		static uint8_t buf[4 << 20];
+		bitwriter_t bw;
+		bitreader_t br;
+		proof_t pf = { y, _y, d, s, digest };
+
+		serial_writer_init(&bw, buf, sizeof(buf));
+		proof_walk(&pf, &bw, NULL);
+		proof_bytes = bw.overflow ? 0 : serial_bytes(&bw);
+		serial_reader_init(&br, buf, sizeof(buf));
+		proof_walk(&pf, NULL, &br);
+	}
 
 	result = shuffle_verifier(y, _y, t, _t, u, d, s, com, _m, rho, key,
 			digest);
@@ -652,6 +746,24 @@ static void test(flint_rand_t rand) {
 	for (int i = 0; i < MSGS; i++) {
 		nmod_poly_set(_m[i], m[(i + 1) % MSGS]);
 	}
+
+	TEST_ONCE("proof survives serialisation, and measures what it should") {
+		measure_proof = 1;
+		TEST_ASSERT(run(com, m, _m, r, &key, rand) == 1, end);
+		measure_proof = 0;
+		printf("\n    %zu bytes, %.1f KB per message\n", proof_bytes,
+				proof_bytes / 1024.0 / MSGS);
+		{
+			/* The same count expressed by shape rather than by walking, so
+			 * that a field added to one and not the other shows up here. */
+			size_t bu = serial_bits_uniform();
+			size_t bg = serial_bits_gauss(SIGMA_C);
+			size_t per = 3 * DEGREE * bu + 2 * WIDTH * DEGREE * bg
+					+ SHA256HashSize * 8;
+
+			TEST_ASSERT(proof_bytes == (MSGS * per + 7) / 8, end);
+		}
+	} TEST_END;
 
 	TEST_ONCE("shuffle proof is consistent") {
 		TEST_ASSERT(run(com, m, _m, r, &key, rand) == 1, end);
