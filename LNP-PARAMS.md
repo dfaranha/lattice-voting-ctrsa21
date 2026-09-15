@@ -177,8 +177,8 @@ repetitions and leaves the certified bound a factor 1.78 inside the ceiling.
 | `WIDTH` | 3 | 4 | 3 |
 | `DIM` | 2 | 3 | 3 |
 | `Q` | `2^56` | 18446744073709551557 (`2^64 - 59`) | unchanged |
-| `SIGMA_C` | 54000 | 54000 | 66136 |
-| `SIGMA_B` | -- | 270000 | 330680 |
+| `SIGMA_C` | 54000 | 54000 | 33068 |
+| `SIGMA_B` | -- | 270000 | 165340 |
 | `SIGMA_P` | -- | 3258 | 4608 |
 
 The degree change is described in section 5d. It needed no new CRT constants
@@ -315,8 +315,8 @@ reconstructed polynomial is short: the components of a short element are not.
 | modulus, `WIDTH` | `2^31.86`, 3 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 |
 | prover, per message | 88 ms | 600 ms | 227 ms | 111 ms | 109 ms | 248 ms |
 | prover against fix-pkc | 1.00x | 6.8x | 2.6x | 1.28x | 1.11x | **2.43x** |
-| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 100.6 KB | 139.9 KB |
-| proof against fix-pkc | 1.00x | 5.2x | 3.0x | 1.9x | 1.57x | **2.19x** |
+| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 100.6 KB | 137.0 KB |
+| proof against fix-pkc | 1.00x | 5.2x | 3.0x | 1.9x | 1.57x | **2.14x** |
 
 The ratios are the comparable quantity. Each was taken against `fix-pkc` in
 its own bracketed session, and the milliseconds come from whichever session
@@ -667,6 +667,63 @@ three tests that must reject:
 
 In two of the three the digest is the only thing that rejects. The norm and
 constant-coefficient checks catch the third.
+
+## 5f. The challenge weight, and where the floor is
+
+`NONZERO` was 36, chosen when `DEGREE` was 1024. The challenge space is
+`C(DEGREE, NONZERO)`, and at 2048 that is `2^257` at weight 36 against the
+`2^128` the knowledge error needs, so half the weight is still ample:
+`C(2048, 18)` is `2^145`.
+
+Lowering it pays twice. `SIGMA_C` is linear in `NONZERO`, so the masks halve,
+which takes a Gaussian coefficient from 22 bits to 21. And the extractable
+opening `16 sigma sqrt(nu N)` falls with both, from `2^30.42` to `2^28.92`, so
+MSIS binding rises from 308.6 to 352.2. The rejection rate does not move,
+because the term being masked is also linear in the weight: `sigma_C` and
+`||c r||` scale together and their ratio is what sets the repetitions.
+
+| | 36 | 18 |
+| --- | --- | --- |
+| `SIGMA_C` | 66136 | 33068 |
+| `SIGMA_B` | 330680 | 165340 |
+| Gaussian coefficient | 22 bits | 21 bits |
+| MSIS binding | 308.6 | 352.2 |
+| proof, per message | 139.9 KB | 137.0 KB |
+
+### Where the floor is
+
+That is 2 per cent, and it is the last easy one. What remains, per message:
+
+| | | |
+| --- | --- | --- |
+| openings `y`, `_y`, `w` | 57.8 KB | 42% |
+| `p.c2`: `SLOT_S`, `SLOT_F`, `SLOT_W` | 30.8 KB | 22% |
+| product commitment `d` | 20.5 KB | 15% |
+| partial product `s` | 10.3 KB | 8% |
+| `p.c1` | 10.3 KB | 8% |
+| shared, projection | 7.4 KB | 5% |
+
+`d` and `s` are Neff's product argument and are structural. `p.c1` and
+`SLOT_S` are the commitment to the permutation element that Lemma 5 requires.
+`SLOT_W` is the projection mask, one per witness. The openings are already at
+MLWE rank 1 and their widths are `HEIGHT + SLOTS + LNP_RANK` with nothing
+spare.
+
+**`SLOT_F` cannot be removed**, which is worth recording because it looks as
+though it should be: `f` is `sigma(s)(s - ones)`, entirely determined by `s`,
+so committing it looks redundant. It is not. Section 3 explains why the
+aggregation challenge has to be a scalar, and a scalar can only be applied to a
+*committed message*. Without the commitment the term is quadratic in `s`, and
+in the expansion of the quadratic identity `F(s)` appears only as
+`d sigma(d) F(s)`, multiplied by a ring element. Requiring `ct(gamma f) = 0`
+for ring `gamma` would force `f = 0`, which is false for an honest witness.
+`SLOT_F` is the bridge that turns the quadratic claim into a linear one the
+scalars can aggregate, and removing it needs the trace construction, which
+wants more automorphisms than a two-factor ring gives cheaply.
+
+So the remaining levers are entropy coding the Gaussian openings, worth about
+3 per cent since they carry 20.4 bits of entropy and are written at 21, and the
+ring degree, which is the only one with a factor of two in it.
 
 ## 6. What this changes about the decision
 

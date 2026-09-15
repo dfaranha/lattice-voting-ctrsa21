@@ -1443,6 +1443,7 @@ static lnpgarbcom_t tst_gcom;
 static pcrt_poly_t tst_zg[GARB_WIDTH], tst_rg[GARB_WIDTH], tst_rho;
 static lnpbatch_t tst_batch;
 static pcrt_poly_t tst_z[LNP_WIDTH], tst_zm[MASK_WIDTH], tst_ajtai[HEIGHT];
+static uint8_t tst_digest[SHA256HashSize];
 static pcrt_poly_t tst_mr[MASK_WIDTH];
 static int tst_ready = 0;
 
@@ -1485,8 +1486,32 @@ static void tst_setup(flint_rand_t rng) {
 	tst_ready = 1;
 }
 
+/* The challenge as a function of the digest, so that the harness can derive it
+ * before the first messages exist, exactly as the shuffle's verifier does. */
+static void challenge_from_digest(pcrt_poly_t d,
+		const uint8_t hash[SHA256HashSize]) {
+	nmod_poly_t c;
+	uint32_t buf;
+
+	nmod_poly_init(c, MODP);
+	fastrandombytes_setseed((uint8_t *) hash);
+	nmod_poly_fit_length(c, DEGREE);
+	for (int i = 0; i < NONZERO; i++) {
+		fastrandombytes((unsigned char *)&buf, sizeof(buf));
+		buf = buf % DEGREE;
+		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
+			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			buf = buf % DEGREE;
+		}
+		nmod_poly_set_coeff_ui(c, buf, 1);
+	}
+	pcrt_poly_reduce(d[0], c, 0);
+	pcrt_poly_reduce(d[1], c, 1);
+	nmod_poly_clear(c);
+}
+
 static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
-		lnpbinproof_t *pi, pcrt_poly_t ajtai[HEIGHT]) {
+		lnpbinproof_t *pi, pcrt_poly_t ajtai[HEIGHT], uint8_t *digest) {
 	SHA256Context sha;
 	uint8_t hash[SHA256HashSize];
 	uint32_t buf;
@@ -1526,6 +1551,9 @@ static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
 	}
 	SHA256Input(&sha, (const uint8_t *)pi->zp, PROJ * sizeof(ulong));
 	SHA256Result(&sha, hash);
+	if (digest != NULL) {
+		memcpy(digest, hash, SHA256HashSize);
+	}
 
 	nmod_poly_init(c, MODP);
 	fastrandombytes_setseed(hash);
@@ -1674,7 +1702,7 @@ static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 		for (int i = 0; i < HEIGHT; i++) {
 			inner(tst_ajtai[i], key->B1[i], y, LNP_WIDTH);
 		}
-		bin_local_hash(d, key, com, pi, tst_ajtai);
+		bin_local_hash(d, key, com, pi, tst_ajtai, tst_digest);
 		dot = norm = 0;
 		for (int i = 0; i < LNP_WIDTH; i++) {
 			for (int k = 0; k < NCRT; k++) {
@@ -1745,7 +1773,12 @@ static int bin_verify_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 		}
 	}
 	lnp_bin_public(ctx, pi, com, &tst_mcom, key);
-	bin_local_hash(d, key, com, pi, tst_ajtai);
+	/* The first messages are no longer compared inside lnp_batch_check; that
+	 * function rebuilds them. So this has to close the loop the same way
+	 * shuffle_verifier does, or the checks it replaced are simply gone. The
+	 * challenge comes from the prover's digest, the checks below rebuild
+	 * w, gw, v and T, and the digest is rebuilt over them at the end. */
+	challenge_from_digest(d, tst_digest);
 	for (int i = 0; i < LNP_WIDTH; i++) {
 		pcrt_poly_rec(rec, tst_z[i]);
 		result &= commit_norm2_leq(rec,
@@ -1768,6 +1801,19 @@ static int bin_verify_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 			tst_rho);
 	result &= lnp_batch_check(&tst_batch, &tst_mcom, &tst_mkey, &tst_gcom,
 			&tst_gkey, d, tst_zm, tst_zg, acc);
+	{
+		uint8_t rebuilt[SHA256HashSize];
+		pcrt_poly_t ignored;
+
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_init(ignored[k], MODP);
+		}
+		bin_local_hash(ignored, key, com, pi, tst_ajtai, rebuilt);
+		result &= (memcmp(rebuilt, tst_digest, SHA256HashSize) == 0);
+		for (int k = 0; k < NCRT; k++) {
+			nmod_poly_clear(ignored[k]);
+		}
+	}
 
 	nmod_poly_clear(rec);
 	nmod_poly_clear(tmp);

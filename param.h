@@ -53,10 +53,10 @@
 #define NCRT 	2
 /* Standard deviation for discrete Gaussians: about 23.44 * NONZERO *
  * sqrt(WIDTH * DEGREE), so it grows as sqrt(DEGREE) and shrinks with WIDTH. */
-#define SIGMA_C 66136
+#define SIGMA_C 33068
 /* Standard deviation for the Gaussian masking the committed permutation
  * elements sigma_i of Lemma 5. These are monomials, so ||d * sigma_i|| equals
- * ||d|| <= sqrt(2 * NONZERO) ~ 8.5 exactly regardless of DEGREE, which is why
+ * ||d|| <= sqrt(2 * NONZERO) ~ 6.0 exactly regardless of DEGREE, which is why
  * this one does not scale with it. SIGMA_S = 256 leaves a ratio of about 30
  * for the rejection sampling. It must also stay small enough that the
  * extracted ||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S), which
@@ -67,7 +67,7 @@
  * across MSGS statements means one rejection test over their concatenation, so
  * the term being masked is sqrt(MSGS) times longer than for a single statement
  * and the mask has to widen to match. */
-#define SIGMA_B 330680
+#define SIGMA_B 165340
 /* Standard deviation of the projection mask in the approximate range proof:
  * TAU_PROJ * sqrt(PROJ * DEGREE / 2), the width needed to hide a projection of
  * an honest binary witness. The bound it certifies grows with it, so the

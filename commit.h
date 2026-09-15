@@ -22,8 +22,13 @@
 /* Constant definitions                                                       */
 /*============================================================================*/
 
-/* Parameter v in the commitment scheme (laximum l1-norm of challs). */
-#define NONZERO 36
+/* Parameter v in the commitment scheme: the weight of a challenge, and so the
+ * maximum l1-norm of one. The challenge space is C(DEGREE, NONZERO), which at
+ * DEGREE 2048 is 2^145 even at 18, comfortably past the 2^128 the knowledge
+ * error needs. Lowering it pays twice: SIGMA_C is linear in NONZERO, so the
+ * masks narrow, and the extractable opening 16 sigma sqrt(nu N) falls with
+ * both, taking MSIS binding from 309 to 352 bits. */
+#define NONZERO 18
 /* The \infty-norm bound of certain elements. */
 #define BETA 	1
 /* Width k of the commitment matrix. The hiding property is MLWE of rank
