@@ -26,7 +26,8 @@
 
 /* Number of independent masks used to prove that a constant coefficient is
  * zero. Each one contributes a factor 1/MODP to the soundness error, so four
- * of them give about 2^-127 at this modulus. */
+ * of them give about 2^-160 at this modulus. The 2^-127 this comment used to
+ * quote was for the modulus before B5 raised it. */
 #define LNP_LAMBDA 	4
 
 /* Number of message slots in the multi-slot commitment. Slots 0 to 3 are the

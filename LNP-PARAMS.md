@@ -291,7 +291,7 @@ penalises the slower binary more, and inflated this ratio to 1.40.
 
 Size is counted from the transmitted structures, since nothing here serialises
 a proof: a uniform ring element costs `DEGREE` times `ceil(log2 p)` bits and a
-Gaussian one `DEGREE` times `ceil(log2 12 sigma)`. Note that `MODP` is thirteen
+Gaussian one `DEGREE` times `ceil(log2 12 sigma)`. Note that `MODP` is 141
 above `2^40`, so a uniform element costs 41 bits per coefficient and not 40.
 
 | | fix-pkc | lnp at `a63d9b3` | lnp at `d3491d0` | lnp now |

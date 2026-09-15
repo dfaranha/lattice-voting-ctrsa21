@@ -755,9 +755,10 @@ static int proj_reject(ulong z[PROJ], ulong v[PROJ]) {
 }
 
 
-/* The combined key row and commitment of the j-th consistency relation:
- * P_j applied to the witness slot, sigma(M_j) to the packed mask slot, and the
- * j-th constant-coefficient mask. */
+/* The combined key row and commitment of the j-th consistency relation: P_j
+ * applied to the witness slot, M_j to the packed mask slot, and nu_j to the
+ * product slot. Both P_j and M_j already carry the automorphism, applied once
+ * when proj_public built them. */
 static void range_row(pcrt_poly_t b[LNP_WIDTH], pcrt_poly_t t, lnpkey_t *key,
 		lnpcom_t *com, pcrt_poly_t P, pcrt_poly_t M, ulong nu) {
 	nmod_poly_t tmp;
