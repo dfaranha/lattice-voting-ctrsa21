@@ -309,14 +309,20 @@ uniform coefficient costs 41 bits and not 40. And a Gaussian element has to be
 reconstructed from its CRT components before packing, because only the
 reconstructed polynomial is short: the components of a short element are not.
 
-| | fix-pkc | `a63d9b3` | `d3491d0` | `7d2f639` | now |
-| --- | --- | --- | --- | --- | --- |
-| modulus, `WIDTH` | `2^31.86`, 3 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 |
-| prover, per proof | 2.19 s | 14.99 s | 5.68 s | 2.77 s | see below |
-| prover, per message | 88 ms | 600 ms | 227 ms | 111 ms | see below |
-| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 204.3 KB |
-| proof, 25 messages | 1.56 MB | 8.06 MB | 4.61 MB | 2.93 MB | 4.99 MB |
-| against fix-pkc | | 6.8x, 5.2x | 2.6x, 3.0x | 1.28x, 1.9x | **3.19x size** |
+| | fix-pkc | `a63d9b3` | `d3491d0` | `7d2f639` | `5551374` | now |
+| --- | --- | --- | --- | --- | --- | --- |
+| `DEGREE` | 1024 | 1024 | 1024 | 1024 | 1024 | 2048 |
+| modulus, `WIDTH` | `2^31.86`, 3 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 |
+| prover, per message | 88 ms | 600 ms | 227 ms | 111 ms | 109 ms | 248 ms |
+| prover against fix-pkc | 1.00x | 6.8x | 2.6x | 1.28x | 1.11x | **2.43x** |
+| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 100.6 KB | 204.3 KB |
+| proof against fix-pkc | 1.00x | 5.2x | 3.0x | 1.9x | 1.57x | **3.19x** |
+
+The ratios are the comparable quantity. Each was taken against `fix-pkc` in
+its own bracketed session, and the milliseconds come from whichever session
+measured that column, so absolute times drift between rows by ten per cent or
+so while the ratios do not. Reproducibility of the ratios themselves is about
+plus or minus 0.06 at `DEGREE = 1024` and 0.2 at 2048.
 
 `is_bin` as first wired in cost 6.8 times the prover and 5.2 times the
 proof. Batching it, which is section 5b, brought that to **1.28 times the
@@ -571,7 +577,10 @@ section 5c, so they sit a couple of bits high; the conclusion does not turn on
 that.
 
 It costs a factor of two in the proof, from 100.6 to 204.3 KB per message,
-measured. The prover was not re-measured.
+measured, and 2.18 times the prover, from 109 to 248 milliseconds per message.
+That the time cost is a little over two rather than exactly two is what the
+`n log n` of the transform predicts, and is a reassuring sign that nothing else
+changed shape. Against `fix-pkc` the prover goes from 1.11 to 2.43 times.
 
 ### What narrowed
 
