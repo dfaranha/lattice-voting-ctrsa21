@@ -58,9 +58,17 @@ proof. This table is the reference for what each costs and what each is worth.
 
 Security is core-SVP bits, in the sense of Alkim-Ducas-Pöppelmann-Schwabe,
 computed with the `lattice-estimator`. The security level of a branch is the
-minimum of its three columns, since an attacker picks the weakest. Sizes are at
-`MSGS = 25` and count what the prover sends the verifier: the statement, which
-is the input commitments and the shuffled list, is not included.
+minimum of its three columns, since an attacker picks the weakest.
+
+Sizes are at `MSGS = 25` and are **measured, not estimated**. Every branch
+carries a `serial.c` that packs the values the prover sends, at
+`ceil(log2 p)` bits per uniform coefficient and `ceil(log2 12 sigma)` per
+Gaussian one, and its test suite round-trips an honest proof through it and
+verifies the *decoded* values before reporting the byte count. So each figure
+is the size of something that actually verifies rather than a count of struct
+fields. What is counted is what the prover sends: the statement, which is the
+input commitments and the shuffled list, is not included, and neither are the
+first messages, which the verifier recovers rather than receiving.
 
 Five things the table is worth reading for.
 
@@ -84,9 +92,7 @@ therefore the same security.
 `fix-pkc` establishes the set membership Lemma 5 needs by a norm bound, `lnp`
 proves the committed element is binary, which is the statement the lemma really
 requires. That needs the LNP machinery, a larger modulus, and a larger ring,
-and it costs 137.0 KB. It is the only branch whose size is *measured* rather
-than modelled: `serial.c` packs a real proof and the verifier checks the
-decoded values before the byte count is reported.
+and it costs 137.0 KB.
 
 **`DEGREE` is 2048 on `lnp` because the batch size became a security
 parameter.** One rejection test spans every message's response, so the masks
@@ -100,6 +106,4 @@ Fiat-Shamir digest instead, the verifier recovering each first message from the
 equation that used to check it. That is worth 25 to 31 per cent and is already
 included above.
 
-`LNP-PARAMS.md` on the `lnp` branch has the derivations, the measurements and
-the caveats, including which of these numbers are modelled and which are
-measured.
+`LNP-PARAMS.md` on the `lnp` branch has the derivations and the caveats.
