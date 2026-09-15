@@ -1,17 +1,16 @@
 # lattice-voting-ctrsa21
 
 Code accompannying the paper "Lattice-Based Proof of Shuffle and Applications to Electronic Voting" by Diego F. Aranha, Carsten Baum, Kristian Gjøsteen,
-Tjerand Silde, and Thor Tunge accepted at CT-RSA 2021.
+Tjerand Silde, and Thor Tunge accepted at CT-RSA 2021. The code has been revised post-publication for quality and performance.
 
-## The proof of shuffle in this branch is not sound
+## WARNING
+
+This is an academic proof of concept and has not received code review.
+This implementation is NOT ready for any type of production use, in particular because of the attack below.
 
 Bootle, Lyubashevsky and Merino-Gallardo, ["Efficient Verifiable Mixnets from
-Lattices, Revisited"](https://eprint.iacr.org/2025/658), showed that the proof
-of shuffle of the paper above is unsound, and mounted a working attack against
-this implementation. The product identity the proof checks implies that the two
-lists are related by a permutation only over a field, and the ring used here
-never is one: it only implies that the lists are permuted within each CRT
-component, possibly by two different permutations.
+Lattices, Revisited"](https://eprint.iacr.org/2025/658), showed that our proof
+is not sound, and mounted a working attack against this implementation.
 
 **This branch does not contain the fix.** Work on the countermeasure of Lemma 5
 of that paper lives on the `fix-pkc` branch, along with a draft of the
@@ -39,19 +38,7 @@ CI, which is what keeps the allocation behaviour honest:
     make CFLAGS="-O1 -g -march=native -pthread \
       -fsanitize=address,undefined -fno-sanitize-recover=all" test
 
-## Memory ownership
-
-Aggregates follow the same convention as FLINT polynomials: an explicit
-initializer, then any number of operations, then a release. `commit_init`,
-`commit_keyinit`, `encrypt_cipher_init`, `encrypt_keyinit` and `vericrypt_init`
-allocate; `commit_free`, `commit_keyfree`, `encrypt_free`, `encrypt_keyfree` and
-`vericrypt_free` release. The computation routines, such as `commit_doit` and
-`vericrypt_doit`, allocate nothing and may be called repeatedly on the same
-object.
-
 ## Third-party code
 
 `vcl/` vendors Agner Fog's Vector Class Library, used by the constant-time
 discrete Gaussian sampler in `gaussian_ct.cpp` (by Raymond K. Zhao).
-
-**WARNING**: This is an academic proof of concept, and in particular has not received code review. This implementation is NOT ready for any type of production use.
