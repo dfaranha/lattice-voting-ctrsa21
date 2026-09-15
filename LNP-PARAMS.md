@@ -189,6 +189,11 @@ repetitions and leaves the certified bound a factor 1.78 inside the ceiling.
 Encryption at 129.1 is the thinnest, and is what saturating `q` under 64 bits
 costs.
 
+**The binding row no longer holds.** It was computed with the masks at
+`SIGMA_C`, and since `d3491d0` they are at `SIGMA_B`. Section 5c has the
+recomputation: 128.8, not 162.1, and encryption is no longer the constraint.
+The other two rows are unaffected and stand.
+
 ### Two latent bugs the modulus change exposed
 
 Neither was reachable while `MODP` stayed under `2^32`, and both are now fixed.
@@ -254,20 +259,35 @@ Measured on the same machine, three full proofs at `MSGS = 25`:
 **7.2 times slower.** Three sub-proofs per message, and the range proof's
 rejection sampling retries about 3.8 times, each retry recommitting and
 re-running the product proof. Nothing here had been optimised at this point;
-sections 5a and 5b supersede these figures, and the number below is 117 ms.
+sections 5a and 5b supersede these figures, and the number below is 111 ms.
 
 For scale, the paper reports 33 ms per vote.
 
 ## 5a. Measured against fix-pkc
 
-Both quantities are measured on one footing. Time is the invariant-TSC cycle
-count the benchmark harness itself reports for one full proof at `MSGS = 25`,
-median of twelve rounds in which every binary runs back to back with
-`fix-pkc`; the ratio is taken within each round, so that thermal drift cancels
-instead of landing on whichever binary happened to run while the machine was
-hot. This laptop's TSC ticks at its 1.80 GHz base clock whatever the core is
-doing, so a throttled run genuinely costs more ticks, and the seconds are
-ticks over 1.8e9.
+Time is the invariant-TSC cycle count the benchmark harness reports, and the
+harness is asked for the **mean over nine proofs** rather than the time of one.
+That matters here. Since the transcript was batched the prover runs a single
+rejection test over every message's response, so the cost of one proof is one
+geometric draw; timing single proofs and taking a median across runs gave
+per-round ratios anywhere from 0.82 to 3.35, and an earlier version of this
+section reported 1.2x from exactly that mistake. `fix-pkc`, with twenty-five
+independent rejection tests that average out, does not have the problem, which
+is why the two cannot be measured the same careless way.
+
+Runs are also bracketed: `fix-pkc` is measured immediately before and
+immediately after each variant, and the mean of the two brackets is the
+baseline, so drift in the machine's thermal state over a pair cancels. That
+this is necessary is visible in the result: the three baselines come out at
+2.17, 2.20 and 2.21 seconds and the three ratios at 1.25, 1.28 and 1.30,
+where the same quantity measured without bracketing ranged from 1.22 to 1.46
+depending on what else had been running.
+
+The run length matters too, and shorter is better rather than worse. Asking
+the harness for sixteen proofs instead of nine makes each run long enough to
+heat the machine within itself, and since the TSC ticks at a fixed rate
+whatever the core does, a throttled run genuinely costs more ticks. That
+penalises the slower binary more, and inflated this ratio to 1.40.
 
 Size is counted from the transmitted structures, since nothing here serialises
 a proof: a uniform ring element costs `DEGREE` times `ceil(log2 p)` bits and a
@@ -277,20 +297,22 @@ above `2^40`, so a uniform element costs 41 bits per coefficient and not 40.
 | | fix-pkc | lnp at `a63d9b3` | lnp at `d3491d0` | lnp now |
 | --- | --- | --- | --- | --- |
 | modulus, `WIDTH` | `2^31.86`, 3 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 |
-| prover, per proof | 2.59 s | 16.24 s | 7.16 s | 2.92 s |
-| prover, per message | 104 ms | 649 ms | 286 ms | 117 ms |
+| prover, per proof | 2.19 s | 14.99 s | 5.68 s | 2.77 s |
+| prover, per message | 88 ms | 600 ms | 227 ms | 111 ms |
 | proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB |
 | proof, 25 messages | 1.56 MB | 8.06 MB | 4.61 MB | 2.93 MB |
-| against fix-pkc | | 7.9x, 5.2x | 3.2x, 3.0x | **1.2x, 1.9x** |
+| against fix-pkc | | 6.8x, 5.2x | 2.6x, 3.0x | **1.28x, 1.9x** |
 
-`is_bin` as first wired in cost 7.9 times the prover and 5.2 times the proof.
-Batching it, which is section 5b, brought that to **1.2 times the prover and
-1.9 times the proof**. Almost all of the gap was redundancy rather than the
-argument: at `a63d9b3` the same commitment was opened four times, once by the
-shuffle's linear proof and once by each of the three sub-proofs, and every one
-of those openings carried its own mask, its own challenge and its own
-rejection sampling loop. The parameter change by itself accounts for 1.1x,
-measured on the branch after the modulus moved but before B6.
+`is_bin` as first wired in cost 6.8 times the prover and 5.2 times the
+proof. Batching it, which is section 5b, brought that to **1.28 times the
+prover and 1.9 times the proof**. Almost all of the gap was redundancy rather
+than the argument: at `a63d9b3` the same commitment was opened four times,
+once by the shuffle's linear proof and once by each of the three sub-proofs,
+and every one of those openings carried its own mask, its own challenge and
+its own rejection sampling loop.
+
+The last column includes the mask-commitment opening added in `472edfc`, which
+costs 1.04x on its own, within the noise of these measurements.
 
 Where the 119.9 KB goes now, per message:
 
@@ -332,9 +354,9 @@ to one pair for the batch. The mask commitment, the aggregated values and the
 mask opening cost 3.6 KB per message once spread over 25, and remove 72.5, so
 the proof falls by 68.9 KB per message.
 
-The prover gains more than the size does, because the inner products in
-`lnp_bin_first` and `lnp_bin_check` cost `SLOTS` times `LNP_WIDTH`
-multiplications, which falls from 108 to 40.
+The prover gains more than the size does, 2.6x against 1.6x, because the
+inner products in `lnp_bin_first` and `lnp_bin_check` cost `SLOTS` times
+`LNP_WIDTH` multiplications, which falls from 108 to 40.
 
 ### The mask commitment has to be opened, and that was missed
 
@@ -371,12 +393,18 @@ introduced.
 
 ### The rejection test got noisier
 
-Runs at `a63d9b3` land within 5 per cent of each other. After `d3491d0` the
-spread is nearly a factor of two. One challenge over every message means one
-rejection test over the concatenation of their responses, so the number of
-repetitions is a single geometric draw instead of 25 independent ones that
-average out. The mean fell and the variance rose. That is why the table above
-reports medians of interleaved runs rather than single measurements.
+One challenge over every message means one rejection test over the
+concatenation of their responses, so the number of repetitions a proof needs
+is a single geometric draw instead of 25 independent ones that average out.
+The mean fell and the variance rose with it: timing one proof at a time gave
+ratios against `fix-pkc` ranging from 0.82 to 3.35.
+
+This is a property of the scheme and not only of the measurement, and it is
+worth stating as such. A prover that is 1.3 times `fix-pkc` on average is not
+1.3 times on every proof, and the tail is one-sided: rejection can only add
+repetitions. `fix-pkc` has no equivalent, because averaging 25 independent
+tests is what keeps its own spread to a few per cent. Section 5a explains what
+measuring the mean rather than the median costs in method.
 
 ### What is left
 
@@ -388,6 +416,81 @@ mask, so they look per message; but every message now answers one challenge,
 which is the condition under which LNP22 batches garbage terms across
 statements. Whether that applies here has not been checked, and it is the
 obvious next thing to look at.
+
+## 5c. What batching cost the parameters
+
+The table in section 4 quotes MSIS binding at 162.1 bits core-SVP, computed
+with the extractable opening `16 sigma_C sqrt(nu N)`. That was right when it
+was written and is not right now. Since `d3491d0` one rejection test spans the
+concatenation of every message's response, so every mask is drawn at
+`SIGMA_B`, five times `SIGMA_C`, and the verifier's norm bounds moved with
+them. The bound the extractor meets moved too, and had not been recomputed.
+
+Recomputed with the `lattice-estimator`, taking the `SIGMA_C` row first as a
+control against the number already recorded:
+
+| MSIS binding | `beta` | core-SVP | MATZOV |
+| --- | --- | --- | --- |
+| as documented, at `SIGMA_C` | `2^27.31` | 162.1 | 187.3 |
+| as built, at `SIGMA_B` | `2^29.63` | **128.8** | **155.5** |
+
+The control reproduces 162.1 and 187.3 exactly, so the 33-bit drop is real and
+not a change of method. MSIS is flat in the commitment width, so the same
+figure covers all three commitments: the shuffle's at `WIDTH` 4, the
+per-message one at `LNP_WIDTH` 8 and the mask one at `MASK_WIDTH` 7.
+
+### MSGS became a security parameter
+
+`SIGMA_B` is `SIGMA_C sqrt(MSGS)`, because the term one rejection test has to
+mask is `sqrt(MSGS)` times longer than a single message's. So the batch size
+now feeds straight into the binding bound, which it did not before:
+
+| `MSGS` | `SIGMA_B` | `beta` | core-SVP | MATZOV |
+| --- | --- | --- | --- | --- |
+| 1 | 54000 | `2^27.31` | 162.1 | 187.3 |
+| 25 | 270000 | `2^29.63` | 128.8 | 155.5 |
+| 100 | 540000 | `2^30.63` | 117.1 | 144.3 |
+| 1000 | 1707630 | `2^32.29` | 100.4 | 128.5 |
+| 10000 | 5400000 | `2^33.95` | 86.4 | 115.1 |
+
+This is the part worth carrying into any writeup. The speed in section 5a is
+quoted at `MSGS = 25`, and it is not scale-free: an electorate of ten thousand
+shuffled as one batch would sit at 86 bits, not 129. The fix is not to widen
+anything but to keep the batch at the size the security target allows and
+shuffle a larger electorate in blocks of it. Nothing is lost by doing so. The
+mask commitment is already amortised to 3.6 KB per message at 25, and the
+per-message work does not depend on the block count.
+
+`shuffle.c` now asserts both halves of this at compile time: that `SIGMA_B` is
+wide enough for `MSGS`, which is a completeness requirement and fails loudly,
+and that `MSGS` does not exceed the size these numbers were derived at, which
+is a soundness requirement and would otherwise fail silently.
+
+### What did not move
+
+Hiding and encryption depend on the modulus and the randomness distribution,
+neither of which batching touched, so they are unchanged. Recomputed anyway
+rather than assumed:
+
+| | core-SVP | MATZOV |
+| --- | --- | --- |
+| MLWE commitment hiding, rank 2 | 137.6 | 164.7 |
+| MLWE encryption, `DIM` 3 | 129.1 | 157.3 |
+
+Those two are the figures already in section 4, and they stand. Recomputing
+them here needed the attack set restricted to primal uSVP and dual, because
+the exhaustive sweep does not terminate in reasonable time at rank 2 with
+`q = 2^40`; that gives 140.2 and 130.5, which sit 2.6 and 1.4 bits above the
+recorded numbers. The difference is the attacks the restricted set leaves out,
+not a change in the parameters, so the lower recorded figures are the ones to
+quote.
+
+So the scheme as it stands is **128.8 bits core-SVP**, set by MSIS binding,
+with encryption just behind it at 129.1. Before batching the same two were
+162.1 and 129.1 and encryption was the constraint; MSIS binding has overtaken
+it. The paper's "at least 100 bits" is still true at `MSGS = 25`, and it is
+the right kind of claim to make precise: it is 129, it is set by the batch
+size, and at `MSGS = 1000` it would be exactly 100.
 
 ## 6. What this changes about the decision
 
@@ -406,7 +509,7 @@ Track A would have paid the same price, since LaZer's range proof obeys the
 same arithmetic.
 
 The prover was the other half of that price, and it is no longer. `is_bin`
-started at 7.9 times `fix-pkc` and batching brought it to 1.2 times, with the
+started at 6.8 times `fix-pkc` and batching brought it to 1.3 times, with the
 proof 1.9 times larger; sections 5a and 5b have the numbers. What that cost
 turned out to measure was redundancy in how the sub-proofs were wired, not the
 argument itself.

@@ -15,10 +15,33 @@
 /*============================================================================*/
 
 /* Number of messages to shuffle. Override at build time with -DMSGS=<n>; it
- * sizes stack arrays, so it cannot be a runtime parameter as things stand. */
+ * sizes stack arrays, so it cannot be a runtime parameter as things stand.
+ *
+ * Since the transcript was batched this is also a security parameter, which it
+ * was not before. One rejection test spans the concatenation of every
+ * response, so SIGMA_B has to be SIGMA_C * sqrt(MSGS), and the extractable
+ * opening 16 sigma sqrt(nu N) grows with it. MSIS binding falls accordingly:
+ * 162 bits core-SVP at MSGS = 1, 129 at 25, 117 at 100, 100 at 1000. Section
+ * 5c of LNP-PARAMS.md has the table and the reasoning.
+ *
+ * So a larger electorate is shuffled in blocks of this size, not by raising
+ * it. The assertions below catch the two ways of getting that wrong: widening
+ * the batch without widening the mask, which breaks completeness, and
+ * widening both without re-deriving the security, which does not announce
+ * itself at all. */
 #ifndef MSGS
 #define MSGS        25
 #endif
+
+static_assert((uint64_t) SIGMA_B * SIGMA_B >=
+		(uint64_t) SIGMA_C * SIGMA_C * MSGS,
+		"SIGMA_B must be at least SIGMA_C * sqrt(MSGS): one rejection test "
+		"spans every response, so the masked term is sqrt(MSGS) longer");
+static_assert(MSGS <= 25,
+		"MSGS is a security parameter since the transcript was batched. "
+		"Raising it lowers MSIS binding, which is 129 bits core-SVP at 25. "
+		"Shuffle a larger electorate in blocks, or re-derive the parameters "
+		"and move this bound deliberately");
 
 /*
  * The proof of shuffle below follows Neff's paradigm, but it does *not* use the
