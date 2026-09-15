@@ -455,11 +455,30 @@ now feeds straight into the binding bound, which it did not before:
 
 This is the part worth carrying into any writeup. The speed in section 5a is
 quoted at `MSGS = 25`, and it is not scale-free: an electorate of ten thousand
-shuffled as one batch would sit at 86 bits, not 129. The fix is not to widen
-anything but to keep the batch at the size the security target allows and
-shuffle a larger electorate in blocks of it. Nothing is lost by doing so. The
-mask commitment is already amortised to 3.6 KB per message at 25, and the
-per-message work does not depend on the block count.
+shuffled as one batch would sit at 86 bits, not 129.
+
+An earlier version of this section said to shuffle a larger electorate in
+blocks. **That was wrong.** `MSGS` is the anonymity set, not merely a batch
+size: the proof says the output list is a permutation of the input list, so
+blocking proves only that each output block permutes its own input block and
+reveals the partition. It buys the security back by giving up the anonymity
+the shuffle exists to provide.
+
+The remedy is a larger ring. `SIGMA_C` scales as `sqrt(k N)` and the bound as
+`16 sigma sqrt(nu N)`, so `beta` grows linearly in `N` while the MSIS lattice
+dimension does too, and the dimension wins comfortably:
+
+| `DEGREE` | `MSGS` 25 | `MSGS` 100 | `MSGS` 1000 |
+| --- | --- | --- | --- |
+| 1024 | 128.8 | 117.1 | 100.4 |
+| 2048 | 303.1 | 278.6 | 242.9 |
+
+The same near-doubling appears between Dilithium2 and Dilithium5, at 1024 and
+2048 MSIS rows and 123 and 265 bits, which is one of the points this estimator
+was validated against. So `DEGREE = 2048` covers any realistic electorate with
+room to spare, at roughly twice the proof size and rather more than twice the
+prover. Whether that trade is worth making depends on the target electorate,
+and it is a parameter decision rather than a code one.
 
 `shuffle.c` now asserts both halves of this at compile time: that `SIGMA_B` is
 wide enough for `MSGS`, which is a completeness requirement and fails loudly,

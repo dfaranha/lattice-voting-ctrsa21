@@ -24,11 +24,19 @@
  * 162 bits core-SVP at MSGS = 1, 129 at 25, 117 at 100, 100 at 1000. Section
  * 5c of LNP-PARAMS.md has the table and the reasoning.
  *
- * So a larger electorate is shuffled in blocks of this size, not by raising
- * it. The assertions below catch the two ways of getting that wrong: widening
- * the batch without widening the mask, which breaks completeness, and
- * widening both without re-deriving the security, which does not announce
- * itself at all. */
+ * MSGS is the anonymity set, not merely a batch size: the proof says the
+ * output list is a permutation of the input list, so shuffling an electorate
+ * in blocks would prove only that each output block permutes its own input
+ * block, and would reveal the partition. Blocking is a weaker statement, not
+ * a mitigation. The way to shuffle more messages at this security level is a
+ * larger ring: at DEGREE = 2048 the MSIS lattice dimension doubles, which
+ * dominates the one bit the bound gains, and MSGS = 1000 sits at 243 bits
+ * instead of 100.
+ *
+ * The assertions below catch the two ways of getting this wrong: widening the
+ * batch without widening the mask, which breaks completeness, and widening
+ * both without re-deriving the security, which does not announce itself at
+ * all. */
 #ifndef MSGS
 #define MSGS        25
 #endif
@@ -40,8 +48,8 @@ static_assert((uint64_t) SIGMA_B * SIGMA_B >=
 static_assert(MSGS <= 25,
 		"MSGS is a security parameter since the transcript was batched. "
 		"Raising it lowers MSIS binding, which is 129 bits core-SVP at 25. "
-		"Shuffle a larger electorate in blocks, or re-derive the parameters "
-		"and move this bound deliberately");
+		"It is also the anonymity set, so blocking is not a way around it. "
+		"Raise DEGREE and re-derive, then move this bound deliberately");
 
 /*
  * The proof of shuffle below follows Neff's paradigm, but it does *not* use the

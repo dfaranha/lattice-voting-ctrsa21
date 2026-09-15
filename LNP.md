@@ -282,10 +282,17 @@ both.
 
 *`MSGS` became a security parameter.* Since `SIGMA_B` scales with
 `sqrt(MSGS)`, so does the extractable opening, and MSIS binding falls with the
-batch size: 162 bits core-SVP at one message, 129 at 25, 100 at 1000. A larger
-electorate is shuffled in blocks of `MSGS` rather than by raising it.
-`shuffle.c` asserts both halves of this at compile time. Section 5c of
-`LNP-PARAMS.md` has the table.
+batch size: 162 bits core-SVP at one message, 129 at 25, 100 at 1000.
+
+There is no way around this by blocking, because `MSGS` is the anonymity set
+and not merely a batch size: the proof says the output list is a permutation
+of the input list, so shuffling in blocks would prove only that each output
+block permutes its own input block, and would reveal the partition. The way to
+shuffle more messages at a given security level is a larger ring. At
+`DEGREE = 2048` the MSIS lattice dimension doubles, which dominates the single
+bit the bound gains, and `MSGS = 1000` sits at 243 bits instead of 100.
+`shuffle.c` asserts both halves of this at compile time, and section 5c of
+`LNP-PARAMS.md` has the tables.
 
 ## 7. The orderings
 
