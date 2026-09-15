@@ -170,13 +170,19 @@ repetitions and leaves the certified bound a factor 1.78 inside the ceiling.
 
 ### Final parameters
 
-| | was | now |
-| --- | --- | --- |
-| `MODP` | 3906450253 (`2^31.86`) | 1099511627917 (`2^40`) |
-| `WIDTH` | 3 | 4 |
-| `DIM` | 2 | 3 |
-| `Q` | `2^56` | 18446744073709551557 (`2^64 - 59`) |
-| `SIGMA_P` | -- | 3258 |
+| | was | after B5 | now |
+| --- | --- | --- | --- |
+| `DEGREE` | 1024 | 1024 | 2048 |
+| `MODP` | 3906450253 (`2^31.86`) | 1099511627917 (`2^40`) | unchanged |
+| `WIDTH` | 3 | 4 | 4 |
+| `DIM` | 2 | 3 | 3 |
+| `Q` | `2^56` | 18446744073709551557 (`2^64 - 59`) | unchanged |
+| `SIGMA_C` | 54000 | 54000 | 76368 |
+| `SIGMA_B` | -- | 270000 | 381840 |
+| `SIGMA_P` | -- | 3258 | 4608 |
+
+The degree change is described in section 5d. It needed no new CRT constants
+and no new modulus, which is what distinguishes it from the B5 change.
 
 | problem | core-SVP | MATZOV |
 | --- | --- | --- |
@@ -294,8 +300,9 @@ Size is now **measured**. `serial.c` packs every value the prover sends, at
 `ceil(log2 12 sigma)` for a Gaussian one, and `shuffle.c` round-trips an
 honest proof through it and verifies the decoded values before reporting the
 byte count. So the figure is the size of something that verifies, not a count
-of struct fields. It comes to 2575104 bytes, or 100.6 KB per message, which is
-what the hand-maintained model in earlier versions of this section also said.
+of struct fields. At `DEGREE = 1024` it came to 2575104 bytes, or 100.6 KB per
+message, exactly what the hand-maintained model in earlier versions of this
+section said; at 2048 it is 5230080 bytes, or 204.3 KB.
 
 Two details the packing makes concrete. `MODP` is 141 above `2^40`, so a
 uniform coefficient costs 41 bits and not 40. And a Gaussian element has to be
@@ -307,9 +314,9 @@ reconstructed polynomial is short: the components of a short element are not.
 | modulus, `WIDTH` | `2^31.86`, 3 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 |
 | prover, per proof | 2.19 s | 14.99 s | 5.68 s | 2.77 s | see below |
 | prover, per message | 88 ms | 600 ms | 227 ms | 111 ms | see below |
-| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 100.6 KB |
-| proof, 25 messages | 1.56 MB | 8.06 MB | 4.61 MB | 2.93 MB | 2.46 MB |
-| against fix-pkc | | 6.8x, 5.2x | 2.6x, 3.0x | 1.28x, 1.9x | **~1.1x, 1.57x** |
+| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 204.3 KB |
+| proof, 25 messages | 1.56 MB | 8.06 MB | 4.61 MB | 2.93 MB | 4.99 MB |
+| against fix-pkc | | 6.8x, 5.2x | 2.6x, 3.0x | 1.28x, 1.9x | **3.19x size** |
 
 `is_bin` as first wired in cost 6.8 times the prover and 5.2 times the
 proof. Batching it, which is section 5b, brought that to **1.28 times the
@@ -529,6 +536,56 @@ with encryption just behind it at 129.1. Before batching the same two were
 it. The paper's "at least 100 bits" is still true at `MSGS = 25`, and it is
 the right kind of claim to make precise: it is 129, it is set by the batch
 size, and at `MSGS = 1000` it would be exactly 100.
+
+## 5d. Raising the ring degree
+
+Section 5c ended by saying that a larger electorate needs a larger ring, and
+that `DEGREE = 2048` would cover any realistic one. That is done.
+
+What it did not need is as notable as what it did. The modulus is unchanged, so
+the CRT constants are unchanged: `P0` is a square root of `-1`, which does not
+depend on the degree, `P1` is `-P0`, and `x^(DEGREE/2) +- P0` is still
+irreducible at 1024 as it was at 512. That was checked rather than assumed.
+None of the cascade that the B5 modulus change caused repeated here.
+
+What did move is every width that carries a `sqrt(DEGREE)`:
+
+| | 1024 | 2048 | why |
+| --- | --- | --- | --- |
+| `SIGMA_C` | 54000 | 76368 | about `23.44 nu sqrt(k N)` |
+| `SIGMA_B` | 270000 | 381840 | `SIGMA_C sqrt(MSGS)` |
+| `SIGMA_P` | 3258 | 4608 | `TAU_PROJ sqrt(PROJ N / 2)` |
+| `SIGMA_S` | 256 | 256 | masks monomials, so independent of the degree |
+
+The security moves with them, in the right direction, because the lattice
+dimension grows faster than the bounds do:
+
+| | 1024 | 2048 |
+| --- | --- | --- |
+| MSIS commitment binding | 128.8 | 303.1 |
+| MLWE commitment hiding, rank 2 | 137.6 | 343.4 |
+| MLWE encryption, `DIM` 3 | 129.1 | 326.2 |
+
+The two MLWE rows at 2048 come from the restricted attack set described in
+section 5c, so they sit a couple of bits high; the conclusion does not turn on
+that.
+
+It costs a factor of two in the proof, from 100.6 to 204.3 KB per message,
+measured. The prover was not re-measured.
+
+### What narrowed
+
+The one margin that got worse is the wraparound condition. `SIGMA_P` grows as
+`sqrt(DEGREE)` and so does the bound the projection certifies, while the
+ceiling `sqrt(p/2)` is fixed by the modulus. The certified bound goes from
+417069 to 589825 against a ceiling of 741455, so the factor inside the ceiling
+falls from 1.78 to 1.26.
+
+That is still a real margin, but it is the constraint to watch: another
+doubling of the degree would need 834138 against the same 741455 and would not
+close. A further increase therefore needs a larger modulus, which would in turn
+lower MSIS binding, or a smaller `TAU_PROJ`, which costs rejection-sampling
+repetitions. Neither is needed at 2048.
 
 ## 6. What this changes about the decision
 

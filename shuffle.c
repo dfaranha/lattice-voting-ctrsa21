@@ -21,18 +21,21 @@
  * Since the transcript was batched this is also a security parameter, which it
  * was not before. One rejection test spans the concatenation of every
  * response, so SIGMA_B has to be SIGMA_C * sqrt(MSGS), and the extractable
- * opening 16 sigma sqrt(nu N) grows with it. MSIS binding falls accordingly:
- * 162 bits core-SVP at MSGS = 1, 129 at 25, 117 at 100, 100 at 1000. Section
- * 5c of LNP-PARAMS.md has the table and the reasoning.
+ * opening 16 sigma sqrt(nu N) grows with it.
  *
  * MSGS is the anonymity set, not merely a batch size: the proof says the
  * output list is a permutation of the input list, so shuffling an electorate
  * in blocks would prove only that each output block permutes its own input
  * block, and would reveal the partition. Blocking is a weaker statement, not
- * a mitigation. The way to shuffle more messages at this security level is a
- * larger ring: at DEGREE = 2048 the MSIS lattice dimension doubles, which
- * dominates the one bit the bound gains, and MSGS = 1000 sits at 243 bits
- * instead of 100.
+ * a mitigation. That is why DEGREE was raised to 2048: the MSIS lattice
+ * dimension grows faster than the bound does, so at this degree binding is
+ * 303 bits core-SVP at MSGS = 25, 279 at 100 and 243 at 1000, where at
+ * DEGREE = 1024 the same three were 129, 117 and 100.
+ *
+ * So security is no longer what pins this at 25. SIGMA_B is, since it is sized
+ * for exactly this batch, and so is the fact that nothing above 25 has been
+ * run. Raising it means widening SIGMA_B to match and re-deriving; sections 5c
+ * and 5d of LNP-PARAMS.md have the numbers.
  *
  * The assertions below catch the two ways of getting this wrong: widening the
  * batch without widening the mask, which breaks completeness, and widening
@@ -48,9 +51,9 @@ static_assert((uint64_t) SIGMA_B * SIGMA_B >=
 		"spans every response, so the masked term is sqrt(MSGS) longer");
 static_assert(MSGS <= 25,
 		"MSGS is a security parameter since the transcript was batched. "
-		"Raising it lowers MSIS binding, which is 129 bits core-SVP at 25. "
-		"It is also the anonymity set, so blocking is not a way around it. "
-		"Raise DEGREE and re-derive, then move this bound deliberately");
+		"SIGMA_B is sized for exactly this batch, and nothing larger has "
+		"been run. Widen SIGMA_B to SIGMA_C * sqrt(MSGS), re-derive the "
+		"security, then move this bound deliberately");
 
 /*
  * The proof of shuffle below follows Neff's paradigm, but it does *not* use the
@@ -1561,10 +1564,20 @@ static void test(flint_rand_t rand) {
 		measure_proof = 0;
 		printf("\n    %zu bytes, %.1f KB per message\n", proof_bytes,
 				proof_bytes / 1024.0 / MSGS);
-		/* The figure quoted in LNP-PARAMS.md, to within the padding of the
-		 * final byte. If this drifts, one of the two is wrong. */
-		TEST_ASSERT(proof_bytes / 1024.0 / MSGS < 101.0, end);
-		TEST_ASSERT(proof_bytes / 1024.0 / MSGS > 100.0, end);
+		{
+			/* The same count expressed by shape rather than by walking, so
+			 * that a field added to one and not the other shows up here
+			 * instead of silently changing the published size. */
+			size_t bu = serial_bits_uniform();
+			size_t bg = serial_bits_gauss(SIGMA_B);
+			size_t per = (4 + 2 + 1 + HEIGHT + SLOTS) * DEGREE * bu
+					+ (2 * WIDTH + LNP_WIDTH) * DEGREE * bg
+					+ PROJ * serial_bits_gauss(SIGMA_P);
+			size_t shared = (4 * HEIGHT + 3 * LNP_LAMBDA + 2 + 1) * DEGREE * bu
+					+ (MASK_WIDTH + GARB_WIDTH) * DEGREE * bg;
+
+			TEST_ASSERT(proof_bytes == (MSGS * per + shared + 7) / 8, end);
+		}
 	} TEST_END;
 
 	TEST_ONCE("batched quadratic rejects one message with a wrong product") {

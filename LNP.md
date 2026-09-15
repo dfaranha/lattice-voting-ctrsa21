@@ -322,11 +322,12 @@ There is no way around this by blocking, because `MSGS` is the anonymity set
 and not merely a batch size: the proof says the output list is a permutation
 of the input list, so shuffling in blocks would prove only that each output
 block permutes its own input block, and would reveal the partition. The way to
-shuffle more messages at a given security level is a larger ring. At
-`DEGREE = 2048` the MSIS lattice dimension doubles, which dominates the single
-bit the bound gains, and `MSGS = 1000` sits at 243 bits instead of 100.
-`shuffle.c` asserts both halves of this at compile time, and section 5c of
-`LNP-PARAMS.md` has the tables.
+shuffle more messages at a given security level is a larger ring, and that is
+why `DEGREE` is 2048 rather than 1024: the MSIS lattice dimension grows faster
+than the bound does, so binding is 303 bits at `MSGS = 25` and still 243 at
+1000, where at 1024 the same two were 129 and 100. It costs a factor of two in
+the proof. `shuffle.c` asserts both halves of this at compile time, and
+sections 5c and 5d of `LNP-PARAMS.md` have the tables.
 
 ## 7. The orderings
 
@@ -378,7 +379,7 @@ response.
 
 | | | why |
 | --- | --- | --- |
-| `DEGREE` | 1024 | ring degree |
+| `DEGREE` | 2048 | ring degree; 1024 until the electorate-size question forced it up |
 | `MODP` | `2^40 + 141` | set by the range proof's no-wraparound condition |
 | `LNP_LAMBDA` | 4 | `p^-4` is about `2^-160` |
 | `SLOTS` | 3 | witness, product, projection mask |
@@ -386,6 +387,7 @@ response.
 | `PROJ` | 256 | the projection lemma's requirement for `2^-128` |
 | `TAU_PROJ` | 9 | about 3.8 repetitions, bound 1.78x inside the ceiling |
 | `SIGMA_B` | `SIGMA_C sqrt(MSGS)` | one rejection test spans the batch |
+| `SIGMA_P` | `TAU_PROJ sqrt(PROJ N / 2)` | and its certified bound grows with it |
 
 The modulus is the parameter that drags everything: it forced `WIDTH` up, `DIM`
 up, `q` against its 64-bit ceiling, and exposed two latent 32-bit assumptions
