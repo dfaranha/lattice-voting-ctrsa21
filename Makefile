@@ -55,8 +55,8 @@ encrypt: encrypt.c encrypt.h ${TEST} ${BENCH} ${INCLUDES}
 vericrypt: vericrypt.c encrypt.o ${TEST} ${BENCH} ${INCLUDES} gaussian_e.o
 	${CPP} ${CFLAGS} -DMAIN vericrypt.c encrypt.o sha224-256.c gaussian_e.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
-shuffle: shuffle.c commit.c commit.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
-	${CPP} ${CFLAGS} commit.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
+shuffle: shuffle.c commit.c commit.h serial.c serial.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
+	${CPP} ${CFLAGS} commit.c serial.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
 clean:
 	rm -f *.o commit encrypt vericrypt shuffle
