@@ -59,8 +59,9 @@
 
 /* Rank of the MLWE instance that hides the commitment, which is the number of
  * randomness components beyond those consumed by the Ajtai part and by the
- * message slots. Rank 1 is only about 72 bits; see LNP-PARAMS.md. */
-#define LNP_RANK 	2
+ * message slots. Rank 1 is about 52 bits at DEGREE 1024, which is why this was
+ * 2, and about 140 at 2048, which is why it is 1. See LNP-PARAMS.md. */
+#define LNP_RANK 	1
 
 /* Width of the LNP commitment randomness. Unlike commit.h, which carries a
  * single message slot, a BDLOP key with SLOTS message rows in Hermite normal

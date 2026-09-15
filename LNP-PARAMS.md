@@ -174,11 +174,11 @@ repetitions and leaves the certified bound a factor 1.78 inside the ceiling.
 | --- | --- | --- | --- |
 | `DEGREE` | 1024 | 1024 | 2048 |
 | `MODP` | 3906450253 (`2^31.86`) | 1099511627917 (`2^40`) | unchanged |
-| `WIDTH` | 3 | 4 | 4 |
+| `WIDTH` | 3 | 4 | 3 |
 | `DIM` | 2 | 3 | 3 |
 | `Q` | `2^56` | 18446744073709551557 (`2^64 - 59`) | unchanged |
-| `SIGMA_C` | 54000 | 54000 | 76368 |
-| `SIGMA_B` | -- | 270000 | 381840 |
+| `SIGMA_C` | 54000 | 54000 | 66136 |
+| `SIGMA_B` | -- | 270000 | 330680 |
 | `SIGMA_P` | -- | 3258 | 4608 |
 
 The degree change is described in section 5d. It needed no new CRT constants
@@ -315,8 +315,8 @@ reconstructed polynomial is short: the components of a short element are not.
 | modulus, `WIDTH` | `2^31.86`, 3 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 |
 | prover, per message | 88 ms | 600 ms | 227 ms | 111 ms | 109 ms | 248 ms |
 | prover against fix-pkc | 1.00x | 6.8x | 2.6x | 1.28x | 1.11x | **2.43x** |
-| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 100.6 KB | 204.3 KB |
-| proof against fix-pkc | 1.00x | 5.2x | 3.0x | 1.9x | 1.57x | **3.19x** |
+| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 100.6 KB | 183.7 KB |
+| proof against fix-pkc | 1.00x | 5.2x | 3.0x | 1.9x | 1.57x | **2.87x** |
 
 The ratios are the comparable quantity. Each was taken against `fix-pkc` in
 its own bracketed session, and the milliseconds come from whichever session
@@ -581,6 +581,37 @@ measured, and 2.18 times the prover, from 109 to 248 milliseconds per message.
 That the time cost is a little over two rather than exactly two is what the
 `n log n` of the transform predicts, and is a reassuring sign that nothing else
 changed shape. Against `fix-pkc` the prover goes from 1.11 to 2.43 times.
+
+### Rebalancing after the degree change
+
+Doubling the degree roughly doubled every security figure, which left the
+hiding rank over-provisioned. MLWE hiding at rank 1 is about 52 bits at
+`DEGREE = 1024`, which is why `WIDTH` was 4 and `LNP_RANK` 2; at 2048 rank 1
+is 140, so both drop by one:
+
+| | before | after |
+| --- | --- | --- |
+| `WIDTH` | 4 | 3 |
+| `LNP_RANK` | 2 | 1 |
+| MLWE hiding | 343.4 | 140.2 |
+| MSIS binding | 303.1 | 308.6 |
+| proof, per message | 204.3 KB | 183.7 KB |
+
+Binding goes slightly *up*, because `SIGMA_C` carries a `sqrt(WIDTH)` and the
+narrower commitment therefore has a shorter extractable opening.
+
+That is all the slack the parameters have. What is left over-provisioned is
+MSIS binding at 308 against a target of 128, and it cannot be spent on size:
+binding improves as the modulus falls, but the modulus is pinned from below by
+the wraparound condition, and it improves with the lattice dimension, which is
+the degree. The only way to convert that headroom into a smaller proof is to
+halve the degree again, which halves hiding back to 52 at rank 1 and so forces
+`WIDTH` and `LNP_RANK` back up.
+
+So at `DEGREE = 2048` the parameters are balanced at 183.7 KB, and at
+`DEGREE = 1024` they are balanced at 100.6 KB. The difference between those two
+points is not slack; it is 175 bits of binding and the batch size that binding
+supports. Section 5c has that table.
 
 ### What narrowed
 

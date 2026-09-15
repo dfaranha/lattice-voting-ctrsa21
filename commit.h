@@ -27,9 +27,10 @@
 /* The \infty-norm bound of certain elements. */
 #define BETA 	1
 /* Width k of the commitment matrix. The hiding property is MLWE of rank
- * k - n - 1, which at k = 3 is rank 1 and only 49.6 bits at this modulus.
- * k = 4 gives rank 2. */
-#define WIDTH 	4
+ * k - n - 1, so k = 3 gives rank 1 and k = 4 rank 2. Rank 1 was not an option
+ * at DEGREE 1024, where it is about 52 bits, but at 2048 it is 140 and rank 2
+ * would be 343, far past what is needed. So k = 3 here. */
+#define WIDTH 	3
 /* Height of the commitment matrix. */
 #define HEIGHT 	1
 
