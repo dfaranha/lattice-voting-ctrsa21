@@ -1160,13 +1160,31 @@ static void test(flint_rand_t rand) {
 		printf("\n    %zu bytes, %.1f KB per message\n", proof_bytes,
 				proof_bytes / 1024.0 / MSGS);
 		{
-			size_t bu = serial_bits_uniform();
-			size_t per = 5 * DEGREE * bu
-					+ 3 * WIDTH * DEGREE * serial_bits_gauss(SIGMA_C)
-					+ DEGREE * serial_bits_gauss(SIGMA_S)
+			/* The uniform part is a fixed width, but the Gaussian part is not
+			 * one any more: it is coded against its distribution, so what it
+			 * costs depends on the sample. The walk is therefore bracketed
+			 * rather than predicted -- below what a flat encoding at the bound
+			 * would have taken, above the entropy of the distribution it codes
+			 * -- and a coding that stopped working would leave one side. Two
+			 * widths here, since the opening of the permutation element is
+			 * sampled at SIGMA_S, so the figure printed is their average. */
+			double ncoef = 3.0 * WIDTH * DEGREE + DEGREE;
+			double fixed = 5.0 * DEGREE * serial_bits_uniform()
 					+ SHA256HashSize * 8;
+			double flat = fixed
+					+ 3.0 * WIDTH * DEGREE * serial_bits_gauss(SIGMA_C)
+					+ DEGREE * serial_bits_gauss(SIGMA_S);
+			double ent = fixed
+					+ 3.0 * WIDTH * DEGREE
+					* log2(SIGMA_C * sqrt(2.0 * M_PI * M_E))
+					+ DEGREE * log2(SIGMA_S * sqrt(2.0 * M_PI * M_E));
 
-			TEST_ASSERT(proof_bytes == (MSGS * per + 7) / 8, end);
+			TEST_ASSERT(proof_bytes * 8.0 < MSGS * flat, end);
+			TEST_ASSERT(proof_bytes * 8.0 > MSGS * ent, end);
+			printf("    %.2f bits a Gaussian coefficient, against %.2f flat "
+					"and %.2f of entropy\n",
+					(proof_bytes * 8.0 / MSGS - fixed) / ncoef,
+					(flat - fixed) / ncoef, (ent - fixed) / ncoef);
 		}
 	} TEST_END;
 
