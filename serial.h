@@ -9,14 +9,19 @@
  * computed by hand from the shapes of the structures; this makes the same
  * count come out of the code, and makes the assumption behind it testable.
  *
- * That assumption is the number of bits a coefficient needs. A uniform ring
- * element is written at ceil(log2 p) bits per coefficient, and a Gaussian one
- * at ceil(log2 12 sigma), which covers six standard deviations either side.
- * The verifier's norm bound is looser than that: it bounds the whole vector in
- * l2, so a single coefficient could in principle be much larger and still
- * pass. Packing therefore refuses rather than truncating when a coefficient
- * does not fit, which turns the modelling assumption into something an honest
- * run can falsify.
+ * A uniform ring element is written at ceil(log2 p) bits per coefficient,
+ * where there is nothing to exploit. A Gaussian one is not: writing it at the
+ * width of its bound, ceil(log2 12 sigma), spends the difference between that
+ * bound and the distribution's entropy, which is log2(sigma sqrt(2 pi e)). At
+ * SIGMA_C that is 20 bits against 17.8. So a Gaussian coefficient is zigzagged
+ * and Golomb-Rice coded about its own width instead, which costs about half a
+ * bit above the entropy.
+ *
+ * This also removes an assumption the flat encoding had to make. The verifier
+ * bounds the whole vector in l2, so a single coefficient can exceed six
+ * standard deviations and still pass; the flat packing had to refuse such a
+ * coefficient rather than truncate it. Rice has no width to overflow, and the
+ * long-run escape encodes any value at all, so the question does not arise.
  *
  * @ingroup serial
  */
@@ -57,7 +62,9 @@ void serial_writer_init(bitwriter_t *w, uint8_t *buf, size_t cap);
 void serial_reader_init(bitreader_t *r, const uint8_t *buf, size_t cap);
 
 /**
- * Bits needed per coefficient.
+ * Bits needed per coefficient. The Gaussian one is the width a flat encoding
+ * would take, which nothing writes at any more; it is what the saving of the
+ * entropy coding is measured against.
  */
 int serial_bits_uniform(void);
 int serial_bits_gauss(ulong sigma);

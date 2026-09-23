@@ -754,14 +754,27 @@ static void test(flint_rand_t rand) {
 		printf("\n    %zu bytes, %.1f KB per message\n", proof_bytes,
 				proof_bytes / 1024.0 / MSGS);
 		{
-			/* The same count expressed by shape rather than by walking, so
-			 * that a field added to one and not the other shows up here. */
-			size_t bu = serial_bits_uniform();
-			size_t bg = serial_bits_gauss(SIGMA_C);
-			size_t per = 3 * DEGREE * bu + 2 * WIDTH * DEGREE * bg
+			/* The uniform part is a fixed width, but the Gaussian part is not
+			 * one any more: it is coded against its distribution, so what it
+			 * costs depends on the sample. The walk is therefore bracketed
+			 * rather than predicted -- below what a flat encoding at the bound
+			 * would have taken, above the entropy of the distribution it codes
+			 * -- and a coding that stopped working would leave one side. */
+			double fixed = 3.0 * DEGREE * serial_bits_uniform()
 					+ SHA256HashSize * 8;
+			double flat = fixed
+					+ 2.0 * WIDTH * DEGREE * serial_bits_gauss(SIGMA_C);
+			double ent = fixed + 2.0 * WIDTH * DEGREE
+					* log2(SIGMA_C * sqrt(2.0 * M_PI * M_E));
 
-			TEST_ASSERT(proof_bytes == (MSGS * per + 7) / 8, end);
+			TEST_ASSERT(proof_bytes * 8.0 < MSGS * flat, end);
+			TEST_ASSERT(proof_bytes * 8.0 > MSGS * ent, end);
+			printf("    %.2f bits a Gaussian coefficient, against %d flat "
+					"and %.2f of entropy\n",
+					(proof_bytes * 8.0 / MSGS - fixed)
+					/ (2.0 * WIDTH * DEGREE),
+					serial_bits_gauss(SIGMA_C),
+					log2(SIGMA_C * sqrt(2.0 * M_PI * M_E)));
 		}
 	} TEST_END;
 
