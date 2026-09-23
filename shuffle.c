@@ -1618,21 +1618,37 @@ static void test(flint_rand_t rand) {
 		{
 			/* The same count expressed by shape rather than by walking, so
 			 * that a field added to one and not the other shows up here
-			 * instead of silently changing the published size. */
-			size_t bu = serial_bits_uniform();
-			size_t bg = serial_bits_gauss(SIGMA_B);
+			 * instead of silently changing the published size. The uniform
+			 * part is a fixed width, but the Gaussian part is not one any
+			 * more: it is coded against its distribution, so what it costs
+			 * depends on the sample. That half is therefore bracketed rather
+			 * than predicted -- below what a flat encoding at the bound would
+			 * have taken, above the entropy of the distribution it codes --
+			 * and a coding that stopped working would leave one side. */
+			double bu = serial_bits_uniform();
+			double hb = log2(SIGMA_B * sqrt(2.0 * M_PI * M_E));
+			double hp = log2(SIGMA_P * sqrt(2.0 * M_PI * M_E));
 			/* The first messages are gone: per message that is t, tp, _t
 			 * and u, and for the batch w, gw, v and T, replaced by the
 			 * digest. What is left per message is the product commitment,
 			 * the partial product and the sigma commitment. */
-			size_t per = (2 + 1 + HEIGHT + SLOTS) * DEGREE * bu
-					+ (2 * WIDTH + LNP_WIDTH) * DEGREE * bg
-					+ PROJ * serial_bits_gauss(SIGMA_P);
-			size_t shared = (2 * HEIGHT + 2 * LNP_LAMBDA + 2) * DEGREE * bu
-					+ (MASK_WIDTH + GARB_WIDTH) * DEGREE * bg
+			double ngb = MSGS * (2.0 * WIDTH + LNP_WIDTH) * DEGREE
+					+ (MASK_WIDTH + GARB_WIDTH) * DEGREE;
+			double ngp = MSGS * (double) PROJ;
+			double fixed = MSGS * (2 + 1 + HEIGHT + SLOTS) * DEGREE * bu
+					+ (2 * HEIGHT + 2 * LNP_LAMBDA + 2) * DEGREE * bu
 					+ SHA256HashSize * 8;
+			double flat = fixed + ngb * serial_bits_gauss(SIGMA_B)
+					+ ngp * serial_bits_gauss(SIGMA_P);
+			double ent = fixed + ngb * hb + ngp * hp;
 
-			TEST_ASSERT(proof_bytes == (MSGS * per + shared + 7) / 8, end);
+			TEST_ASSERT(proof_bytes * 8.0 < flat, end);
+			TEST_ASSERT(proof_bytes * 8.0 > ent, end);
+			printf("    %.2f bits a Gaussian coefficient, against %.2f flat "
+					"and %.2f of entropy\n",
+					(proof_bytes * 8.0 - fixed) / (ngb + ngp),
+					(flat - fixed) / (ngb + ngp),
+					(ent - fixed) / (ngb + ngp));
 		}
 	} TEST_END;
 
