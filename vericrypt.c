@@ -277,6 +277,12 @@ void vericrypt_sample_gauss_crt(fmpz_mod_poly_t r[2], fmpz_mod_ctx_t *ctx) {
 	fmpz_mod_poly_clear(t, *encrypt_large_modulus_ctx());
 }
 
+#ifdef MAIN
+/* Attempts the prover is made to reject regardless of their norm. A natural
+ * rejection is rare, so this is how the test reaches the retry path. */
+static int forced_rejections = 0;
+#endif
+
 int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 		fmpz_mod_poly_t u, fmpz_mod_poly_t m[VECTOR], publickey_t *pk,
 		flint_rand_t rand) {
@@ -284,6 +290,11 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 	/* The challenge is reduced into its CRT components, so c is NCRT wide. */
 	qcrt_poly_t c;
 	qcrt_poly_t y_r[VECTOR][DIM], y_e[VECTOR][DIM], y_e_[VECTOR];
+	/* The encryption randomness. It is kept apart from out->r, out->e and
+	 * out->e_, which receive the response c * s + y: writing the response over
+	 * the secret made every attempt after a rejection compute c' * (c * s + y)
+	 * + y', whose norm only grows, so the loop never ended. */
+	qcrt_poly_t s_r[VECTOR][DIM], s_e[VECTOR][DIM], s_e_[VECTOR];
 	ciphertext_t y[VECTOR];
 	uint8_t hash[SHA256HashSize];
 	int result = 0;
@@ -302,6 +313,8 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 			for (int k = 0; k < NCRT; k++) {
 				fmpz_mod_poly_init(y_r[i][j][k], *ctx_q);
 				fmpz_mod_poly_init(y_e[i][j][k], *ctx_q);
+				fmpz_mod_poly_init(s_r[i][j][k], *ctx_q);
+				fmpz_mod_poly_init(s_e[i][j][k], *ctx_q);
 			}
 		}
 		/* y_e_ is indexed by the CRT component, which is NCRT and not DIM.
@@ -311,21 +324,21 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 		 * with NCRT. */
 		for (int k = 0; k < NCRT; k++) {
 			fmpz_mod_poly_init(y_e_[i][k], *ctx_q);
+			fmpz_mod_poly_init(s_e_[i][k], *ctx_q);
 		}
 		fmpz_mod_poly_init(y_mu[i], *ctx_p);
 	}
 
 	for (int i = 0; i < VECTOR; i++) {
 		for (int j = 0; j < DIM; j++) {
-			encrypt_sample_short_crt(out->r[i][j], *ctx_q);
-			encrypt_sample_short_crt(out->e[i][j], *ctx_q);
+			encrypt_sample_short_crt(s_r[i][j], *ctx_q);
+			encrypt_sample_short_crt(s_e[i][j], *ctx_q);
 		}
-		encrypt_sample_short_crt(out->e_[i], *ctx_q);
+		encrypt_sample_short_crt(s_e_[i], *ctx_q);
 	}
 
 	for (int i = 0; i < VECTOR; i++) {
-		encrypt_make(&out->cipher[i], out->r[i], out->e[i], out->e_[i], m[i],
-				pk);
+		encrypt_make(&out->cipher[i], s_r[i], s_e[i], s_e_[i], m[i], pk);
 	}
 
 	while (result == 0) {
@@ -359,10 +372,10 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 		for (int i = 0; i < VECTOR; i++) {
 			for (int j = 0; j < DIM; j++) {
 				for (int k = 0; k < NCRT; k++) {
-					qcrt_poly_mulmod(out->r[i][j][k], out->r[i][j][k], c[k], k, *ctx_q);
+					qcrt_poly_mulmod(out->r[i][j][k], s_r[i][j][k], c[k], k, *ctx_q);
 					fmpz_mod_poly_add(out->r[i][j][k], out->r[i][j][k],
 							y_r[i][j][k], *ctx_q);
-					qcrt_poly_mulmod(out->e[i][j][k], out->e[i][j][k], c[k], k, *ctx_q);
+					qcrt_poly_mulmod(out->e[i][j][k], s_e[i][j][k], c[k], k, *ctx_q);
 					fmpz_mod_poly_add(out->e[i][j][k], out->e[i][j][k],
 							y_e[i][j][k], *ctx_q);
 				}
@@ -370,7 +383,7 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 		}
 		for (int i = 0; i < VECTOR; i++) {
 			for (int k = 0; k < NCRT; k++) {
-				qcrt_poly_mulmod(out->e_[i][k], out->e_[i][k], c[k], k, *ctx_q);
+				qcrt_poly_mulmod(out->e_[i][k], s_e_[i][k], c[k], k, *ctx_q);
 				fmpz_mod_poly_add(out->e_[i][k], out->e_[i][k], y_e_[i][k],
 						*ctx_q);
 			}
@@ -379,6 +392,12 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 		}
 
 		result = vericrypt_test_norm(out);
+#ifdef MAIN
+		if (forced_rejections > 0) {
+			forced_rejections--;
+			result = 0;
+		}
+#endif
 	}
 
 	fmpz_mod_poly_clear(tmp, *ctx_p);
@@ -392,10 +411,13 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 			for (int k = 0; k < NCRT; k++) {
 				fmpz_mod_poly_clear(y_r[i][j][k], *ctx_q);
 				fmpz_mod_poly_clear(y_e[i][j][k], *ctx_q);
+				fmpz_mod_poly_clear(s_r[i][j][k], *ctx_q);
+				fmpz_mod_poly_clear(s_e[i][j][k], *ctx_q);
 			}
 		}
 		for (int k = 0; k < NCRT; k++) {
 			fmpz_mod_poly_clear(y_e_[i][k], *ctx_q);
+			fmpz_mod_poly_clear(s_e_[i][k], *ctx_q);
 		}
 		fmpz_mod_poly_clear(y_mu[i], *ctx_p);
 	}
@@ -530,6 +552,29 @@ static void test(flint_rand_t rand) {
 		}
 
 		TEST_ASSERT(vericrypt_doit(&cipher, t, u, m, &pk, rand) == 1, end);
+		TEST_ASSERT(vericrypt_verify(&cipher, t, u, &pk) == 1, end);
+		TEST_ASSERT(vericrypt_undo(_m, c, &cipher, t, u, &pk, &sk) == 1, end);
+
+		fmpz_mod_poly_zero(v, *encrypt_modulus_ctx());
+		for (int i = 0; i < VECTOR; i++) {
+			encrypt_poly_mulmod(tmp, t[i], _m[i], *encrypt_modulus_ctx());
+			fmpz_mod_poly_add(v, v, tmp, *encrypt_modulus_ctx());
+		}
+		encrypt_poly_mulmod(u, u, c, *encrypt_modulus_ctx());
+
+		TEST_ASSERT(fmpz_mod_poly_equal(u, v, *encrypt_modulus_ctx()) == 1, end);
+	} TEST_END;
+
+	TEST_ONCE("verifiable encryption survives rejected attempts") {
+		fmpz_mod_poly_zero(u, *encrypt_modulus_ctx());
+		for (int i = 0; i < VECTOR; i++) {
+			encrypt_poly_mulmod(tmp, t[i], m[i], *encrypt_modulus_ctx());
+			fmpz_mod_poly_add(u, u, tmp, *encrypt_modulus_ctx());
+		}
+
+		forced_rejections = 3;
+		TEST_ASSERT(vericrypt_doit(&cipher, t, u, m, &pk, rand) == 1, end);
+		TEST_ASSERT(forced_rejections == 0, end);
 		TEST_ASSERT(vericrypt_verify(&cipher, t, u, &pk) == 1, end);
 		TEST_ASSERT(vericrypt_undo(_m, c, &cipher, t, u, &pk, &sk) == 1, end);
 
