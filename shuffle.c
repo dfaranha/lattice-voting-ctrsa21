@@ -260,21 +260,23 @@ static void rho_hash(nmod_poly_t rho[MSGS][2], commitkey_t *key,
 	}
 	SHA256Result(&sha, hash);
 
-	/* Same shape as the opening challenge, so that differences of distinct
-	 * challenges are short enough for Lemma 1 to make them invertible. */
+	/* Same shape as the challenge d, from the space C of the paper: NONZERO
+	 * coefficients of +-1, the sign from the top bit, which the reduction does
+	 * not use. A difference of distinct challenges then has ||.||_oo <= 2,
+	 * short enough for Lemma 1 to make it invertible. */
 	nmod_poly_init(c, MODP);
 	prg_setseed(&prg, hash);
 	for (int l = 0; l < MSGS; l++) {
 		nmod_poly_zero(c);
 		nmod_poly_fit_length(c, DEGREE);
 		for (int i = 0; i < NONZERO; i++) {
-			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
-			buf = buf % DEGREE;
-			while (nmod_poly_get_coeff_ui(c, buf) != 0) {
+			uint32_t pos;
+
+			do {
 				prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
-				buf = buf % DEGREE;
-			}
-			nmod_poly_set_coeff_ui(c, buf, 1);
+				pos = buf % DEGREE;
+			} while (nmod_poly_get_coeff_ui(c, pos) != 0);
+			nmod_poly_set_coeff_ui(c, pos, (buf >> 31) ? MODP - 1 : 1);
 		}
 		pcrt_poly_reduce(rho[l][0], c, 0);
 		pcrt_poly_reduce(rho[l][1], c, 1);
@@ -293,23 +295,30 @@ static void challenge_from_hash(nmod_poly_t d[2],
 	prg_t prg;
 	uint32_t buf;
 
+	nmod_poly_t c;
+
 	prg_setseed(&prg, hash);
-	for (int i = 0; i < 2; i++) {
-		nmod_poly_zero(d[i]);
-		nmod_poly_fit_length(d[i], DEGREE);
-		for (int j = 0; j < NONZERO; j++) {
+	/* A challenge from the space C of the paper: NONZERO coefficients of +-1
+	 * and the rest zero, so that ||d||_1 = NONZERO and |C| = 2^NONZERO *
+	 * C(DEGREE, NONZERO). This used to be the difference of two binary
+	 * polynomials, an element of C - C with ||d||_1 up to 2 * NONZERO, which
+	 * put the extracted opening sqrt(2) above the bound binding is estimated
+	 * at. DEGREE is a power of two, so the reduction below is unbiased, and
+	 * the sign comes from the top bit, which the reduction does not use. */
+	nmod_poly_init(c, MODP);
+	nmod_poly_fit_length(c, DEGREE);
+	for (int j = 0; j < NONZERO; j++) {
+		uint32_t pos;
+
+		do {
 			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
-			buf = buf % DEGREE;
-			while (nmod_poly_get_coeff_ui(d[i], buf) != 0) {
-				prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
-				buf = buf % DEGREE;
-			}
-			nmod_poly_set_coeff_ui(d[i], buf, 1);
-		}
+			pos = buf % DEGREE;
+		} while (nmod_poly_get_coeff_ui(c, pos) != 0);
+		nmod_poly_set_coeff_ui(c, pos, (buf >> 31) ? MODP - 1 : 1);
 	}
-	nmod_poly_sub(d[1], d[0], d[1]);
-	pcrt_poly_reduce(d[0], d[1], 0);
-	pcrt_poly_reduce(d[1], d[1], 1);
+	pcrt_poly_reduce(d[0], c, 0);
+	pcrt_poly_reduce(d[1], c, 1);
+	nmod_poly_clear(c);
 }
 
 /* One challenge for the whole batch. It absorbs every commitment and every
@@ -1688,6 +1697,30 @@ static void test(void) {
 		nmod_poly_set(_m[i], m[pi[i]]);
 		int_to_monomial(sigma[i], pi[i]);
 	}
+
+	TEST_ONCE("challenges have NONZERO coefficients of +-1") {
+		nmod_poly_t d[2], c;
+		uint8_t h[SHA256HashSize];
+		int ones = 0, ternary = 1;
+
+		nmod_poly_init(d[0], MODP);
+		nmod_poly_init(d[1], MODP);
+		nmod_poly_init(c, MODP);
+		for (int i = 0; i < SHA256HashSize; i++) {
+			h[i] = i;
+		}
+		challenge_from_hash(d, h);
+		pcrt_poly_rec(c, d);
+		for (int i = 0; i < DEGREE; i++) {
+			ulong x = nmod_poly_get_coeff_ui(c, i);
+			ternary &= (x <= 1 || x == MODP - 1);
+			ones += (x != 0);
+		}
+		nmod_poly_clear(d[0]);
+		nmod_poly_clear(d[1]);
+		nmod_poly_clear(c);
+		TEST_ASSERT(ternary && ones == NONZERO, end);
+	} TEST_END;
 
 	TEST_ONCE("shuffle proof is consistent") {
 		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey) == 1, end);

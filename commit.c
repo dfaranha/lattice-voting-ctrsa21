@@ -85,9 +85,12 @@ static void fold_mod(nmod_poly_t c, const nmod_poly_t a, slong m, ulong r) {
  * @return the computed norm.
  */
 static int test_norm(nmod_poly_t r) {
-	// Compute sigma^2 = (11 * v * beta * sqrt(k * N))^2.
-	uint64_t sigma_sqr = 11 * NONZERO * BETA;
-	sigma_sqr *= sigma_sqr * DEGREE * WIDTH;
+	/* The width the masks are sampled at, and so the one an extracted opening
+	 * is bounded by. The binding estimates use the same SIGMA_C, through the
+	 * extractable bound 16 * SIGMA_C * sqrt(nu * N). The paper's lower bound
+	 * 11 * nu * beta * sqrt(k * N) on that width, which this used to take,
+	 * accepted only openings 2.1 times shorter than extraction yields. */
+	const uint64_t sigma_sqr = (uint64_t) SIGMA_C * SIGMA_C;
 
 	/* Compare the squared norm to (4 * sigma * sqrt(N))^2 = 16 * sigma^2 * N.
 	 * The opening is the prover's input, so this has to be the check that
@@ -477,19 +480,20 @@ void commit_sample_chall(nmod_poly_t f) {
 	nmod_poly_t c[2];
 	uint32_t buf;
 
-	/* The two halves of the challenge c[0] - c[1]. This 2 belongs to the
-	 * challenge construction, not to the CRT decomposition. */
+	/* The two challenges of the difference c[0] - c[1], each with NONZERO
+	 * coefficients of +-1. This 2 belongs to the challenge construction, not
+	 * to the CRT decomposition. */
 	for (int i = 0; i < 2; i++) {
 		nmod_poly_init(c[i], MODP);
 		nmod_poly_fit_length(c[i], DEGREE);
 		for (int j = 0; j < NONZERO; j++) {
-			getrandom(&buf, sizeof(buf), 0);
-			buf = buf % DEGREE;
-			while (nmod_poly_get_coeff_ui(c[i], buf) != 0) {
+			uint32_t pos;
+
+			do {
 				getrandom(&buf, sizeof(buf), 0);
-				buf = buf % DEGREE;
-			}
-			nmod_poly_set_coeff_ui(c[i], buf, 1);
+				pos = buf % DEGREE;
+			} while (nmod_poly_get_coeff_ui(c[i], pos) != 0);
+			nmod_poly_set_coeff_ui(c[i], pos, (buf >> 31) ? MODP - 1 : 1);
 		}
 	}
 	nmod_poly_sub(f, c[0], c[1]);

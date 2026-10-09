@@ -1502,17 +1502,20 @@ static void challenge_from_digest(pcrt_poly_t d,
 	nmod_poly_t c;
 	uint32_t buf;
 
+	/* A challenge from the space C of the paper, as the shuffle draws it:
+	 * NONZERO coefficients of +-1, the sign from the top bit, which the
+	 * reduction does not use. */
 	nmod_poly_init(c, MODP);
 	prg_setseed(&prg, hash);
 	nmod_poly_fit_length(c, DEGREE);
 	for (int i = 0; i < NONZERO; i++) {
-		prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
-		buf = buf % DEGREE;
-		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
+		uint32_t pos;
+
+		do {
 			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
-			buf = buf % DEGREE;
-		}
-		nmod_poly_set_coeff_ui(c, buf, 1);
+			pos = buf % DEGREE;
+		} while (nmod_poly_get_coeff_ui(c, pos) != 0);
+		nmod_poly_set_coeff_ui(c, pos, (buf >> 31) ? MODP - 1 : 1);
 	}
 	pcrt_poly_reduce(d[0], c, 0);
 	pcrt_poly_reduce(d[1], c, 1);
@@ -1567,17 +1570,19 @@ static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
 		memcpy(digest, hash, SHA256HashSize);
 	}
 
+	/* The opening challenge, from the space C of the paper: NONZERO
+	 * coefficients of +-1. */
 	nmod_poly_init(c, MODP);
 	prg_setseed(&prg, hash);
 	nmod_poly_fit_length(c, DEGREE);
 	for (int i = 0; i < NONZERO; i++) {
-		prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
-		buf = buf % DEGREE;
-		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
+		uint32_t pos;
+
+		do {
 			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
-			buf = buf % DEGREE;
-		}
-		nmod_poly_set_coeff_ui(c, buf, 1);
+			pos = buf % DEGREE;
+		} while (nmod_poly_get_coeff_ui(c, pos) != 0);
+		nmod_poly_set_coeff_ui(c, pos, (buf >> 31) ? MODP - 1 : 1);
 	}
 	pcrt_poly_reduce(d[0], c, 0);
 	pcrt_poly_reduce(d[1], c, 1);
@@ -1613,22 +1618,21 @@ static void tst_rho_hash(pcrt_poly_t rho, lnpkey_t *key, lnpcom_t *com) {
 	}
 	SHA256Result(&sha, hash);
 
-	/* Same shape as the opening challenge: NONZERO ones in DEGREE positions.
-	 * Differences of distinct challenges are then short enough for Lemma 1 to
-	 * make them invertible, which is what the aggregation needs. */
+	/* Same shape as the opening challenge: NONZERO coefficients of +-1 in
+	 * DEGREE positions. Differences of distinct challenges then have
+	 * ||.||_oo <= 2, short enough for Lemma 1 to make them invertible, which
+	 * is what the aggregation needs. */
 	nmod_poly_init(c, MODP);
 	prg_setseed(&prg, hash);
 	nmod_poly_fit_length(c, DEGREE);
 	for (int i = 0; i < NONZERO; i++) {
-		uint32_t buf;
+		uint32_t buf, pos;
 
-		prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
-		buf = buf % DEGREE;
-		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
+		do {
 			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
-			buf = buf % DEGREE;
-		}
-		nmod_poly_set_coeff_ui(c, buf, 1);
+			pos = buf % DEGREE;
+		} while (nmod_poly_get_coeff_ui(c, pos) != 0);
+		nmod_poly_set_coeff_ui(c, pos, (buf >> 31) ? MODP - 1 : 1);
 	}
 	pcrt_poly_reduce(rho[0], c, 0);
 	pcrt_poly_reduce(rho[1], c, 1);

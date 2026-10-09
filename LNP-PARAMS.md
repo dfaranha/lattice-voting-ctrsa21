@@ -75,8 +75,15 @@ here there is none. At `DEGREE = 1024` and `MODP` about `2^31.86`:
 | no wraparound in `sum_j s_j (s_j - 1) < p` | `\|\|s\|\|_inf <= 1953` | yes, against 1 for honest `s` |
 | MLWE hiding, `LNP_RANK = 2` | 187 bits core-SVP | yes |
 | MSIS binding, bound `16 sigma_C sqrt(nu N)` | 118 bits core-SVP | same as the base scheme |
-| `\|\|c - c'\|\| < sqrt(p/2)` for Lemma 1 | 8.5 against 44195 | yes |
+| `\|\|c - c'\|\| < sqrt(p/2)` for Lemma 1 | 12 against 44195 | yes |
 | soundness of the scalar aggregation, `p^-LNP_LAMBDA` | `2^-127.5` at `LNP_LAMBDA = 4` | just |
+
+The Lemma 1 row is for challenges `c, c'` with `nu` coefficients of +-1 each,
+the space `C` of the paper, so `||c - c'||_oo <= 2` and `||c - c'||_2 <=
+sqrt(2 * 2 nu) = 2 sqrt(nu)`, 12 at `nu = 36`. (It read 8.5, `sqrt(2 nu)`, while
+challenges were binary.) At the current `NONZERO = 18` and `MODP` about `2^40`
+it is 8.5 against `sqrt(p/2) = 741455`, and in the infinity norm 2 against the
+same ceiling.
 
 MSIS binding is flat in the commitment width, so widening the randomness to
 make room for the message slots costs nothing there. Hiding is the constraint
@@ -671,9 +678,11 @@ constant-coefficient checks catch the third.
 ## 5f. The challenge weight, and where the floor is
 
 `NONZERO` was 36, chosen when `DEGREE` was 1024. The challenge space is
-`C(DEGREE, NONZERO)`, and at 2048 that is `2^257` at weight 36 against the
-`2^128` the knowledge error needs, so half the weight is still ample:
-`C(2048, 18)` is `2^145`.
+`2^NONZERO C(DEGREE, NONZERO)`, `NONZERO` coefficients of +-1, and at 2048 that
+is `2^293` at weight 36 against the `2^128` the knowledge error needs, so half
+the weight is still ample: `2^18 C(2048, 18)` is `2^163.4`. (When this was
+written challenges were binary and the space was `C(DEGREE, NONZERO)`, `2^257`
+and `2^145`; the signs were added later and only enlarge it.)
 
 Lowering it pays twice. `SIGMA_C` is linear in `NONZERO`, so the masks halve,
 which takes a Gaussian coefficient from 22 bits to 21. And the extractable

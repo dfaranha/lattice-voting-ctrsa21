@@ -56,9 +56,9 @@
 #define SIGMA_C 33068
 /* Standard deviation for the Gaussian masking the committed permutation
  * elements sigma_i of Lemma 5. These are monomials, so ||d * sigma_i|| equals
- * ||d|| <= sqrt(2 * NONZERO) ~ 6.0 exactly regardless of DEGREE, which is why
- * this one does not scale with it. SIGMA_S = 256 leaves a ratio of about 30
- * for the rejection sampling. It must also stay small enough that the
+ * ||d|| = sqrt(NONZERO) ~ 4.24 exactly regardless of DEGREE, d having NONZERO
+ * coefficients of +-1, which is why this one does not scale with it.
+ * SIGMA_S = 256 leaves a ratio of about 60 for the rejection sampling. It must also stay small enough that the
  * extracted ||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S), which
  * is 46341 at DEGREE 2048, remains below sqrt(MODP) ~ 1048576, the bound under
  * which Lemma 1 guarantees invertibility. */
