@@ -52,8 +52,8 @@ proof. This table is the reference for what each costs and what each is worth.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `master` | `2^31.86` | 1024 | 3 | 36 | 25.4 KB | 117.4 | 72.7 | 88.8 | **72.7** |
 | `fix-pkc` | `2^31.86` | 1024 | 3 | 36 | 41.4 KB | 117.4 | 72.7 | 88.8 | **72.7** |
-| `balanced-params` | `2^31.25` | 1024 | 4 | 20 | 47.1 KB | 128.2 | 191.6 | 159.7 | **128.2** |
-| `lnp` | `2^40` | 2048 | 3 | 18 | 132.9 KB | 352.2 | 140.2 | 326.2 | **140.2** |
+| `balanced-params` | `2^31.25` | 1024 | 4 | 20 | 46.4 KB | 132.9 | 191.6 | 159.7 | **132.9** |
+| `lnp` | `2^40` | 2048 | 3 | 18 | 135.1 KB | 327.0 | 140.2 | 326.2 | **140.2** |
 
 Security is core-SVP bits, in the sense of Alkim-Ducas-Pöppelmann-Schwabe,
 computed with the `lattice-estimator`. The security level of a branch is the
@@ -93,15 +93,17 @@ and brackets the byte count by it -- below a flat encoding, above the entropy
 | --- | --- | --- | --- | --- | --- |
 | `master` | 17.86 | 20 | 17.77 | 27.0 KB | 25.4 KB |
 | `fix-pkc` | 17.09 | 19.20 | 17.00 | 44.0 KB | 41.4 KB |
-| `balanced-params` | 16.65 | 18.46 | 16.55 | 50.0 KB | 47.1 KB |
-| `lnp` | 19.50 | 20.95 | 19.33 | 137.0 KB | 132.9 KB |
+| `balanced-params` | 16.25 | 18.38 | 16.17 | 50.0 KB | 46.4 KB |
+| `lnp` | 20.26 | 21.93 | 20.15 | 137.0 KB | 135.1 KB |
 
 The first three columns are bits a Gaussian coefficient, averaged over the
-widths a branch uses where it has more than one. Rice lands within a tenth of
-a bit of the entropy throughout, so what the change is worth per branch is
+widths a branch uses where it has more than one. Rice lands within about a
+tenth of a bit of the entropy throughout, so what the change is worth per branch is
 essentially the gap between the bound and the distribution, and how much of the
 proof is Gaussian rather than uniform: close to 6 per cent on every branch but
-`lnp`, where the projection and the batch masks make it 3.
+`lnp`, where the projection and the batch masks make it 3. The "was" column
+is at the widths each branch had when the coding landed; `balanced-params` and
+`lnp` have since moved theirs, below.
 
 **`fix-pkc` is what the patch costs.** Lemma 5 needs the permutation element
 committed and tied to the linear proof, which is one extra commitment and one
@@ -112,7 +114,7 @@ therefore the same security.
 `fix-pkc` establishes the set membership Lemma 5 needs by a norm bound, `lnp`
 proves the committed element is binary, which is the statement the lemma really
 requires. That needs the LNP machinery, a larger modulus, and a larger ring,
-and it costs 132.9 KB.
+and it costs 135.1 KB.
 
 **`DEGREE` is 2048 on `lnp` because the batch size became a security
 parameter.** One rejection test spans every message's response, so the masks
@@ -133,5 +135,16 @@ prover attempt, within 2 per cent of instructions retired. FLINT multiplies in
 quasi-linear time, so two products of half the degree cost about what one of
 the full degree does, and the conversions between the representations take the
 rest. The branch is gone; its last state is the tag `archive/nocrt`.
+
+**The mask widths are the minimum rejection sampling needs.** At the code's
+`M = 1.75`, rejection sampling keeps its `2^-100` bound once `sigma` is 21.485
+times the longest vector it masks, `nu * beta * sqrt(K * N)` for `K` ternary
+ring elements. `balanced-params` had inherited a width scaled from the paper's
+54000 and now sits at that minimum, which takes 0.7 KB off a message and raises
+binding from 128.2 to 132.9 bits. `lnp` went the other way: its batched test
+masks `K = 285` ring elements, not the 75 its width was sized for, so `SIGMA_B`
+had to grow from 165340 to 295465, at 2.2 KB a message and 25 bits of binding
+that its hiding-limited security level does not notice. `master` and `fix-pkc`
+keep the paper's width, with about 26 per cent to spare.
 
 `LNP-PARAMS.md` on the `lnp` branch has the derivations and the caveats.
