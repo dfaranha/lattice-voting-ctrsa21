@@ -609,11 +609,14 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t w[WIDTH][2],
  * them, and all of which the verifier holds: the first two are the statement,
  * the P_i travel in the proof.
  *
- * Unlike a single evaluation point, no condition on public values has to be
- * avoided: the factor that must be invertible, b_i = _m_i + sigma_i * tau -
- * rho, involves the secret sigma_i, so only the prover can test it, and it
- * does so by committing to the sigma_i afresh, which re-derives both
- * challenges.
+ * tau must be invertible: where it vanishes in a CRT component, sigma_i
+ * drops out of the product there, leaving the plain product of (m_i - rho)
+ * that the CRT-mixing attack satisfies. That is a public condition, so a
+ * counter absorbed into the hash re-derives both challenges in that case,
+ * which keeps them deterministic. The other factor that must be invertible,
+ * b_i = _m_i + sigma_i * tau - rho, involves the secret sigma_i, so only the
+ * prover can test it, and it does so by committing to the sigma_i afresh,
+ * which re-derives both challenges as well.
  *
  * @param[out] tau			- the challenge X1.
  * @param[out] rho			- the challenge X2.
@@ -627,24 +630,30 @@ static void shuffle_challenges(nmod_poly_t tau, nmod_poly_t rho,
 	uint8_t hash[SHA256HashSize];
 	prg_t prg;
 
-	SHA256Reset(&sha);
-	SHA256Input(&sha, (const uint8_t *)"tau,rho", 7);
-	for (int i = 0; i < MSGS; i++) {
-		hash_poly(&sha, _m[i]);
-		for (int j = 0; j < NCRT; j++) {
-			hash_poly(&sha, com[i].c1[j]);
-			hash_poly(&sha, com[i].c2[j]);
-			hash_poly(&sha, p[i].c1[j]);
-			hash_poly(&sha, p[i].c2[j]);
+	for (uint8_t ctr = 0;; ctr++) {
+		SHA256Reset(&sha);
+		SHA256Input(&sha, (const uint8_t *)"tau,rho", 7);
+		SHA256Input(&sha, &ctr, 1);
+		for (int i = 0; i < MSGS; i++) {
+			hash_poly(&sha, _m[i]);
+			for (int j = 0; j < NCRT; j++) {
+				hash_poly(&sha, com[i].c1[j]);
+				hash_poly(&sha, com[i].c2[j]);
+				hash_poly(&sha, p[i].c1[j]);
+				hash_poly(&sha, p[i].c2[j]);
+			}
+		}
+		SHA256Result(&sha, hash);
+
+		/* Of degree below N/2, so that differences of distinct challenges are
+		 * invertible. */
+		prg_setseed(&prg, hash);
+		commit_sample_rand(tau, &prg, DEGCRT);
+		commit_sample_rand(rho, &prg, DEGCRT);
+		if (is_invertible(tau)) {
+			return;
 		}
 	}
-	SHA256Result(&sha, hash);
-
-	/* Of degree below N/2, so that differences of distinct challenges are
-	 * invertible. */
-	prg_setseed(&prg, hash);
-	commit_sample_rand(tau, &prg, DEGCRT);
-	commit_sample_rand(rho, &prg, DEGCRT);
 }
 
 void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t p[MSGS],
