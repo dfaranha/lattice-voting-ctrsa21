@@ -87,9 +87,9 @@ exactly. The budget is tight and this is what makes it comfortable:
 
 | quantity | value |
 | --- | --- |
-| invertibility ceiling `MODP^(1/2)` | 62501 |
-| extracted `||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S)` | 32768 |
-| masking ratio `SIGMA_S / ||d * sigma_i||`, with `||d|| = sqrt(NONZERO)` | ~43 at `NONZERO = 36`, ~60 at 18 |
+| invertibility ceiling `MODP^(1/2)` | 62501 (1048576 at this branch's `MODP`) |
+| extracted `||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S)` | 32768 (16654 at `DEGREE = 2048`, `SIGMA_S = 92`) |
+| masking ratio `SIGMA_S / ||d * sigma_i||`, with `||d|| = sqrt(NONZERO)` | ~21.7 at `NONZERO = 18`, `SIGMA_S = 92`: the least ratio, 21.485, that keeps `M = 1.75`, rounded up |
 
 A binary encoding would also fit at `N = 25`, but with a factor of about 1.3 to
 spare, and it degrades as `N` grows, since `||sigma_i||_1` grows with the

@@ -252,6 +252,23 @@ implementation uses 256. **This window is the fragile part of the construction.*
 It is narrow because `k = 2`, so (Inv) only reaches `q^(1/2)`, which is small
 against `n = 1024`-dimensional Gaussian responses.
 
+*On the `lnp` branch (2026-10-09).* The figures above are for the parameters
+this argument was written at. With `q = 2^40 + 141`, `n = 2048` and
+`NONZERO = 18`, `||d * sigma_i|| = sqrt(18) ~ 4.24` and `||delta||_2 <= 8.49`,
+so the window is
+
+| bound | value | source |
+| --- | --- | --- |
+| `sigma_S <= (q^(1/2) - 8.49) / (4 sqrt n)` | 5792 | (H) via (Inv) |
+| `sigma_S >= 21.485 * ||d * sigma_i||` | 91.2 | rejection sampling at `M = 1.75` |
+
+and `SIGMA_S` was narrowed from 256 to 92, the lower edge rounded up. The
+extracted norm is then `4 sqrt(n) sigma_S + ||delta||_2 = 16663` against a
+ceiling of 1048576. The constant is 21.485 rather than 21.5: it is the least
+`alpha` with `exp(12/alpha + 1/(2 alpha^2)) <= 1.75`. No proof on that branch
+samples at `SIGMA_S` any more, since `is_bin` replaced the relaxed proof, so
+the window is recorded for completeness rather than load-bearing there.
+
 This is also why `g` maps to monomials rather than to binary representations of
 indices, as in the paper. For a binary `g`, `||d * sigma_i||_2 <= ||d||_2 *
 ||sigma_i||_1` grows with the bit-length of the index: at `N = 25` the window
@@ -264,7 +281,9 @@ and `g` stays injective up to `N = n`.
 *Completeness.* An honest `z_sigma` has `||z_sigma|| ~ sigma_S sqrt(n) = 8192`
 against a bound of 16384, so the added check fails with negligible probability.
 The added rejection sampling runs at `alpha = sigma_S / ||d sigma_i|| ~ 30`,
-giving `M ~ 1.49`, within the `M = 1.75` used by the code.
+giving `M ~ 1.49`, within the `M = 1.75` used by the code. At the `lnp`
+branch's `SIGMA_S = 92` and `NONZERO = 18` it is `alpha ~ 21.7` and
+`M ~ 1.741`, just inside 1.75 by construction.
 
 *Zero-knowledge.* The proof carries one extra masked value. The simulator picks
 `z_p` and `z_sigma` from their distributions and sets

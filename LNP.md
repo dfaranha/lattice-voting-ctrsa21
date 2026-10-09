@@ -391,7 +391,7 @@ response.
 | `LNP_RANK` | 2 | rank 1 hiding is only 73 bits |
 | `PROJ` | 256 | the projection lemma's requirement for `2^-128` |
 | `TAU_PROJ` | 9 | about 3.8 repetitions, bound 1.78x inside the ceiling |
-| `SIGMA_B` | `SIGMA_C sqrt(MSGS)` | one rejection test spans the batch |
+| `SIGMA_B` | `SIGMA_C sqrt(K / WIDTH)`, `K = 285` | one rejection test spans every opening of the batch |
 | `SIGMA_P` | `TAU_PROJ sqrt(PROJ N / 2)` | and its certified bound grows with it |
 
 The modulus is the parameter that drags everything: it forced `WIDTH` up, `DIM`

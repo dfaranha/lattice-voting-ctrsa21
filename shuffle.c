@@ -20,8 +20,11 @@
  *
  * Since the transcript was batched this is also a security parameter, which it
  * was not before. One rejection test spans the concatenation of every
- * response, so SIGMA_B has to be SIGMA_C * sqrt(MSGS), and the extractable
- * opening 16 sigma sqrt(nu N) grows with it.
+ * response, so SIGMA_B has to grow as sqrt(MSGS), and the extractable
+ * opening 16 sigma sqrt(nu N) grows with it. Each message contributes three
+ * openings, two WIDTH wide and one LNP_WIDTH wide, and the batch two more, so
+ * the term masked is SIGMA_C's term sqrt(K / WIDTH) times over, with K the
+ * total count of ring elements below; param.h has the derivation.
  *
  * MSGS is the anonymity set, not merely a batch size: the proof says the
  * output list is a permutation of the input list, so shuffling an electorate
@@ -45,14 +48,16 @@
 #define MSGS        25
 #endif
 
-static_assert((uint64_t) SIGMA_B * SIGMA_B >=
-		(uint64_t) SIGMA_C * SIGMA_C * MSGS,
-		"SIGMA_B must be at least SIGMA_C * sqrt(MSGS): one rejection test "
-		"spans every response, so the masked term is sqrt(MSGS) longer");
+static_assert((uint64_t) SIGMA_B * SIGMA_B * WIDTH >=
+		(uint64_t) SIGMA_C * SIGMA_C *
+		(MSGS * (2 * WIDTH + LNP_WIDTH) + MASK_WIDTH + GARB_WIDTH),
+		"SIGMA_B must be at least SIGMA_C * sqrt(K / WIDTH), with K = "
+		"MSGS * (2 WIDTH + LNP_WIDTH) + MASK_WIDTH + GARB_WIDTH: one "
+		"rejection test spans every response, all K ring elements of it");
 static_assert(MSGS <= 25,
 		"MSGS is a security parameter since the transcript was batched. "
 		"SIGMA_B is sized for exactly this batch, and nothing larger has "
-		"been run. Widen SIGMA_B to SIGMA_C * sqrt(MSGS), re-derive the "
+		"been run. Widen SIGMA_B to SIGMA_C * sqrt(K / WIDTH), re-derive the "
 		"security, then move this bound deliberately");
 
 /*

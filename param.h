@@ -51,23 +51,35 @@
  * share the value 2 with DIM, which made several loops index a CRT component
  * with a module bound. */
 #define NCRT 	2
-/* Standard deviation for discrete Gaussians: about 23.44 * NONZERO *
- * sqrt(WIDTH * DEGREE), so it grows as sqrt(DEGREE) and shrinks with WIDTH. */
-#define SIGMA_C 33068
+/* Standard deviation for discrete Gaussians masking one commitment opening
+ * d * r, r ternary in WIDTH ring elements, so ||d * r|| <= T = NONZERO *
+ * sqrt(WIDTH * DEGREE). SIGMA_C = ceil(21.485 * T): alpha = sigma / T = 21.485
+ * is the least ratio at which rejection sampling with the code's M = 1.75
+ * keeps its 2^-100 statistical bound, M = exp(12 / alpha + 1 / (2 alpha^2)).
+ * It grows as sqrt(DEGREE) and shrinks with WIDTH. On this branch nothing is
+ * masked at this width any more; it sets the opening bound commit_open
+ * accepts, and the unit SIGMA_B is derived from. */
+#define SIGMA_C 30314
 /* Standard deviation for the Gaussian masking the committed permutation
  * elements sigma_i of Lemma 5. These are monomials, so ||d * sigma_i|| equals
  * ||d|| = sqrt(NONZERO) ~ 4.24 exactly regardless of DEGREE, d having NONZERO
  * coefficients of +-1, which is why this one does not scale with it.
- * SIGMA_S = 256 leaves a ratio of about 60 for the rejection sampling. It must also stay small enough that the
+ * SIGMA_S = ceil(21.485 * sqrt(NONZERO)) = 92, a ratio of about 21.7, the
+ * rigorous minimum for M = 1.75. It must also stay small enough that the
  * extracted ||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S), which
- * is 46341 at DEGREE 2048, remains below sqrt(MODP) ~ 1048576, the bound under
- * which Lemma 1 guarantees invertibility. */
-#define SIGMA_S 256
+ * is 16654 at DEGREE 2048, remains below sqrt(MODP) ~ 1048576, the bound under
+ * which Lemma 1 guarantees invertibility. The relaxed proof that used it was
+ * replaced by is_bin, so no proof on this branch samples at this width. */
+#define SIGMA_S 92
 /* Standard deviation for the masks of the batched proof. One challenge shared
- * across MSGS statements means one rejection test over their concatenation, so
- * the term being masked is sqrt(MSGS) times longer than for a single statement
- * and the mask has to widen to match. */
-#define SIGMA_B 165340
+ * across MSGS statements means one rejection test over their concatenation:
+ * per message the openings d * r and d * _r of the two WIDTH-wide commitments
+ * and d * s of the LNP_WIDTH-wide one, and once for the batch those of the
+ * mask and garbage commitments, MASK_WIDTH + GARB_WIDTH more. That is
+ * K = MSGS * (2 WIDTH + LNP_WIDTH) + MASK_WIDTH + GARB_WIDTH = 285 ternary ring
+ * elements, so T = NONZERO * sqrt(K * DEGREE) and the width has to be
+ * 21.485 * T = SIGMA_C * sqrt(K / WIDTH), rounded up. shuffle.c asserts it. */
+#define SIGMA_B 295465
 /* Standard deviation of the projection mask in the approximate range proof:
  * TAU_PROJ * sqrt(PROJ * DEGREE / 2), the width needed to hide a projection of
  * an honest binary witness. The bound it certifies grows with it, so the

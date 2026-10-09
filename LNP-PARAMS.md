@@ -184,8 +184,8 @@ repetitions and leaves the certified bound a factor 1.78 inside the ceiling.
 | `WIDTH` | 3 | 4 | 3 |
 | `DIM` | 2 | 3 | 3 |
 | `Q` | `2^56` | 18446744073709551557 (`2^64 - 59`) | unchanged |
-| `SIGMA_C` | 54000 | 54000 | 33068 |
-| `SIGMA_B` | -- | 270000 | 165340 |
+| `SIGMA_C` | 54000 | 54000 | 30314 |
+| `SIGMA_B` | -- | 270000 | 295465 |
 | `SIGMA_P` | -- | 3258 | 4608 |
 
 The degree change is described in section 5d. It needed no new CRT constants
@@ -733,6 +733,52 @@ wants more automorphisms than a two-factor ring gives cheaply.
 So the remaining levers are entropy coding the Gaussian openings, worth about
 3 per cent since they carry 20.4 bits of entropy and are written at 21, and the
 ring degree, which is the only one with a factor of two in it.
+
+## 5g. Mask widths at the rigorous minimum (2026-10-09)
+
+Once challenges were drawn from the paper's `C`, `nu` coefficients of +-1, an
+opening term is bounded exactly: for ternary `r` in `k` ring elements,
+`||d r||_2 <= T = nu sqrt(k N)`. Rejection sampling at the code's `M = 1.75`
+keeps its `2^-100` statistical bound, `M = exp(12/alpha + 1/(2 alpha^2))`,
+exactly when `alpha = sigma / T >= 21.485`. The widths were set to that minimum,
+rounded up, each against the term it actually masks:
+
+| width | masks | `k` | `T` | was | now | `alpha` was |
+| --- | --- | --- | --- | --- | --- | --- |
+| `SIGMA_C` | one opening `d r` | `WIDTH` = 3 | 1410.9 | 33068 | 30314 | 23.44 |
+| `SIGMA_B` | the batch, below | `K` = 285 | 13751.8 | 165340 | 295465 | **12.02** |
+| `SIGMA_S` | `d sigma_i`, a monomial | -- | `sqrt(nu)` = 4.24 | 256 | 92 | 60.3 |
+
+`SIGMA_B` went *up*. The rejection test in `shuffle.c` spans, per message,
+`d r` and `d _r` over `WIDTH` each and `d s` over `LNP_WIDTH` = 5, and once for
+the batch the mask and garbage openings over `MASK_WIDTH + GARB_WIDTH` = 10:
+`K = 25 * 11 + 10 = 285` ring elements, the same count the proof-size test
+uses for the Gaussian part. `SIGMA_C sqrt(MSGS)` covers only `25 * 3` of them,
+so at 165340 the test ran at `alpha = 12.0`, where `M = 1.75` would have needed
+`M = 2.72`. The width is now `SIGMA_C sqrt(K / WIDTH)` rounded up, and the
+compile-time assertion in `shuffle.c` checks that form. The `lnp` binary's
+own test spans `LNP_WIDTH + MASK_WIDTH + GARB_WIDTH = 15` elements and needs
+67783, well inside it. Neither `SIGMA_C` nor `SIGMA_S` is sampled from on this
+branch: `SIGMA_C` sets the opening bound `commit_open` accepts and the unit of
+the assertion, and `SIGMA_S` survives only from the relaxed proof.
+
+What depends on them:
+
+| check | value |
+| --- | --- |
+| MSIS binding, `beta = 16 SIGMA_B sqrt(nu N)` | `2^28.92` -> `2^29.76`, 352.2 -> **327.0** core-SVP, 370.4 -> 346.2 MATZOV |
+| verifier bound `4 N SIGMA_B^2` | `7.2 * 10^14`, inside `2^64` |
+| `commit_open` bound `16 N SIGMA_C^2` | `3.0 * 10^13`, inside `2^64` |
+| `SIGMA_S` window under Lemma 1 | `[91.2, 5792]`, extracted `16654` against `sqrt(p)` = 1048576 |
+| JL certified bound against `sqrt(p/2)` | unchanged at 1.26x, `SIGMA_P` does not depend on the challenge |
+| Rice parameter for `SIGMA_B` | `k = 18` either way |
+| proof, per message (measured) | 132.9 KB -> 135.1 KB |
+
+The control, `SIGMA_B` = 165340, reproduces 352.2 and 370.4 exactly. Binding
+at 327 is still far above hiding, so the security level, the least of
+hiding, binding and encryption, stays where it was, set by MLWE hiding at
+rank 1. The proof grows by 0.84 bits a Gaussian coefficient, `log2` of the
+widening, from 19.50 to 20.26 bits measured.
 
 ## 6. What this changes about the decision
 
