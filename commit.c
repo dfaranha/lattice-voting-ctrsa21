@@ -83,15 +83,49 @@ static void fold_mod(nmod_poly_t c, const nmod_poly_t a, slong m, ulong r) {
  * @return the computed norm.
  */
 static int test_norm(nmod_poly_t r) {
-	// Compute squared norm to save sqrt() and simplify comparison.
-	uint64_t norm = commit_norm2_sqr(r);
+	/* The width the masks are sampled at, and so the one an extracted opening
+	 * is bounded by. The binding estimates use the same SIGMA_C, through the
+	 * extractable bound 16 * SIGMA_C * sqrt(nu * N). The paper's lower bound
+	 * 11 * nu * beta * sqrt(k * N) on that width, which this used to take,
+	 * accepted only openings 2.5 times shorter than extraction yields. */
+	const uint64_t sigma_sqr = (uint64_t) SIGMA_C * SIGMA_C;
 
-	// Compute sigma^2 = (11 * v * beta * sqrt(k * N))^2.
-	uint64_t sigma_sqr = 11 * NONZERO * BETA;
-	sigma_sqr *= sigma_sqr * DEGREE * WIDTH;
+	/* Compare the squared norm to (4 * sigma * sqrt(N))^2 = 16 * sigma^2 * N.
+	 * The opening is the prover's input, so this has to be the check that
+	 * cannot overflow: summing the squares in a word wraps for a handful of
+	 * coefficients near MODP / 2, which let an enormous opening through. */
+	return commit_norm2_leq(r, (uint64_t) 16 * sigma_sqr * DEGREE);
+}
 
-	// Compare to (4 * sigma * sqrt(N))^2 = 16 * sigma^2 * N.
-	return norm <= (uint64_t) 16 *sigma_sqr * DEGREE;
+/**
+ * Test if a polynomial is a valid opening challenge: a non-zero difference
+ * of two challenges, so that ||f||_oo <= 2 and ||f||_1 <= 2 * NONZERO.
+ *
+ * An opening (m, r, f) proves f * c = B * r + f * m, which says nothing about m
+ * when f is zero: r = 0 and f = 0 open any commitment to any message. A short
+ * non-zero f is invertible by Lemma 1, which is what makes the opening bind.
+ *
+ * @param[in] f 			- the challenge in coefficient representation.
+ * @return 1 if it is a valid opening challenge, 0 otherwise.
+ */
+static int test_chall_diff(nmod_poly_t f) {
+	int64_t coeff;
+	uint64_t l1 = 0;
+
+	if (nmod_poly_is_zero(f)) {
+		return 0;
+	}
+	for (int i = 0; i < DEGREE; i++) {
+		coeff = nmod_poly_get_coeff_ui(f, i);
+		if (coeff > MODP / 2) {
+			coeff -= MODP;
+		}
+		if (coeff < -2 || coeff > 2) {
+			return 0;
+		}
+		l1 += (coeff < 0 ? -coeff : coeff);
+	}
+	return l1 <= 2 * NONZERO;
 }
 
 /*============================================================================*/
@@ -152,14 +186,16 @@ void commit_poly_mulmod(nmod_poly_t c, const nmod_poly_t a,
  * coefficients near MODP. Use commit_norm2_leq to check a bound on input that
  * a malicious party could have chosen. */
 uint64_t commit_norm2_sqr(nmod_poly_t r) {
-	int64_t coeff, norm = 0;
+	int64_t coeff;
+	uint64_t norm = 0;
 
-	/* Compute norm^2. */
+	/* Compute norm^2. Unsigned, so that an overflow wraps rather than being
+	 * undefined, which it was for the signed accumulator this used to be. */
 	for (int i = 0; i < DEGREE; i++) {
 		coeff = nmod_poly_get_coeff_ui(r, i);
 		if (coeff > MODP / 2)
 			coeff -= MODP;
-		norm += coeff * coeff;
+		norm += (uint64_t) (coeff * coeff);
 	}
 	return norm;
 }
@@ -332,19 +368,20 @@ void commit_sample_chall(nmod_poly_t f) {
 	nmod_poly_t c[2];
 	uint32_t buf;
 
-	/* The two halves of the challenge c[0] - c[1]. This 2 belongs to the
-	 * challenge construction, not to the CRT decomposition. */
+	/* The two challenges of the difference c[0] - c[1], each with NONZERO
+	 * coefficients of +-1. This 2 belongs to the challenge construction, not
+	 * to the CRT decomposition. */
 	for (int i = 0; i < 2; i++) {
 		nmod_poly_init(c[i], MODP);
 		nmod_poly_fit_length(c[i], DEGREE);
 		for (int j = 0; j < NONZERO; j++) {
-			getrandom(&buf, sizeof(buf), 0);
-			buf = buf % DEGREE;
-			while (nmod_poly_get_coeff_ui(c[i], buf) != 0) {
+			uint32_t pos;
+
+			do {
 				getrandom(&buf, sizeof(buf), 0);
-				buf = buf % DEGREE;
-			}
-			nmod_poly_set_coeff_ui(c[i], buf, 1);
+				pos = buf % DEGREE;
+			} while (nmod_poly_get_coeff_ui(c[i], pos) != 0);
+			nmod_poly_set_coeff_ui(c[i], pos, (buf >> 31) ? MODP - 1 : 1);
 		}
 	}
 	nmod_poly_sub(f, c[0], c[1]);
@@ -430,13 +467,16 @@ int commit_open(commit_t *com, nmod_poly_t m, commitkey_t *key,
 	commit_poly_mulmod(_c1, com->c1, f);
 	commit_poly_mulmod(_c2, com->c2, f);
 
-	/* The randomness is already a ring element, so there is nothing to
-	 * reconstruct before checking its norm. */
-	if (test_norm(r[0]) && test_norm(r[1]) && test_norm(r[2])) {
-		if (nmod_poly_equal(_c1, c1) && nmod_poly_equal(_c2, c2)) {
-			result = 1;
-		}
+	/* The challenge and randomness are already ring elements, so there is
+	 * nothing to reconstruct before checking them. Every component of r is
+	 * bounded, not only the first three, which is all this used to check
+	 * whatever the WIDTH. */
+	result = test_chall_diff(f);
+	for (int i = 0; i < WIDTH; i++) {
+		result &= test_norm(r[i]);
 	}
+	result &= nmod_poly_equal(_c1, c1);
+	result &= nmod_poly_equal(_c2, c2);
 
 	nmod_poly_clear(t);
 	nmod_poly_clear(c1);
@@ -457,15 +497,18 @@ void commit_free(commit_t *com) {
 static void test(flint_rand_t rand) {
 	commitkey_t key;
 	commit_t com, _com;
-	nmod_poly_t m, rho;
-	nmod_poly_t r[WIDTH], s[WIDTH], f;
+	nmod_poly_t m, _m, rho;
+	nmod_poly_t r[WIDTH], s[WIDTH], _s[WIDTH], f, _f;
 
 	nmod_poly_init(m, MODP);
+	nmod_poly_init(_m, MODP);
 	nmod_poly_init(rho, MODP);
 	nmod_poly_init(f, MODP);
+	nmod_poly_init(_f, MODP);
 	for (int i = 0; i < WIDTH; i++) {
 		nmod_poly_init(r[i], MODP);
 		nmod_poly_init(s[i], MODP);
+		nmod_poly_init(_s[i], MODP);
 	}
 
 	/* Generate a random message. */
@@ -493,6 +536,28 @@ static void test(flint_rand_t rand) {
 		TEST_ASSERT(commit_open(&com, m, &key, s, f) == 1, end);
 	} TEST_END;
 
+	/* With f = 0 and r = 0 the opening equation holds for any message. */
+	TEST_ONCE("commitment does not open with a zero challenge") {
+		for (int i = 0; i < WIDTH; i++) {
+			nmod_poly_zero(_s[i]);
+		}
+		nmod_poly_zero(_f);
+		nmod_poly_set(_m, m);
+		nmod_poly_set_coeff_ui(_m, 0, (nmod_poly_get_coeff_ui(m, 0) + 1) % MODP);
+		TEST_ASSERT(commit_open(&com, _m, &key, _s, _f) == 0, end);
+	} TEST_END;
+
+	/* Four coefficients at MODP / 2 and one more chosen so that the sum of
+	 * their squares wraps a 64-bit word to 1420468769, far below the bound. */
+	TEST_ONCE("norm bound does not wrap on an oversized opening") {
+		nmod_poly_zero(_m);
+		for (int i = 0; i < 4; i++) {
+			nmod_poly_set_coeff_ui(_m, i, MODP / 2);
+		}
+		nmod_poly_set_coeff_ui(_m, 4, 1785046359);
+		TEST_ASSERT(test_norm(_m) == 0, end);
+	} TEST_END;
+
 	TEST_BEGIN("commitments are linearly homomorphic") {
 		/* Test linearity. */
 		for (int i = 0; i < WIDTH; i++) {
@@ -510,11 +575,14 @@ static void test(flint_rand_t rand) {
 	commit_free(&com);
 	commit_free(&_com);
 	nmod_poly_clear(m);
+	nmod_poly_clear(_m);
 	nmod_poly_clear(rho);
 	nmod_poly_clear(f);
+	nmod_poly_clear(_f);
 	for (int i = 0; i < WIDTH; i++) {
 		nmod_poly_clear(r[i]);
 		nmod_poly_clear(s[i]);
+		nmod_poly_clear(_s[i]);
 	}
 }
 
