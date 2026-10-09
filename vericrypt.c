@@ -233,19 +233,57 @@ void vericrypt_sample_chall(fmpz_mod_poly_t f, uint8_t *seed, int len,
 	fmpz_init(coeff);
 	fmpz_mod_poly_zero(f, *ctx);
 	prg_setseed(&prg, seed);
+	/* NONZERO coefficients of +-1, as in the challenge space C of the paper.
+	 * The sign comes from the top bit, which the reduction does not use. */
 	for (int j = 0; j < NONZERO; j++) {
-		prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
-		buf = buf % DEGREE;
-		fmpz_mod_poly_get_coeff_fmpz(coeff, f, buf, *ctx);
-		while (!fmpz_is_zero(coeff)) {
+		uint32_t pos;
+
+		do {
 			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
-			buf = buf % DEGREE;
-			fmpz_mod_poly_get_coeff_fmpz(coeff, f, buf, *ctx);
-		}
-		fmpz_set_ui(coeff, 1);
-		fmpz_mod_poly_set_coeff_fmpz(f, buf, coeff, *ctx);
+			pos = buf % DEGREE;
+			fmpz_mod_poly_get_coeff_fmpz(coeff, f, pos, *ctx);
+		} while (!fmpz_is_zero(coeff));
+		fmpz_set_si(coeff, (buf >> 31) ? -1 : 1);
+		fmpz_mod_poly_set_coeff_fmpz(f, pos, coeff, *ctx);
 	}
 	fmpz_clear(coeff);
+}
+
+/**
+ * Move a challenge from the ring mod p, where it is sampled and hashed, into
+ * the CRT representation of the ring mod q.
+ *
+ * The challenge is short, so it is the same integer polynomial in both rings
+ * only once its coefficients are centred: a -1 is p - 1 mod p, which is not
+ * -1 mod q. Reducing the stored representatives directly, which was only
+ * correct while challenges were binary, would multiply by a different element.
+ *
+ * @param[out] c			- the challenge in CRT representation mod q.
+ * @param[in] chall			- the challenge mod p.
+ */
+static void vericrypt_chall_crt(qcrt_poly_t c, fmpz_mod_poly_t chall) {
+	fmpz_mod_ctx_t *ctx_p = encrypt_modulus_ctx();
+	fmpz_mod_ctx_t *ctx_q = encrypt_large_modulus_ctx();
+	fmpz_mod_poly_t t;
+	fmpz_t coeff, half;
+
+	fmpz_init(coeff);
+	fmpz_init(half);
+	fmpz_mod_poly_init(t, *ctx_q);
+	fmpz_fdiv_q_ui(half, *encrypt_modulus(), 2);
+	for (int i = 0; i < DEGREE; i++) {
+		fmpz_mod_poly_get_coeff_fmpz(coeff, chall, i, *ctx_p);
+		if (fmpz_cmp(coeff, half) > 0) {
+			fmpz_sub(coeff, coeff, *encrypt_modulus());
+		}
+		fmpz_mod_poly_set_coeff_fmpz(t, i, coeff, *ctx_q);
+	}
+	for (int i = 0; i < NCRT; i++) {
+		qcrt_poly_reduce(c[i], t, i, *ctx_q);
+	}
+	fmpz_mod_poly_clear(t, *ctx_q);
+	fmpz_clear(coeff);
+	fmpz_clear(half);
 }
 
 void vericrypt_sample_gauss(fmpz_mod_poly_t r, fmpz_mod_ctx_t *ctx) {
@@ -362,9 +400,7 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 		/* Hash and convert result to challenge space. */
 		vericrypt_hash(hash, pk, t, u, out, y, _u);
 		vericrypt_sample_chall(out->c, hash, SHA256HashSize, ctx_p);
-		for (int i = 0; i < NCRT; i++) {
-			qcrt_poly_reduce(c[i], out->c, i, *ctx_q);
-		}
+		vericrypt_chall_crt(c, out->c);
 
 		// Compute z = [r e e' mu]^T c + y.
 		for (int i = 0; i < VECTOR; i++) {
@@ -447,9 +483,7 @@ int vericrypt_verify(veritext_t *in, fmpz_mod_poly_t t[VECTOR],
 			encrypt_cipher_init(&y[i]);
 			encrypt_make(&y[i], in->r[i], in->e[i], in->e_[i], in->u[i], pk);
 		}
-		for (int i = 0; i < NCRT; i++) {
-			qcrt_poly_reduce(_c[i], in->c, i, *ctx_q);
-		}
+		vericrypt_chall_crt(_c, in->c);
 
 		fmpz_mod_poly_zero(_u, *ctx_p);
 		for (int i = 0; i < VECTOR; i++) {

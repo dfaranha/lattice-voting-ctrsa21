@@ -19,7 +19,10 @@
 /* Constant definitions                                                       */
 /*============================================================================*/
 
-/* Parameter v in the commitment scheme (laximum l1-norm of challs). */
+/* Parameter nu in the commitment scheme: the number of non-zero coefficients,
+ * each +-1, of a challenge, and so its l1-norm. A difference of two
+ * challenges, which is what an opening carries, has l1-norm at most
+ * 2 * NONZERO. */
 #define NONZERO 36
 /* The \infty-norm bound of certain elements. */
 #define BETA 	1
@@ -194,14 +197,16 @@ void commit_sample_rand(nmod_poly_t r, prg_t *prg, int degree);
 void commit_sample_rand_crt(pcrt_poly_t r, prg_t *prg);
 
 /**
- * Sample a random challenge.
+ * Sample a random opening challenge: the difference of two challenges with
+ * NONZERO coefficients of +-1 each, which is what an extracted opening
+ * carries.
  *
  * @param[out] r		- the polynomial to sample.
  */
 void commit_sample_chall(nmod_poly_t f);
 
 /**
- * Sample a random challenge in CRT representation.
+ * Sample a random opening challenge in CRT representation.
  *
  * @param[out] r		- the polynomial to sample.
  */
