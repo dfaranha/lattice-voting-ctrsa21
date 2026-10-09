@@ -122,26 +122,22 @@ static double uniform_double(void) {
 	return (double)(bits >> 11) * 0x1.0p-53;
 }
 
-int rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
-		int width) {
+/* z and v are in coefficient representation: the test needs their centred
+ * coefficients, and the prover keeps them that way so as not to reconstruct
+ * them from CRT form on every attempt. */
+int rej_sampling(nmod_poly_t z[], nmod_poly_t v[], uint64_t s2, int width) {
 	double r, u, M = 1.75;
 	int64_t dot, norm;
 	int64_t c0, c1;
-	nmod_poly_t t0, t1;
 	int result;
-
-	nmod_poly_init(t0, MODP);
-	nmod_poly_init(t1, MODP);
 
 	u = uniform_double();
 
 	norm = dot = 0;
 	for (int i = 0; i < width; i++) {
-		pcrt_poly_rec(t0, z[i]);
-		pcrt_poly_rec(t1, v[i]);
 		for (int j = 0; j < DEGREE; j++) {
-			c0 = nmod_poly_get_coeff_ui(t0, j);
-			c1 = nmod_poly_get_coeff_ui(t1, j);
+			c0 = nmod_poly_get_coeff_ui(z[i], j);
+			c1 = nmod_poly_get_coeff_ui(v[i], j);
 			if (c0 > MODP / 2)
 				c0 -= MODP;
 			if (c1 > MODP / 2)
@@ -157,8 +153,6 @@ int rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
 
 	result = u > r;
 
-	nmod_poly_clear(t0);
-	nmod_poly_clear(t1);
 	return result;
 }
 
@@ -178,7 +172,7 @@ int rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
  * the proof carry the digest instead of the first messages: the verifier
  * derives the challenge from it, rebuilds each first message from the equation
  * that used to check it, and re-derives the digest to confirm it matches. */
-static void challenge_from_hash(nmod_poly_t d[2],
+static void challenge_from_hash(nmod_poly_t d[2], nmod_poly_t dc,
 		const uint8_t hash[SHA256HashSize]) {
 	/* A local stream: keying the global one with public data would expose
 	 * the masks that the Gaussian sampler draws from it. */
@@ -208,10 +202,14 @@ static void challenge_from_hash(nmod_poly_t d[2],
 	}
 	pcrt_poly_reduce(d[0], c, 0);
 	pcrt_poly_reduce(d[1], c, 1);
+	if (dc != NULL) {
+		nmod_poly_set(dc, c);
+	}
 	nmod_poly_clear(c);
 }
 
-void lin_hash(nmod_poly_t d[2], commitkey_t *key, commit_t x, commit_t p,
+void lin_hash(nmod_poly_t d[2], nmod_poly_t dc, commitkey_t *key,
+		commit_t x, commit_t p,
 		commit_t y, nmod_poly_t alpha, nmod_poly_t gamma, nmod_poly_t beta,
 		nmod_poly_t u[2], nmod_poly_t t[2], nmod_poly_t tp[2],
 		nmod_poly_t _t[2], nmod_poly_t vs[2], uint8_t *digest) {
@@ -247,7 +245,7 @@ void lin_hash(nmod_poly_t d[2], commitkey_t *key, commit_t x, commit_t p,
 	if (digest != NULL) {
 		memcpy(digest, hash, SHA256HashSize);
 	}
-	challenge_from_hash(d, hash);
+	challenge_from_hash(d, dc, hash);
 }
 
 static void lin_prover(uint8_t digest[SHA256HashSize],
@@ -258,8 +256,15 @@ static void lin_prover(uint8_t digest[SHA256HashSize],
 		commitkey_t *key, nmod_poly_t alpha, nmod_poly_t gamma,
 		nmod_poly_t beta, nmod_poly_t r[WIDTH][2], nmod_poly_t s[WIDTH][2],
 		nmod_poly_t _r[WIDTH][2], nmod_poly_t sig[2]) {
-	nmod_poly_t tmp, rec, d[2], a[2], g[2];
-	nmod_poly_t dr[WIDTH][2], ds[WIDTH][2], _dr[WIDTH][2], dsig[1][2];
+	/* The rejection tests work on coefficients, so the prover keeps the masks,
+	 * the challenge and its products with the witness in coefficient form,
+	 * and reduces into CRT form only what the commitments and the proof need.
+	 * The witness is reconstructed once per proof rather than once per
+	 * attempt. */
+	nmod_poly_t tmp, d[2], dc, a[2], g[2];
+	nmod_poly_t yc[WIDTH], wc[WIDTH], _yc[WIDTH], ysc[1];
+	nmod_poly_t rc[WIDTH], sc[WIDTH], _rc[WIDTH], sigc;
+	nmod_poly_t dr[WIDTH], ds[WIDTH], _dr[WIDTH], dsig[1];
 	int rej0, rej1, rej2, rej3;
 	/* Rejection sampling only makes z independent of the witness when it
 	 * tests against the width y was actually sampled at, which is the SIGMA_C
@@ -270,17 +275,25 @@ static void lin_prover(uint8_t digest[SHA256HashSize],
 	uint64_t sigma_s_sqr = (uint64_t) SIGMA_S * SIGMA_S;
 
 	for (int i = 0; i < WIDTH; i++) {
-		for (int j = 0; j < NCRT; j++) {
-			nmod_poly_init(dr[i][j], MODP);
-			nmod_poly_init(ds[i][j], MODP);
-			nmod_poly_init(_dr[i][j], MODP);
-		}
+		nmod_poly_init(dr[i], MODP);
+		nmod_poly_init(ds[i], MODP);
+		nmod_poly_init(_dr[i], MODP);
+		nmod_poly_init(yc[i], MODP);
+		nmod_poly_init(wc[i], MODP);
+		nmod_poly_init(_yc[i], MODP);
+		nmod_poly_init(rc[i], MODP);
+		nmod_poly_init(sc[i], MODP);
+		nmod_poly_init(_rc[i], MODP);
+		pcrt_poly_rec(rc[i], r[i]);
+		pcrt_poly_rec(sc[i], s[i]);
+		pcrt_poly_rec(_rc[i], _r[i]);
 	}
-	for (int j = 0; j < NCRT; j++) {
-		nmod_poly_init(dsig[0][j], MODP);
-	}
+	nmod_poly_init(dsig[0], MODP);
+	nmod_poly_init(ysc[0], MODP);
+	nmod_poly_init(sigc, MODP);
+	pcrt_poly_rec(sigc, sig);
 	nmod_poly_init(tmp, MODP);
-	nmod_poly_init(rec, MODP);
+	nmod_poly_init(dc, MODP);
 	for (int i = 0; i < NCRT; i++) {
 		nmod_poly_init(d[i], MODP);
 		nmod_poly_init(a[i], MODP);
@@ -301,13 +314,21 @@ static void lin_prover(uint8_t digest[SHA256HashSize],
 		}
 
 		for (int i = 0; i < WIDTH; i++) {
-			commit_sample_gauss_crt(y[i]);
-			commit_sample_gauss_crt(w[i]);
-			commit_sample_gauss_crt(_y[i]);
+			commit_sample_gauss(yc[i]);
+			commit_sample_gauss(wc[i]);
+			commit_sample_gauss(_yc[i]);
+			for (int k = 0; k < NCRT; k++) {
+				pcrt_poly_reduce(y[i][k], yc[i], k);
+				pcrt_poly_reduce(w[i][k], wc[i], k);
+				pcrt_poly_reduce(_y[i][k], _yc[i], k);
+			}
 		}
 		/* Mask for the committed message sigma of p, narrow enough that the
 		 * norm the verifier extracts from z_sigma stays below MODP^(1/2). */
-		commit_sample_gauss_small_crt(ys[0]);
+		commit_sample_gauss_small(ysc[0]);
+		for (int k = 0; k < NCRT; k++) {
+			pcrt_poly_reduce(ys[0][k], ysc[0], k);
+		}
 		for (int i = 0; i < HEIGHT; i++) {
 			for (int j = 0; j < WIDTH; j++) {
 				for (int k = 0; k < NCRT; k++) {
@@ -347,50 +368,62 @@ static void lin_prover(uint8_t digest[SHA256HashSize],
 		}
 
 		/* Sample challenge. */
-		lin_hash(d, key, x, p, _x, alpha, gamma, beta, u, t, tp, _t, vs,
+		lin_hash(d, dc, key, x, p, _x, alpha, gamma, beta, u, t, tp, _t, vs,
 				digest);
 
 		/* Prover */
 		for (int i = 0; i < WIDTH; i++) {
-			for (int j = 0; j < NCRT; j++) {
-				pcrt_poly_mulmod(dr[i][j], d[j], r[i][j], j);
-				nmod_poly_add(y[i][j], y[i][j], dr[i][j]);
-				pcrt_poly_mulmod(ds[i][j], d[j], s[i][j], j);
-				nmod_poly_add(w[i][j], w[i][j], ds[i][j]);
-				pcrt_poly_mulmod(_dr[i][j], d[j], _r[i][j], j);
-				nmod_poly_add(_y[i][j], _y[i][j], _dr[i][j]);
-			}
+			commit_poly_mulmod(dr[i], dc, rc[i]);
+			nmod_poly_add(yc[i], yc[i], dr[i]);
+			commit_poly_mulmod(ds[i], dc, sc[i]);
+			nmod_poly_add(wc[i], wc[i], ds[i]);
+			commit_poly_mulmod(_dr[i], dc, _rc[i]);
+			nmod_poly_add(_yc[i], _yc[i], _dr[i]);
 		}
-		for (int j = 0; j < NCRT; j++) {
-			pcrt_poly_mulmod(dsig[0][j], d[j], sig[j], j);
-			nmod_poly_add(ys[0][j], ys[0][j], dsig[0][j]);
-		}
-		rej0 = rej_sampling(y, dr, sigma_sqr, WIDTH);
-		rej1 = rej_sampling(w, ds, sigma_sqr, WIDTH);
-		rej2 = rej_sampling(_y, _dr, sigma_sqr, WIDTH);
-		/* If sigma lies outside D, d * sigma is far too large for the mask to
-		 * hide and retrying cannot help. Stop rejecting and emit the
-		 * transcript: the verifier rejects it on the norm check below. */
-		pcrt_poly_rec(rec, dsig[0]);
-		if (commit_norm2_leq(rec, (uint64_t) DEGREE * SIGMA_S * SIGMA_S)) {
-			rej3 = rej_sampling(ys, dsig, sigma_s_sqr, 1);
+		commit_poly_mulmod(dsig[0], dc, sigc);
+		nmod_poly_add(ysc[0], ysc[0], dsig[0]);
+		/* Each test is only worth running if all the previous ones accept. */
+		rej0 = rej_sampling(yc, dr, sigma_sqr, WIDTH);
+		rej1 = rej0 ? 1 : rej_sampling(wc, ds, sigma_sqr, WIDTH);
+		rej2 = (rej0 || rej1) ? 1 : rej_sampling(_yc, _dr, sigma_sqr, WIDTH);
+		if (rej0 || rej1 || rej2) {
+			rej3 = 1;
+		} else if (commit_norm2_leq(dsig[0],
+						(uint64_t) DEGREE * SIGMA_S * SIGMA_S)) {
+			rej3 = rej_sampling(ysc, dsig, sigma_s_sqr, 1);
 		} else {
+			/* If sigma lies outside D, d * sigma is far too large for the
+			 * mask to hide and retrying cannot help. Stop rejecting and emit
+			 * the transcript: the verifier rejects it on the norm check. */
 			rej3 = 0;
 		}
 	} while (rej0 || rej1 || rej2 || rej3);
 
+	/* The responses z = y + d * r, in the CRT form the proof carries. */
 	for (int i = 0; i < WIDTH; i++) {
-		for (int j = 0; j < NCRT; j++) {
-			nmod_poly_clear(dr[i][j]);
-			nmod_poly_clear(ds[i][j]);
-			nmod_poly_clear(_dr[i][j]);
+		for (int k = 0; k < NCRT; k++) {
+			pcrt_poly_reduce(y[i][k], yc[i], k);
+			pcrt_poly_reduce(w[i][k], wc[i], k);
+			pcrt_poly_reduce(_y[i][k], _yc[i], k);
 		}
+		nmod_poly_clear(dr[i]);
+		nmod_poly_clear(ds[i]);
+		nmod_poly_clear(_dr[i]);
+		nmod_poly_clear(yc[i]);
+		nmod_poly_clear(wc[i]);
+		nmod_poly_clear(_yc[i]);
+		nmod_poly_clear(rc[i]);
+		nmod_poly_clear(sc[i]);
+		nmod_poly_clear(_rc[i]);
 	}
-	for (int j = 0; j < NCRT; j++) {
-		nmod_poly_clear(dsig[0][j]);
+	for (int k = 0; k < NCRT; k++) {
+		pcrt_poly_reduce(ys[0][k], ysc[0], k);
 	}
+	nmod_poly_clear(dsig[0]);
+	nmod_poly_clear(ysc[0]);
+	nmod_poly_clear(sigc);
+	nmod_poly_clear(dc);
 	nmod_poly_clear(tmp);
-	nmod_poly_clear(rec);
 	for (int i = 0; i < NCRT; i++) {
 		nmod_poly_clear(d[i]);
 		nmod_poly_clear(a[i]);
@@ -439,7 +472,7 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t w[WIDTH][2],
 	/* The proof carries the digest, not the first messages. Derive the
 	 * challenge from it; the equations below rebuild each first message, and
 	 * the digest is rebuilt over them at the end. */
-	challenge_from_hash(_d, digest);
+	challenge_from_hash(_d, NULL, digest);
 
 	/* Verifier checks norms, reconstructing from CRT representation. These are
 	 * soundness checks and must make verification fail, so they are ordinary
@@ -541,7 +574,7 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t w[WIDTH][2],
 		for (int j = 0; j < NCRT; j++) {
 			nmod_poly_init(ignored[j], MODP);
 		}
-		lin_hash(ignored, key, x, p, _x, alpha, gamma, beta, u, t, tp, _t, vs,
+		lin_hash(ignored, NULL, key, x, p, _x, alpha, gamma, beta, u, t, tp, _t, vs,
 				rebuilt);
 		result &= (memcmp(rebuilt, digest, SHA256HashSize) == 0);
 		for (int j = 0; j < NCRT; j++) {
@@ -744,7 +777,7 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 		uint8_t digest[MSGS][SHA256HashSize]) {
 	int flag;
 	nmod_poly_t beta, alpha, gamma, pub, tau, rho, t0, t1;
-	nmod_poly_t a[MSGS], b[MSGS], theta[MSGS], _r[MSGS][WIDTH][2];
+	nmod_poly_t a[MSGS], b[MSGS], theta[MSGS], inv[MSGS], _r[MSGS][WIDTH][2];
 	nmod_poly_t pr[MSGS][WIDTH][2], sig[MSGS][2];
 
 	nmod_poly_init(tau, MODP);
@@ -759,6 +792,7 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 		nmod_poly_init(a[i], MODP);
 		nmod_poly_init(b[i], MODP);
 		nmod_poly_init(theta[i], MODP);
+		nmod_poly_init(inv[i], MODP);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(sig[i][k], MODP);
 			/* CRT representation of the committed permutation element. */
@@ -830,19 +864,37 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 	commit_doit(&d[MSGS - 1], t0, key, _r[MSGS - 1]);
 
 	shuffle_hash(beta, com, p, d, _m, tau, rho);
+	/* Every s_i divides by b_i. Inverting each is an extended gcd at full
+	 * degree; inverting their product once and peeling the inverses off it
+	 * (Montgomery's trick) costs one of those and three products per message.
+	 * The loop above has already made sure every b_i is invertible, so their
+	 * product is too. inv[i] holds the inverse of b[i]. */
+	for (int i = 0; i < MSGS - 1; i++) {
+		if (i == 0) {
+			nmod_poly_set(inv[0], b[0]);
+		} else {
+			commit_poly_mulmod(inv[i], inv[i - 1], b[i]);
+		}
+	}
+	nmod_poly_invmod(t0, inv[MSGS - 2], *commit_poly());
+	for (int i = MSGS - 2; i > 0; i--) {
+		/* t0 is the inverse of b[0] * ... * b[i]. */
+		commit_poly_mulmod(inv[i], t0, inv[i - 1]);
+		commit_poly_mulmod(t0, t0, b[i]);
+	}
+	nmod_poly_set(inv[0], t0);
+
 	commit_poly_mulmod(s[0], theta[0], b[0]);
 	commit_poly_mulmod(t0, beta, a[0]);
 	nmod_poly_sub(s[0], s[0], t0);
-	nmod_poly_invmod(t0, b[0], *commit_poly());
-	commit_poly_mulmod(s[0], s[0], t0);
+	commit_poly_mulmod(s[0], s[0], inv[0]);
 	for (int i = 1; i < MSGS - 1; i++) {
 		commit_poly_mulmod(s[i], theta[i - 1], a[i]);
 		commit_poly_mulmod(t0, theta[i], b[i]);
 		nmod_poly_add(s[i], s[i], t0);
 		commit_poly_mulmod(t0, s[i - 1], a[i]);
 		nmod_poly_sub(s[i], s[i], t0);
-		nmod_poly_invmod(t0, b[i], *commit_poly());
-		commit_poly_mulmod(s[i], s[i], t0);
+		commit_poly_mulmod(s[i], s[i], inv[i]);
 	}
 
 	for (int l = 0; l < MSGS; l++) {
@@ -864,6 +916,7 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 		nmod_poly_clear(a[i]);
 		nmod_poly_clear(b[i]);
 		nmod_poly_clear(theta[i]);
+		nmod_poly_clear(inv[i]);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(sig[i][k]);
 			for (int j = 0; j < WIDTH; j++) {
@@ -1209,7 +1262,7 @@ static void test(void) {
 		for (int i = 0; i < SHA256HashSize; i++) {
 			h[i] = i;
 		}
-		challenge_from_hash(d, h);
+		challenge_from_hash(d, NULL, h);
 		pcrt_poly_rec(c, d);
 		for (int i = 0; i < DEGREE; i++) {
 			ulong x = nmod_poly_get_coeff_ui(c, i);
