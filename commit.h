@@ -18,6 +18,7 @@
 
 #include "param.h"
 #include "fastrandombytes.h"
+#include "sha.h"
 
 /*============================================================================*/
 /* Constant definitions                                                       */
@@ -54,6 +55,10 @@ typedef nmod_poly_t pcrt_poly_t[NCRT];
 typedef struct _key_t {
 	pcrt_poly_t B1[HEIGHT][WIDTH];
 	pcrt_poly_t b2[WIDTH];
+	/* A hash of B1 and b2, set by commit_keygen. Every Fiat-Shamir challenge
+	 * binds the key, and absorbing this instead of the matrices themselves
+	 * saves rehashing a constant on every attempt of every proof. */
+	uint8_t digest[SHA256HashSize];
 } commitkey_t;
 
 /* Type that represents a commitment in CRT representation. */
@@ -166,6 +171,33 @@ void commit_keyinit(commitkey_t *key);
  * @param[out] key 		- the generated key pair.
  */
 void commit_keygen(commitkey_t *key);
+
+/**
+ * Absorb a polynomial into a hash computation in a canonical way.
+ *
+ * The coefficients are absorbed one by one up to DEGREE, so that the digest
+ * depends only on the value of the polynomial and not on the capacity FLINT
+ * happens to have allocated. Each takes the fewest bytes that hold MODP: four
+ * when MODP < 2^32, eight otherwise.
+ *
+ * @param[in,out] sha		- the hash context.
+ * @param[in] p				- the polynomial to absorb.
+ */
+void commit_hash_poly(SHA256Context *sha, nmod_poly_t p);
+
+/**
+ * Absorb a CRT component into a hash computation in a canonical way.
+ *
+ * A component is reduced modulo a factor of degree DEGCRT, so only its first
+ * DEGCRT coefficients can be non-zero, and only those are absorbed. Absorbing
+ * DEGREE of them, as hash_poly used to, hashed half a component of zeros.
+ * A component that is not reduced is a bug, and aborts rather than hashing
+ * a truncation that two different values could share.
+ *
+ * @param[in,out] sha		- the hash context.
+ * @param[in] p				- the component to absorb.
+ */
+void commit_hash_crt(SHA256Context *sha, nmod_poly_t p);
 
 /**
  * Free a key pair for the commitment scheme.

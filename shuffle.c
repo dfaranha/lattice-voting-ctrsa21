@@ -146,27 +146,6 @@ static int is_invertible(nmod_poly_t a) {
 	return result;
 }
 
-/**
- * Absorb a polynomial into a hash computation in a canonical way.
- *
- * The coefficients are absorbed one by one up to DEGREE, so that the digest
- * depends only on the value of the polynomial. Absorbing the raw coefficient
- * array instead makes the digest depend on the capacity FLINT happens to have
- * allocated, which is a function of how the polynomial was built and therefore
- * need not agree between the prover and the verifier.
- *
- * @param[in,out] sha		- the hash context.
- * @param[in] p				- the polynomial to absorb.
- */
-static void hash_poly(SHA256Context *sha, nmod_poly_t p) {
-	uint64_t buf[DEGREE];
-
-	for (int i = 0; i < DEGREE; i++) {
-		buf[i] = nmod_poly_get_coeff_ui(p, i);
-	}
-	SHA256Input(sha, (const uint8_t *)buf, sizeof(buf));
-}
-
 /* Everything the is_bin sub-proof contributes for one message: the product
  * relation, the constant coefficient being zero, and the norm bound. The three
  * together say that the committed permutation element is binary, which is the
@@ -231,35 +210,26 @@ static void rho_hash(nmod_poly_t rho[MSGS][2], commitkey_t *key,
 	nmod_poly_t c;
 
 	SHA256Reset(&sha);
-	for (int i = 0; i < HEIGHT; i++) {
-		for (int j = 0; j < WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->B1[i][j][k]);
-			}
-		}
-		for (int j = 0; j < LNP_WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, lkey->B1[i][j][k]);
-			}
-		}
-	}
+	/* Hash public keys, through the digests their keygens computed once. */
+	SHA256Input(&sha, key->digest, SHA256HashSize);
+	SHA256Input(&sha, lkey->digest, SHA256HashSize);
 	for (int k = 0; k < NCRT; k++) {
 		for (int i = 0; i < HEIGHT; i++) {
-			hash_poly(&sha, mcom->c1[i][k]);
+			commit_hash_crt(&sha, mcom->c1[i][k]);
 		}
 		for (int i = 0; i < LNP_LAMBDA; i++) {
-			hash_poly(&sha, mcom->c2[i][k]);
+			commit_hash_crt(&sha, mcom->c2[i][k]);
 		}
 	}
 	for (int l = 0; l < MSGS; l++) {
 		for (int k = 0; k < NCRT; k++) {
-			hash_poly(&sha, com[l].c1[k]);
-			hash_poly(&sha, com[l].c2[k]);
+			commit_hash_crt(&sha, com[l].c1[k]);
+			commit_hash_crt(&sha, com[l].c2[k]);
 			for (int i = 0; i < HEIGHT; i++) {
-				hash_poly(&sha, p[l].c1[i][k]);
+				commit_hash_crt(&sha, p[l].c1[i][k]);
 			}
 			for (int i = 0; i < SLOTS; i++) {
-				hash_poly(&sha, p[l].c2[i][k]);
+				commit_hash_crt(&sha, p[l].c2[i][k]);
 			}
 		}
 	}
@@ -340,58 +310,43 @@ static void batch_hash(nmod_poly_t d[2], commitkey_t *key, lnpkey_t *lkey,
 	uint8_t hash[SHA256HashSize];
 
 	SHA256Reset(&sha);
-	for (int i = 0; i < HEIGHT; i++) {
-		for (int j = 0; j < WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->B1[i][j][k]);
-				if (i == 0) {
-					hash_poly(&sha, key->b2[j][k]);
-				}
-			}
-		}
-		for (int j = 0; j < LNP_WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, lkey->B1[i][j][k]);
-				for (int q = 0; q < SLOTS; q++) {
-					hash_poly(&sha, lkey->b2[q][j][k]);
-				}
-			}
-		}
-	}
-	hash_poly(&sha, beta);
+	/* Hash public keys, through the digests their keygens computed once. */
+	SHA256Input(&sha, key->digest, SHA256HashSize);
+	SHA256Input(&sha, lkey->digest, SHA256HashSize);
+	commit_hash_poly(&sha, beta);
 	for (int k = 0; k < NCRT; k++) {
 		for (int i = 0; i < HEIGHT; i++) {
-			hash_poly(&sha, mcom->c1[i][k]);
-			hash_poly(&sha, batch->w[i][k]);
-			hash_poly(&sha, gcom->c1[i][k]);
-			hash_poly(&sha, batch->gw[i][k]);
+			commit_hash_crt(&sha, mcom->c1[i][k]);
+			commit_hash_crt(&sha, batch->w[i][k]);
+			commit_hash_crt(&sha, gcom->c1[i][k]);
+			commit_hash_crt(&sha, batch->gw[i][k]);
 		}
 		for (int i = 0; i < LNP_LAMBDA; i++) {
-			hash_poly(&sha, mcom->c2[i][k]);
-			hash_poly(&sha, batch->h[i][k]);
-			hash_poly(&sha, batch->v[i][k]);
+			commit_hash_crt(&sha, mcom->c2[i][k]);
+			commit_hash_crt(&sha, batch->h[i][k]);
+			commit_hash_crt(&sha, batch->v[i][k]);
 		}
 		for (int i = 0; i < 2; i++) {
-			hash_poly(&sha, gcom->c2[i][k]);
+			commit_hash_crt(&sha, gcom->c2[i][k]);
 		}
-		hash_poly(&sha, batch->T[k]);
+		commit_hash_crt(&sha, batch->T[k]);
 	}
 	for (int l = 0; l < MSGS; l++) {
 		for (int k = 0; k < NCRT; k++) {
-			hash_poly(&sha, com[l].c1[k]);
-			hash_poly(&sha, com[l].c2[k]);
-			hash_poly(&sha, dc[l].c1[k]);
-			hash_poly(&sha, dc[l].c2[k]);
+			commit_hash_crt(&sha, com[l].c1[k]);
+			commit_hash_crt(&sha, com[l].c2[k]);
+			commit_hash_crt(&sha, dc[l].c1[k]);
+			commit_hash_crt(&sha, dc[l].c2[k]);
 			for (int i = 0; i < HEIGHT; i++) {
-				hash_poly(&sha, p[l].c1[i][k]);
+				commit_hash_crt(&sha, p[l].c1[i][k]);
 			}
 			for (int i = 0; i < SLOTS; i++) {
-				hash_poly(&sha, p[l].c2[i][k]);
+				commit_hash_crt(&sha, p[l].c2[i][k]);
 			}
-			hash_poly(&sha, t[l][k]);
-			hash_poly(&sha, tp[l][k]);
-			hash_poly(&sha, _t[l][k]);
-			hash_poly(&sha, u[l][k]);
+			commit_hash_crt(&sha, t[l][k]);
+			commit_hash_crt(&sha, tp[l][k]);
+			commit_hash_crt(&sha, _t[l][k]);
+			commit_hash_crt(&sha, u[l][k]);
 		}
 		SHA256Input(&sha, (const uint8_t *)ib[l].all.zp,
 				PROJ * sizeof(ulong));
@@ -709,14 +664,14 @@ static void shuffle_challenges(nmod_poly_t tau, nmod_poly_t rho,
 		SHA256Input(&sha, (const uint8_t *)"tau,rho", 7);
 		SHA256Input(&sha, &ctr, 1);
 		for (int l = 0; l < MSGS; l++) {
-			hash_poly(&sha, _m[l]);
+			commit_hash_poly(&sha, _m[l]);
 			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, com[l].c1[k]);
-				hash_poly(&sha, com[l].c2[k]);
+				commit_hash_crt(&sha, com[l].c1[k]);
+				commit_hash_crt(&sha, com[l].c2[k]);
 				for (int i = 0; i < HEIGHT; i++) {
-					hash_poly(&sha, p[l].c1[i][k]);
+					commit_hash_crt(&sha, p[l].c1[i][k]);
 				}
-				hash_poly(&sha, p[l].c2[SLOT_S][k]);
+				commit_hash_crt(&sha, p[l].c2[SLOT_S][k]);
 			}
 		}
 		SHA256Result(&sha, hash);
@@ -756,18 +711,18 @@ void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], lnpcom_t p[MSGS],
 	SHA256Reset(&sha);
 
 	for (int i = 0; i < MSGS; i++) {
-		hash_poly(&sha, _m[i]);
+		commit_hash_poly(&sha, _m[i]);
 		for (int j = 0; j < NCRT; j++) {
-			hash_poly(&sha, c[i].c1[j]);
-			hash_poly(&sha, c[i].c2[j]);
-			hash_poly(&sha, p[i].c1[0][j]);
-			hash_poly(&sha, p[i].c2[SLOT_S][j]);
-			hash_poly(&sha, d[i].c1[j]);
-			hash_poly(&sha, d[i].c2[j]);
+			commit_hash_crt(&sha, c[i].c1[j]);
+			commit_hash_crt(&sha, c[i].c2[j]);
+			commit_hash_crt(&sha, p[i].c1[0][j]);
+			commit_hash_crt(&sha, p[i].c2[SLOT_S][j]);
+			commit_hash_crt(&sha, d[i].c1[j]);
+			commit_hash_crt(&sha, d[i].c2[j]);
 		}
 	}
-	hash_poly(&sha, tau);
-	hash_poly(&sha, rho);
+	commit_hash_poly(&sha, tau);
+	commit_hash_poly(&sha, rho);
 	SHA256Result(&sha, hash);
 
 	/* beta is public and must be reproducible by the verifier, so it is drawn

@@ -24,18 +24,6 @@
 /*============================================================================*/
 
 
-/* Absorb a polynomial into a hash by value. FLINT keeps an allocated capacity
- * that is unrelated to the value, so this walks DEGREE coefficients rather
- * than hashing the underlying buffer. */
-static void hash_poly(SHA256Context *sha, nmod_poly_t p) {
-	uint64_t buf[DEGREE];
-
-	for (int i = 0; i < DEGREE; i++) {
-		buf[i] = nmod_poly_get_coeff_ui(p, i);
-	}
-	SHA256Input(sha, (const uint8_t *)buf, sizeof(buf));
-}
-
 /* Inner product <b, x> over CRT-represented vectors. */
 static void inner(pcrt_poly_t out, pcrt_poly_t b[], pcrt_poly_t x[], int len) {
 	nmod_poly_t tmp;
@@ -120,6 +108,25 @@ void lnp_keygen(lnpkey_t *key) {
 			}
 		}
 	}
+
+	SHA256Context sha;
+
+	SHA256Reset(&sha);
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int j = 0; j < LNP_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				commit_hash_crt(&sha, key->B1[i][j][k]);
+			}
+		}
+	}
+	for (int i = 0; i < SLOTS; i++) {
+		for (int j = 0; j < LNP_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				commit_hash_crt(&sha, key->b2[i][j][k]);
+			}
+		}
+	}
+	SHA256Result(&sha, key->digest);
 }
 
 void lnp_com_init(lnpcom_t *com) {
@@ -304,13 +311,8 @@ static void proj_seed(uint8_t hash[SHA256HashSize], lnpkey_t *key,
 	SHA256Context sha;
 
 	SHA256Reset(&sha);
-	for (int i = 0; i < SLOTS; i++) {
-		for (int j = 0; j < LNP_WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->b2[i][j][k]);
-			}
-		}
-	}
+	/* Hash public key, through the digest lnp_keygen computed once. */
+	SHA256Input(&sha, key->digest, SHA256HashSize);
 	/* Only the Ajtai part and the slots the projection speaks about: the
 	 * witness, the projection mask and the constant-coefficient masks. The
 	 * garbage slots are deliberately left out. They are written by the product
@@ -321,18 +323,18 @@ static void proj_seed(uint8_t hash[SHA256HashSize], lnpkey_t *key,
 	 * and those slots are covered. */
 	for (int k = 0; k < NCRT; k++) {
 		for (int i = 0; i < HEIGHT; i++) {
-			hash_poly(&sha, com->c1[i][k]);
+			commit_hash_crt(&sha, com->c1[i][k]);
 		}
-		hash_poly(&sha, com->c2[SLOT_S][k]);
-		hash_poly(&sha, com->c2[SLOT_W][k]);
+		commit_hash_crt(&sha, com->c2[SLOT_S][k]);
+		commit_hash_crt(&sha, com->c2[SLOT_W][k]);
 		/* The batch masks live in their own commitment now, and the scalars
 		 * derived from this seed are exactly what they have to be fixed
 		 * before, so it has to bind them. */
 		for (int i = 0; i < HEIGHT; i++) {
-			hash_poly(&sha, mcom->c1[i][k]);
+			commit_hash_crt(&sha, mcom->c1[i][k]);
 		}
 		for (int i = 0; i < LNP_LAMBDA; i++) {
-			hash_poly(&sha, mcom->c2[i][k]);
+			commit_hash_crt(&sha, mcom->c2[i][k]);
 		}
 	}
 	SHA256Result(&sha, hash);
@@ -1533,36 +1535,31 @@ static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
 	nmod_poly_t c;
 
 	SHA256Reset(&sha);
-	for (int i = 0; i < SLOTS; i++) {
-		for (int j = 0; j < LNP_WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->b2[i][j][k]);
-			}
-		}
-	}
+	/* Hash public key, through the digest lnp_keygen computed once. */
+	SHA256Input(&sha, key->digest, SHA256HashSize);
 	for (int k = 0; k < NCRT; k++) {
 		for (int i = 0; i < HEIGHT; i++) {
-			hash_poly(&sha, com->c1[i][k]);
-			hash_poly(&sha, ajtai[i][k]);
-			hash_poly(&sha, tst_mcom.c1[i][k]);
-			hash_poly(&sha, tst_batch.w[i][k]);
+			commit_hash_crt(&sha, com->c1[i][k]);
+			commit_hash_crt(&sha, ajtai[i][k]);
+			commit_hash_crt(&sha, tst_mcom.c1[i][k]);
+			commit_hash_crt(&sha, tst_batch.w[i][k]);
 		}
 		for (int i = 0; i < SLOTS; i++) {
-			hash_poly(&sha, com->c2[i][k]);
+			commit_hash_crt(&sha, com->c2[i][k]);
 		}
 		for (int i = 0; i < LNP_LAMBDA; i++) {
-			hash_poly(&sha, tst_mcom.c2[i][k]);
-			hash_poly(&sha, tst_batch.h[i][k]);
-			hash_poly(&sha, tst_batch.v[i][k]);
+			commit_hash_crt(&sha, tst_mcom.c2[i][k]);
+			commit_hash_crt(&sha, tst_batch.h[i][k]);
+			commit_hash_crt(&sha, tst_batch.v[i][k]);
 		}
 		for (int i = 0; i < HEIGHT; i++) {
-			hash_poly(&sha, tst_gcom.c1[i][k]);
-			hash_poly(&sha, tst_batch.gw[i][k]);
+			commit_hash_crt(&sha, tst_gcom.c1[i][k]);
+			commit_hash_crt(&sha, tst_batch.gw[i][k]);
 		}
 		for (int i = 0; i < 2; i++) {
-			hash_poly(&sha, tst_gcom.c2[i][k]);
+			commit_hash_crt(&sha, tst_gcom.c2[i][k]);
 		}
-		hash_poly(&sha, tst_batch.T[k]);
+		commit_hash_crt(&sha, tst_batch.T[k]);
 	}
 	SHA256Input(&sha, (const uint8_t *)pi->zp, PROJ * sizeof(ulong));
 	SHA256Result(&sha, hash);
@@ -1603,19 +1600,18 @@ static void tst_rho_hash(pcrt_poly_t rho, lnpkey_t *key, lnpcom_t *com) {
 	SHA256Reset(&sha);
 	for (int k = 0; k < NCRT; k++) {
 		for (int i = 0; i < HEIGHT; i++) {
-			hash_poly(&sha, com->c1[i][k]);
-			hash_poly(&sha, tst_mcom.c1[i][k]);
+			commit_hash_crt(&sha, com->c1[i][k]);
+			commit_hash_crt(&sha, tst_mcom.c1[i][k]);
 		}
 		for (int i = 0; i < SLOTS; i++) {
-			hash_poly(&sha, com->c2[i][k]);
+			commit_hash_crt(&sha, com->c2[i][k]);
 		}
 		for (int i = 0; i < LNP_LAMBDA; i++) {
-			hash_poly(&sha, tst_mcom.c2[i][k]);
-		}
-		for (int i = 0; i < LNP_WIDTH; i++) {
-			hash_poly(&sha, key->b2[0][i][k]);
+			commit_hash_crt(&sha, tst_mcom.c2[i][k]);
 		}
 	}
+	/* Hash public key, through the digest lnp_keygen computed once. */
+	SHA256Input(&sha, key->digest, SHA256HashSize);
 	SHA256Result(&sha, hash);
 
 	/* Same shape as the opening challenge: NONZERO coefficients of +-1 in

@@ -88,6 +88,10 @@
 typedef struct _lnpkey_t {
 	pcrt_poly_t B1[HEIGHT][LNP_WIDTH];
 	pcrt_poly_t b2[SLOTS][LNP_WIDTH];
+	/* A hash of B1 and b2, set by lnp_keygen. Every Fiat-Shamir challenge
+	 * binds the key, and absorbing this instead of the matrices themselves
+	 * saves rehashing a constant on every attempt of every proof. */
+	uint8_t digest[SHA256HashSize];
 } lnpkey_t;
 
 /* The key and commitment holding the constant-coefficient masks. There is one
