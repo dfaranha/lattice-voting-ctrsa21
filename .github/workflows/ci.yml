@@ -23,8 +23,28 @@ jobs:
       - name: Build
         run: make
 
+      - name: Describe the runner
+        run: lscpu
+
       - name: Run tests
-        run: make test
+        run: |
+          # Keep a core file from any test binary that crashes, so that the
+          # next step can say where.
+          ulimit -c unlimited
+          sudo sysctl -w kernel.core_pattern="$PWD/core.%e.%p"
+          make test
+
+      - name: Backtrace of a crashed test binary
+        if: failure()
+        run: |
+          sudo apt-get install -y gdb
+          for c in core.*; do
+            [ -e "$c" ] || continue
+            b="${c#core.}"
+            b="${b%%.*}"
+            echo "== $b ($c)"
+            gdb -q -batch -ex bt "./$b" "$c"
+          done
 
   sanitizers:
     runs-on: ubuntu-latest
@@ -40,6 +60,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgmp-dev
+      - name: Describe the runner
+        run: lscpu
+
       - name: Run tests under AddressSanitizer and UndefinedBehaviorSanitizer
         run: |
           make CFLAGS="-O1 -g -march=native -pthread -DTESTS=5 \
