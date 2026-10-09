@@ -50,10 +50,10 @@ proof. This table is the reference for what each costs and what each is worth.
 
 | branch | modulus | `DEGREE` | `WIDTH` | `NONZERO` | proof, per message | MSIS binding | MLWE hiding | MLWE encryption | security level |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `master` | `2^31.86` | 1024 | 3 | 36 | 25.4 KB | 117.4 | 72.7 | 88.8 | **72.7** |
-| `fix-pkc` | `2^31.86` | 1024 | 3 | 36 | 41.4 KB | 117.4 | 72.7 | 88.8 | **72.7** |
-| `balanced-params` | `2^31.25` | 1024 | 4 | 20 | 46.4 KB | 132.9 | 191.6 | 159.7 | **132.9** |
-| `lnp` | `2^40` | 2048 | 3 | 18 | 135.1 KB | 327.0 | 140.2 | 326.2 | **140.2** |
+| `master` | `2^31.86` | 1024 | 3 | 36 | 25.3 KB | 117.4 | 72.7 | 88.8 | **72.7** |
+| `fix-pkc` | `2^31.86` | 1024 | 3 | 36 | 41.2 KB | 117.4 | 72.7 | 88.8 | **72.7** |
+| `balanced-params` | `2^31.25` | 1024 | 4 | 20 | 46.3 KB | 132.9 | 191.6 | 159.7 | **132.9** |
+| `lnp` | `2^40` | 2048 | 3 | 18 | 134.6 KB | 327.0 | 140.2 | 326.2 | **140.2** |
 
 Security is core-SVP bits, in the sense of Alkim-Ducas-Pöppelmann-Schwabe,
 computed with the `lattice-estimator`. The security level of a branch is the
@@ -80,7 +80,7 @@ not. `balanced-params` exists to fix this, and does, at `WIDTH = 4`.
 **`master` is the unpatched protocol.** Its proofs are the
 smallest in the table and establish the least: the attack of ePrint 2025/658
 breaks them, and the test suites on the patched branches demonstrate it
-succeeding. The 25.4 KB is a reference point, not a recommendation.
+succeeding. The 25.3 KB is a reference point, not a recommendation.
 
 **The sizes are measured, and the masked openings are entropy-coded.** A
 Gaussian coefficient used to be written at the width of its bound,
@@ -91,10 +91,10 @@ and brackets the byte count by it -- below a flat encoding, above the entropy
 
 | branch | achieved | flat | entropy | was | is |
 | --- | --- | --- | --- | --- | --- |
-| `master` | 17.86 | 20 | 17.77 | 27.0 KB | 25.4 KB |
-| `fix-pkc` | 17.09 | 19.20 | 17.00 | 44.0 KB | 41.4 KB |
-| `balanced-params` | 16.25 | 18.38 | 16.17 | 50.0 KB | 46.4 KB |
-| `lnp` | 20.26 | 21.93 | 20.15 | 137.0 KB | 135.1 KB |
+| `master` | 17.86 | 20 | 17.77 | 27.0 KB | 25.3 KB |
+| `fix-pkc` | 17.09 | 19.20 | 17.00 | 44.0 KB | 41.2 KB |
+| `balanced-params` | 16.25 | 18.38 | 16.17 | 50.0 KB | 46.3 KB |
+| `lnp` | 20.26 | 21.93 | 20.15 | 137.0 KB | 134.6 KB |
 
 The first three columns are bits a Gaussian coefficient, averaged over the
 widths a branch uses where it has more than one. Rice lands within about a
@@ -103,30 +103,32 @@ essentially the gap between the bound and the distribution, and how much of the
 proof is Gaussian rather than uniform: close to 6 per cent on every branch but
 `lnp`, where the projection and the batch masks make it 3. The "was" column
 is at the widths each branch had when the coding landed; `balanced-params` and
-`lnp` have since moved theirs, below.
+`lnp` have since moved theirs, below. The "is" column also no longer sends the
+last `s_i`, which no linear proof reads: one ring element fewer, about 4 KB a
+proof at `DEGREE = 1024` and 10 KB on `lnp`.
 
 **`fix-pkc` is what the patch costs.** Lemma 5 needs the permutation element
 committed and tied to the linear proof, which is one extra commitment and one
-extra opening per message: 25.4 KB becomes 41.4 KB, for the same parameters and
+extra opening per message: 25.3 KB becomes 41.2 KB, for the same parameters and
 therefore the same security.
 
 **`lnp` is the same patch with the membership proof actually proven.** Where
 `fix-pkc` establishes the set membership Lemma 5 needs by a norm bound, `lnp`
 proves the committed element is binary, which is the statement the lemma really
 requires. That needs the LNP machinery, a larger modulus, and a larger ring,
-and it costs 135.1 KB.
+and it costs 134.6 KB.
 
 **`DEGREE` is 2048 on `lnp` because the batch size became a security
 parameter.** One rejection test spans every message's response, so the masks
 widen as `sqrt(MSGS)` and the extractable opening widens with them. At
-`DEGREE = 1024` that puts binding at 129 bits for 25 messages and 100 for a
-thousand; at 2048 the same two are 303 and 243. Shuffling in blocks is not a
+`DEGREE = 1024` that puts binding at 140 bits for 25 messages and 109 for a
+thousand; at 2048 the same two are 327 and 261. Shuffling in blocks is not a
 way around this, because `MSGS` is the anonymity set, not merely a batch size.
 
 Every branch omits the first messages from the proof and carries the 32-byte
 Fiat-Shamir digest instead, the verifier recovering each first message from the
-equation that used to check it. That is worth 25 to 31 per cent and is already
-included above.
+equation that used to check it. That is worth 25 per cent on `lnp` and 30 to 33
+on the others, and is already included above.
 
 The CRT splitting of the commitment ring buys no speed. A `nocrt` branch did
 the same arithmetic on whole polynomials, and once master stopped hashing each
