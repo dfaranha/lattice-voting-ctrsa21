@@ -36,8 +36,10 @@ are forced to agree.
 
 Concretely, this changed the following:
 
-* The prover sends an extra list of commitments to the `sigma_i`, and the
-  verifier draws two challenges (`tau` for `X1`, `rho` for `X2`) instead of one.
+* The prover sends an extra list of commitments to the `sigma_i`, and there
+  are two challenges (`tau` for `X1`, `rho` for `X2`) instead of one. Both are
+  derived by Fiat-Shamir from the input commitments, the output list and the
+  `sigma_i` commitments, so prover and verifier compute them alike.
 * The linear proof relates three commitments instead of two. The factor
   `b_i = _m_i + sigma_i * tau - rho` is no longer public: its public part is
   folded into the additive term, and the committed `sigma_i` enters with the
