@@ -103,8 +103,11 @@ static void hash_poly(SHA256Context *sha, nmod_poly_t p) {
 static void challenge_from_hash(nmod_poly_t d[2],
 		const uint8_t hash[SHA256HashSize]) {
 	uint32_t buf;
+	/* A local stream, so that keying it with the public digest leaves the
+	 * global one that produces the secret masks untouched. */
+	prg_t prg;
 
-	fastrandombytes_setseed((uint8_t *) hash);
+	prg_setseed(&prg, (const uint8_t *) hash);
 	/* The two slots of d are reused as the halves of the challenge d[0] - d[1]
 	 * before being reduced into CRT components below, so this 2 belongs to the
 	 * challenge construction rather than to the CRT decomposition. */
@@ -112,10 +115,10 @@ static void challenge_from_hash(nmod_poly_t d[2],
 		nmod_poly_zero(d[i]);
 		nmod_poly_fit_length(d[i], DEGREE);
 		for (int j = 0; j < NONZERO; j++) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 			buf = buf % DEGREE;
 			while (nmod_poly_get_coeff_ui(d[i], buf) != 0) {
-				fastrandombytes((unsigned char *)&buf, sizeof(buf));
+				prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 				buf = buf % DEGREE;
 			}
 			nmod_poly_set_coeff_ui(d[i], buf, 1);

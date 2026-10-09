@@ -226,16 +226,19 @@ void vericrypt_sample_chall(fmpz_mod_poly_t f, uint8_t *seed, int len,
 		fmpz_mod_ctx_t *ctx) {
 	fmpz_t coeff;
 	uint32_t buf;
+	/* A local stream, so that keying it with the public hash leaves the global
+	 * one that produces the secret masks untouched. */
+	prg_t prg;
 
 	fmpz_init(coeff);
 	fmpz_mod_poly_zero(f, *ctx);
-	fastrandombytes_setseed(seed);
+	prg_setseed(&prg, seed);
 	for (int j = 0; j < NONZERO; j++) {
-		fastrandombytes((unsigned char *)&buf, sizeof(buf));
+		prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 		buf = buf % DEGREE;
 		fmpz_mod_poly_get_coeff_fmpz(coeff, f, buf, *ctx);
 		while (!fmpz_is_zero(coeff)) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 			buf = buf % DEGREE;
 			fmpz_mod_poly_get_coeff_fmpz(coeff, f, buf, *ctx);
 		}

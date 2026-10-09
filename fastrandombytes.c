@@ -3,11 +3,14 @@
  */
 
 #include "fastrandombytes.h"
+#include "randombytes.h"
 #include <string.h>
 #include <x86intrin.h>
 
-static __m128i round_key[15];
-static __m128i iv;
+static prg_t global;
+static int global_seeded = 0;
+/* The counter is incremented as a 64-bit lane, so it wraps only after 2^64
+ * blocks; a 32-bit add would repeat the keystream after 2^32. */
 static const __m128i ONE = { 1, 0 };
 
 static inline void KEY_256_ASSIST_1(__m128i *temp1, __m128i *temp2) {
@@ -35,12 +38,13 @@ static inline void KEY_256_ASSIST_2(__m128i *temp1, __m128i *temp3) {
 	*temp3 = _mm_xor_si128(*temp3, temp2);
 }
 
-/* round_key <-- aes256_key_expansion(randomness), iv <-- 0 */
-void fastrandombytes_setseed(const unsigned char *randomness) {
+/* round_key <-- aes256_key_expansion(seed), iv <-- 0 */
+void prg_setseed(prg_t *prg, const unsigned char *seed) {
+	__m128i *round_key = prg->round_key;
 	__m128i temp1, temp2, temp3;
 
-	temp1 = _mm_loadu_si128((__m128i *) randomness);
-	temp3 = _mm_loadu_si128((__m128i *) (randomness + 16));
+	temp1 = _mm_loadu_si128((__m128i *) seed);
+	temp3 = _mm_loadu_si128((__m128i *) (seed + 16));
 	round_key[0] = temp1;
 	round_key[1] = temp3;
 	temp2 = _mm_aeskeygenassist_si128(temp3, 0x01);
@@ -77,13 +81,14 @@ void fastrandombytes_setseed(const unsigned char *randomness) {
 	KEY_256_ASSIST_1(&temp1, &temp2);
 	round_key[14] = temp1;
 
-	iv = _mm_setzero_si128();
+	prg->iv = _mm_setzero_si128();
 }
 
-static inline void AES_ctr_round(unsigned char *out) {
+static inline void AES_ctr_round(prg_t *prg, unsigned char *out) {
+	const __m128i *round_key = prg->round_key;
 	__m128i tmp;
 
-	tmp = _mm_xor_si128(iv, round_key[0]);
+	tmp = _mm_xor_si128(prg->iv, round_key[0]);
 	tmp = _mm_aesenc_si128(tmp, round_key[1]);
 	tmp = _mm_aesenc_si128(tmp, round_key[2]);
 	tmp = _mm_aesenc_si128(tmp, round_key[3]);
@@ -100,22 +105,38 @@ static inline void AES_ctr_round(unsigned char *out) {
 	tmp = _mm_aesenclast_si128(tmp, round_key[14]);
 	_mm_storeu_si128((__m128i *) out, tmp);
 
-	iv = _mm_add_epi32(iv, ONE);
+	prg->iv = _mm_add_epi64(prg->iv, ONE);
 }
 
 /* r <-- aes256_ctr(round_key, iv, rlen) */
-void fastrandombytes(unsigned char *r, unsigned long long rlen) {
+void prg_bytes(prg_t *prg, unsigned char *r, unsigned long long rlen) {
 	unsigned char ct[16];
 	unsigned long long num_of_blocks = rlen >> 4;
 	unsigned long long i;
 
 	for (i = 0; i < num_of_blocks; i++) {
-		AES_ctr_round(r + (i << 4));
+		AES_ctr_round(prg, r + (i << 4));
 	}
 
 	if (rlen & 0x0f) {
-		AES_ctr_round(ct);
+		AES_ctr_round(prg, ct);
 
 		memcpy(r + (i << 4), ct, rlen & 0x0f);
 	}
+}
+
+void fastrandombytes_setseed(const unsigned char *randomness) {
+	prg_setseed(&global, randomness);
+	global_seeded = 1;
+}
+
+void fastrandombytes(unsigned char *r, unsigned long long rlen) {
+	if (!global_seeded) {
+		unsigned char seed[32];
+
+		randombytes(seed, sizeof(seed));
+		fastrandombytes_setseed(seed);
+		memset(seed, 0, sizeof(seed));
+	}
+	prg_bytes(&global, r, rlen);
 }
