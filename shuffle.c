@@ -107,27 +107,6 @@ static int is_invertible(nmod_poly_t a) {
 }
 
 /**
- * Absorb a polynomial into a hash computation in a canonical way.
- *
- * The coefficients are absorbed one by one up to DEGREE, so that the digest
- * depends only on the value of the polynomial. Absorbing the raw coefficient
- * array instead makes the digest depend on the capacity FLINT happens to have
- * allocated, which is a function of how the polynomial was built and therefore
- * need not agree between the prover and the verifier.
- *
- * @param[in,out] sha		- the hash context.
- * @param[in] p				- the polynomial to absorb.
- */
-static void hash_poly(SHA256Context *sha, nmod_poly_t p) {
-	uint64_t buf[DEGREE];
-
-	for (int i = 0; i < DEGREE; i++) {
-		buf[i] = nmod_poly_get_coeff_ui(p, i);
-	}
-	SHA256Input(sha, (const uint8_t *)buf, sizeof(buf));
-}
-
-/**
  * Sample a uniformly random double in [0, 1) with 53 bits of precision.
  *
  * Rejection sampling must not reuse the Fiat-Shamir stream, so this draws from
@@ -241,36 +220,27 @@ void lin_hash(nmod_poly_t d[2], commitkey_t *key, commit_t x, commit_t p,
 
 	SHA256Reset(&sha);
 
-	/* Hash public key. */
-	for (int i = 0; i < HEIGHT; i++) {
-		for (int j = 0; j < WIDTH; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				hash_poly(&sha, key->B1[i][j][k]);
-				if (i == 0) {
-					hash_poly(&sha, key->b2[j][k]);
-				}
-			}
-		}
-	}
+	/* Hash public key, through the digest commit_keygen computed once. */
+	SHA256Input(&sha, key->digest, SHA256HashSize);
 
 	/* Hash alpha, gamma, beta from linear relation. */
-	hash_poly(&sha, alpha);
-	hash_poly(&sha, gamma);
-	hash_poly(&sha, beta);
+	commit_hash_poly(&sha, alpha);
+	commit_hash_poly(&sha, gamma);
+	commit_hash_poly(&sha, beta);
 
 	/* Hash [x], [p], [x'], t, t_p, t' in CRT representation. */
 	for (int i = 0; i < NCRT; i++) {
-		hash_poly(&sha, x.c1[i]);
-		hash_poly(&sha, x.c2[i]);
-		hash_poly(&sha, p.c1[i]);
-		hash_poly(&sha, p.c2[i]);
-		hash_poly(&sha, y.c1[i]);
-		hash_poly(&sha, y.c2[i]);
-		hash_poly(&sha, u[i]);
-		hash_poly(&sha, t[i]);
-		hash_poly(&sha, tp[i]);
-		hash_poly(&sha, _t[i]);
-		hash_poly(&sha, vs[i]);
+		commit_hash_crt(&sha, x.c1[i]);
+		commit_hash_crt(&sha, x.c2[i]);
+		commit_hash_crt(&sha, p.c1[i]);
+		commit_hash_crt(&sha, p.c2[i]);
+		commit_hash_crt(&sha, y.c1[i]);
+		commit_hash_crt(&sha, y.c2[i]);
+		commit_hash_crt(&sha, u[i]);
+		commit_hash_crt(&sha, t[i]);
+		commit_hash_crt(&sha, tp[i]);
+		commit_hash_crt(&sha, _t[i]);
+		commit_hash_crt(&sha, vs[i]);
 	}
 
 	SHA256Result(&sha, hash);
@@ -639,12 +609,12 @@ static void shuffle_challenges(nmod_poly_t tau, nmod_poly_t rho,
 		SHA256Input(&sha, (const uint8_t *)"tau,rho", 7);
 		SHA256Input(&sha, &ctr, 1);
 		for (int i = 0; i < MSGS; i++) {
-			hash_poly(&sha, _m[i]);
+			commit_hash_poly(&sha, _m[i]);
 			for (int j = 0; j < NCRT; j++) {
-				hash_poly(&sha, com[i].c1[j]);
-				hash_poly(&sha, com[i].c2[j]);
-				hash_poly(&sha, p[i].c1[j]);
-				hash_poly(&sha, p[i].c2[j]);
+				commit_hash_crt(&sha, com[i].c1[j]);
+				commit_hash_crt(&sha, com[i].c2[j]);
+				commit_hash_crt(&sha, p[i].c1[j]);
+				commit_hash_crt(&sha, p[i].c2[j]);
 			}
 		}
 		SHA256Result(&sha, hash);
@@ -670,18 +640,18 @@ void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t p[MSGS],
 	SHA256Reset(&sha);
 
 	for (int i = 0; i < MSGS; i++) {
-		hash_poly(&sha, _m[i]);
+		commit_hash_poly(&sha, _m[i]);
 		for (int j = 0; j < NCRT; j++) {
-			hash_poly(&sha, c[i].c1[j]);
-			hash_poly(&sha, c[i].c2[j]);
-			hash_poly(&sha, p[i].c1[j]);
-			hash_poly(&sha, p[i].c2[j]);
-			hash_poly(&sha, d[i].c1[j]);
-			hash_poly(&sha, d[i].c2[j]);
+			commit_hash_crt(&sha, c[i].c1[j]);
+			commit_hash_crt(&sha, c[i].c2[j]);
+			commit_hash_crt(&sha, p[i].c1[j]);
+			commit_hash_crt(&sha, p[i].c2[j]);
+			commit_hash_crt(&sha, d[i].c1[j]);
+			commit_hash_crt(&sha, d[i].c2[j]);
 		}
 	}
-	hash_poly(&sha, tau);
-	hash_poly(&sha, rho);
+	commit_hash_poly(&sha, tau);
+	commit_hash_poly(&sha, rho);
 	SHA256Result(&sha, hash);
 
 	/* beta is public and must be reproducible by the verifier, so it is drawn

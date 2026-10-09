@@ -46,8 +46,8 @@ gaussian_s.o: gaussian_ct.cpp fastrandombytes.h ${INCLUDES}
 encrypt.o: encrypt.c encrypt.h ${INCLUDES}
 	${CPP} ${CFLAGS} -c encrypt.c -o $@
 
-commit: commit.c commit.h ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
-	${CPP} ${CFLAGS} -DMAIN commit.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
+commit: commit.c commit.h sha224-256.c ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
+	${CPP} ${CFLAGS} -DMAIN commit.c sha224-256.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
 encrypt: encrypt.c encrypt.h ${TEST} ${BENCH} ${INCLUDES}
 	${CPP} ${CFLAGS} -DMAIN encrypt.c ${TEST} ${BENCH} -o $@ ${LIBS}
