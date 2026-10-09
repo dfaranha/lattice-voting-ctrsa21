@@ -32,47 +32,47 @@ bench: all
 # time, so each width needs its own object file. Sharing a single gaussian.o
 # between targets made a parallel build race on that file, and could link a
 # sampler of the wrong width into a binary.
-gaussian_c.o: gaussian_ct.cpp ${INCLUDES}
+gaussian_c.o: gaussian_ct.cpp fastrandombytes.h ${INCLUDES}
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_C -c gaussian_ct.cpp -o $@
 
-gaussian_e.o: gaussian_ct.cpp ${INCLUDES}
+gaussian_e.o: gaussian_ct.cpp fastrandombytes.h ${INCLUDES}
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_E -c gaussian_ct.cpp -o $@
 
 # The proof of shuffle also masks the committed permutation elements, with a
 # much narrower Gaussian. Renaming the entry point lets both widths be linked
 # into the same binary.
-gaussian_s.o: gaussian_ct.cpp ${INCLUDES}
+gaussian_s.o: gaussian_ct.cpp fastrandombytes.h ${INCLUDES}
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_S \
 		-Ddiscrete_gaussian=discrete_gaussian_small -c gaussian_ct.cpp -o $@
 
 # The approximate range proof masks a 256-coordinate projection, which wants a
 # width between the two above.
-gaussian_p.o: gaussian_ct.cpp ${INCLUDES}
+gaussian_p.o: gaussian_ct.cpp fastrandombytes.h ${INCLUDES}
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_P \
 		-Ddiscrete_gaussian=discrete_gaussian_proj -c gaussian_ct.cpp -o $@
 
 # The batched proof shares one challenge across all messages, so its masks are
 # wider; see SIGMA_B in param.h.
-gaussian_b.o: gaussian_ct.cpp ${INCLUDES}
+gaussian_b.o: gaussian_ct.cpp fastrandombytes.h ${INCLUDES}
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_B \
 		-Ddiscrete_gaussian=discrete_gaussian_batch -c gaussian_ct.cpp -o $@
 
 encrypt.o: encrypt.c encrypt.h ${INCLUDES}
 	${CPP} ${CFLAGS} -c encrypt.c -o $@
 
-commit: commit.c commit.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_b.o
+commit: commit.c commit.h ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_b.o
 	${CPP} ${CFLAGS} -DMAIN commit.c gaussian_c.o gaussian_s.o gaussian_b.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
 encrypt: encrypt.c encrypt.h ${TEST} ${BENCH} ${INCLUDES}
 	${CPP} ${CFLAGS} -DMAIN encrypt.c ${TEST} ${BENCH} -o $@ ${LIBS}
 
-vericrypt: vericrypt.c encrypt.o ${TEST} ${BENCH} ${INCLUDES} gaussian_e.o
+vericrypt: vericrypt.c encrypt.o sha224-256.c ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_e.o
 	${CPP} ${CFLAGS} -DMAIN vericrypt.c encrypt.o sha224-256.c gaussian_e.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
-shuffle: shuffle.c commit.c commit.h lnp.c lnp.h serial.c serial.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o
+shuffle: shuffle.c commit.c commit.h lnp.c lnp.h serial.c serial.h sha224-256.c ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o
 	${CPP} ${CFLAGS} commit.c lnp.c serial.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
-lnp: lnp.c lnp.h commit.c commit.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o
+lnp: lnp.c lnp.h commit.c commit.h sha224-256.c ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o
 	${CPP} ${CFLAGS} -DLNP_MAIN commit.c lnp.c sha224-256.c gaussian_c.o gaussian_s.o gaussian_p.o gaussian_b.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
 clean:

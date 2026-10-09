@@ -226,18 +226,21 @@ void vericrypt_hash(uint8_t hash[SHA256HashSize], publickey_t *pk,
 
 void vericrypt_sample_chall(fmpz_mod_poly_t f, uint8_t *seed, int len,
 		fmpz_mod_ctx_t *ctx) {
+	/* A local stream: keying the global one with public data would expose
+	 * the masks that the Gaussian sampler draws from it. */
+	prg_t prg;
 	fmpz_t coeff;
 	uint32_t buf;
 
 	fmpz_init(coeff);
 	fmpz_mod_poly_zero(f, *ctx);
-	fastrandombytes_setseed(seed);
+	prg_setseed(&prg, seed);
 	for (int j = 0; j < NONZERO; j++) {
-		fastrandombytes((unsigned char *)&buf, sizeof(buf));
+		prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 		buf = buf % DEGREE;
 		fmpz_mod_poly_get_coeff_fmpz(coeff, f, buf, *ctx);
 		while (!fmpz_is_zero(coeff)) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 			buf = buf % DEGREE;
 			fmpz_mod_poly_get_coeff_fmpz(coeff, f, buf, *ctx);
 		}

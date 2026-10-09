@@ -217,6 +217,9 @@ static size_t proof_bytes = 0;
 static void rho_hash(nmod_poly_t rho[MSGS][2], commitkey_t *key,
 		lnpkey_t *lkey, commit_t com[MSGS], lnpcom_t p[MSGS],
 		lnpmaskcom_t *mcom) {
+	/* A local stream: keying the global one with public data would expose
+	 * the masks that the Gaussian sampler draws from it. */
+	prg_t prg;
 	SHA256Context sha;
 	uint8_t hash[SHA256HashSize];
 	uint32_t buf;
@@ -260,15 +263,15 @@ static void rho_hash(nmod_poly_t rho[MSGS][2], commitkey_t *key,
 	/* Same shape as the opening challenge, so that differences of distinct
 	 * challenges are short enough for Lemma 1 to make them invertible. */
 	nmod_poly_init(c, MODP);
-	fastrandombytes_setseed(hash);
+	prg_setseed(&prg, hash);
 	for (int l = 0; l < MSGS; l++) {
 		nmod_poly_zero(c);
 		nmod_poly_fit_length(c, DEGREE);
 		for (int i = 0; i < NONZERO; i++) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 			buf = buf % DEGREE;
 			while (nmod_poly_get_coeff_ui(c, buf) != 0) {
-				fastrandombytes((unsigned char *)&buf, sizeof(buf));
+				prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 				buf = buf % DEGREE;
 			}
 			nmod_poly_set_coeff_ui(c, buf, 1);
@@ -285,17 +288,20 @@ static void rho_hash(nmod_poly_t rho[MSGS][2], commitkey_t *key,
  * verification equations, and re-derives the digest to check it matches. */
 static void challenge_from_hash(nmod_poly_t d[2],
 		const uint8_t hash[SHA256HashSize]) {
+	/* A local stream: keying the global one with public data would expose
+	 * the masks that the Gaussian sampler draws from it. */
+	prg_t prg;
 	uint32_t buf;
 
-	fastrandombytes_setseed((uint8_t *) hash);
+	prg_setseed(&prg, hash);
 	for (int i = 0; i < 2; i++) {
 		nmod_poly_zero(d[i]);
 		nmod_poly_fit_length(d[i], DEGREE);
 		for (int j = 0; j < NONZERO; j++) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 			buf = buf % DEGREE;
 			while (nmod_poly_get_coeff_ui(d[i], buf) != 0) {
-				fastrandombytes((unsigned char *)&buf, sizeof(buf));
+				prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 				buf = buf % DEGREE;
 			}
 			nmod_poly_set_coeff_ui(d[i], buf, 1);

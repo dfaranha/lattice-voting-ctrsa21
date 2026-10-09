@@ -339,10 +339,10 @@ static void proj_seed(uint8_t hash[SHA256HashSize], lnpkey_t *key,
 }
 
 /* Draw the next row of the projection matrix: DEGREE signs, one bit each. */
-static void proj_row(int8_t row[DEGREE]) {
+static void proj_row(prg_t *prg, int8_t row[DEGREE]) {
 	uint8_t buf[DEGREE / 8];
 
-	fastrandombytes(buf, sizeof(buf));
+	prg_bytes(prg, buf, sizeof(buf));
 	for (int i = 0; i < DEGREE; i++) {
 		row[i] = ((buf[i >> 3] >> (i & 7)) & 1) ? 1 : -1;
 	}
@@ -352,6 +352,9 @@ static void proj_row(int8_t row[DEGREE]) {
  * published, so that the masks committed earlier cannot be adapted to them. */
 static void proj_scalars(ulong mu[LNP_LAMBDA][PROJ], ulong nu[LNP_LAMBDA],
 		uint8_t seed[SHA256HashSize], ulong z[PROJ]) {
+	/* A local stream: keying the global one with public data would expose
+	 * the masks that the Gaussian sampler draws from it. */
+	prg_t prg;
 	SHA256Context sha;
 	uint8_t hash[SHA256HashSize];
 	uint64_t buf;
@@ -361,17 +364,17 @@ static void proj_scalars(ulong mu[LNP_LAMBDA][PROJ], ulong nu[LNP_LAMBDA],
 	SHA256Input(&sha, (const uint8_t *)z, PROJ * sizeof(ulong));
 	SHA256Result(&sha, hash);
 
-	fastrandombytes_setseed(hash);
+	prg_setseed(&prg, hash);
 	for (int j = 0; j < LNP_LAMBDA; j++) {
 		for (int i = 0; i < PROJ; i++) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 			mu[j][i] = buf % MODP;
 		}
 		/* One more scalar per mask, weighting the constant-coefficient claim
 		 * that used to be a separate proof. Folding it in here is what lets a
 		 * single set of masks cover both, which is also what stops the two
 		 * from sharing a mask and cancelling it. */
-		fastrandombytes((unsigned char *)&buf, sizeof(buf));
+		prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 		nu[j] = buf % MODP;
 	}
 }
@@ -387,17 +390,20 @@ static void proj_scalars(ulong mu[LNP_LAMBDA][PROJ], ulong nu[LNP_LAMBDA],
  */
 static void proj_pass(uint8_t seed[SHA256HashSize], ulong *raw,
 		ulong mu[LNP_LAMBDA][PROJ], nmod_poly_t sc, ulong *rs) {
+	/* A local stream: keying the global one with public data would expose
+	 * the masks that the Gaussian sampler draws from it. */
+	prg_t prg;
 	int8_t row[DEGREE];
 	nmod_t mod;
 
 	nmod_init(&mod, MODP);
 
-	fastrandombytes_setseed(seed);
+	prg_setseed(&prg, seed);
 	if (raw != NULL) {
 		memset(raw, 0, (size_t) LNP_LAMBDA * DEGREE * sizeof(ulong));
 	}
 	for (int i = 0; i < PROJ; i++) {
-		proj_row(row);
+		proj_row(&prg, row);
 		if (sc != NULL) {
 			/* Centred coefficients are below 2^39 and there are DEGREE of
 			 * them, so this signed accumulation cannot overflow. */
@@ -1490,17 +1496,20 @@ static void tst_setup(flint_rand_t rng) {
  * before the first messages exist, exactly as the shuffle's verifier does. */
 static void challenge_from_digest(pcrt_poly_t d,
 		const uint8_t hash[SHA256HashSize]) {
+	/* A local stream: keying the global one with public data would expose
+	 * the masks that the Gaussian sampler draws from it. */
+	prg_t prg;
 	nmod_poly_t c;
 	uint32_t buf;
 
 	nmod_poly_init(c, MODP);
-	fastrandombytes_setseed((uint8_t *) hash);
+	prg_setseed(&prg, hash);
 	nmod_poly_fit_length(c, DEGREE);
 	for (int i = 0; i < NONZERO; i++) {
-		fastrandombytes((unsigned char *)&buf, sizeof(buf));
+		prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 		buf = buf % DEGREE;
 		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 			buf = buf % DEGREE;
 		}
 		nmod_poly_set_coeff_ui(c, buf, 1);
@@ -1512,6 +1521,9 @@ static void challenge_from_digest(pcrt_poly_t d,
 
 static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
 		lnpbinproof_t *pi, pcrt_poly_t ajtai[HEIGHT], uint8_t *digest) {
+	/* A local stream: keying the global one with public data would expose
+	 * the masks that the Gaussian sampler draws from it. */
+	prg_t prg;
 	SHA256Context sha;
 	uint8_t hash[SHA256HashSize];
 	uint32_t buf;
@@ -1556,13 +1568,13 @@ static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
 	}
 
 	nmod_poly_init(c, MODP);
-	fastrandombytes_setseed(hash);
+	prg_setseed(&prg, hash);
 	nmod_poly_fit_length(c, DEGREE);
 	for (int i = 0; i < NONZERO; i++) {
-		fastrandombytes((unsigned char *)&buf, sizeof(buf));
+		prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 		buf = buf % DEGREE;
 		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 			buf = buf % DEGREE;
 		}
 		nmod_poly_set_coeff_ui(c, buf, 1);
@@ -1576,6 +1588,9 @@ static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
  * because the garbage terms are weighted by it, and before the garbage terms
  * are committed, because a prover that knew it could adapt them. */
 static void tst_rho_hash(pcrt_poly_t rho, lnpkey_t *key, lnpcom_t *com) {
+	/* A local stream: keying the global one with public data would expose
+	 * the masks that the Gaussian sampler draws from it. */
+	prg_t prg;
 	SHA256Context sha;
 	uint8_t hash[SHA256HashSize];
 	nmod_poly_t c;
@@ -1602,15 +1617,15 @@ static void tst_rho_hash(pcrt_poly_t rho, lnpkey_t *key, lnpcom_t *com) {
 	 * Differences of distinct challenges are then short enough for Lemma 1 to
 	 * make them invertible, which is what the aggregation needs. */
 	nmod_poly_init(c, MODP);
-	fastrandombytes_setseed(hash);
+	prg_setseed(&prg, hash);
 	nmod_poly_fit_length(c, DEGREE);
 	for (int i = 0; i < NONZERO; i++) {
 		uint32_t buf;
 
-		fastrandombytes((unsigned char *)&buf, sizeof(buf));
+		prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 		buf = buf % DEGREE;
 		while (nmod_poly_get_coeff_ui(c, buf) != 0) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 			buf = buf % DEGREE;
 		}
 		nmod_poly_set_coeff_ui(c, buf, 1);
