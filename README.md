@@ -73,7 +73,7 @@ sub-proof of `is_bin(sigma_i)` delegated to a general-purpose lattice proof
 system (LaZer), which has no counterpart in this code base.
 
 Binary coefficients are more than the lemma needs. By Lemma 1, any element of
-l2-norm below `MODP^(1/2) ~ 62501` is invertible, so taking `D` to be a ball of
+l2-norm below `MODP^(1/2) ~ 50535` is invertible, so taking `D` to be a ball of
 small norm satisfies the requirement, and shortness is exactly what
 Fiat-Shamir-with-aborts proves natively. The linear proof therefore masks the
 committed message with a narrow Gaussian (`SIGMA_S`, see `param.h`) and the
@@ -85,9 +85,9 @@ exactly. The budget is tight and this is what makes it comfortable:
 
 | quantity | value |
 | --- | --- |
-| invertibility ceiling `MODP^(1/2)` | 62501 |
-| extracted `||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S)` | 32768 |
-| masking ratio `SIGMA_S / ||d * sigma_i||` | ~43 |
+| invertibility ceiling `MODP^(1/2)` | 50535 |
+| extracted `||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S)` | 12416 |
+| masking ratio `SIGMA_S / ||d * sigma_i||` | ~21.7 |
 
 A binary encoding would also fit at `N = 25`, but with a factor of about 1.3 to
 spare, and it degrades as `N` grows, since `||sigma_i||_1` grows with the

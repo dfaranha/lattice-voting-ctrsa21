@@ -13,7 +13,7 @@
  * where there is nothing to exploit. A Gaussian one is not: writing it at the
  * width of its bound, ceil(log2 12 sigma), spends the difference between that
  * bound and the distribution's entropy, which is log2(sigma sqrt(2 pi e)). At
- * SIGMA_C that is 20 bits against 17.8. So a Gaussian coefficient is zigzagged
+ * SIGMA_C that is 19 bits against 16.8. So a Gaussian coefficient is zigzagged
  * and Golomb-Rice coded about its own width instead, which costs about half a
  * bit above the entropy.
  *

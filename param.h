@@ -78,19 +78,25 @@
  * the commitment randomness that gets verifiably encrypted. */
 #define VECTOR 	WIDTH
 
-/* Standard deviation for discrete Gaussians masking the commitment randomness,
- * following the code's own convention SIGMA_C = 27.06 * NONZERO * sqrt(WIDTH *
- * DEGREE), which is about 1.23 times the bound in Table 1. */
-#define SIGMA_C 34641
+/* Standard deviation for discrete Gaussians masking the commitment randomness.
+ * A challenge d has NONZERO coefficients of +-1, so for ternary randomness r
+ * the shift is ||d * r|| <= T = NONZERO * BETA * sqrt(WIDTH * DEGREE) = 1280.
+ * Rejection sampling at the code's M = 1.75 keeps the statistical distance at
+ * 2^-100 when alpha = SIGMA_C / T satisfies M >= exp(12 / alpha +
+ * 1 / (2 * alpha^2)), that is alpha >= 21.485. So SIGMA_C = ceil(21.485 *
+ * NONZERO * sqrt(WIDTH * DEGREE)), the smallest width that keeps the bound,
+ * and alpha = 21.485. The constant takes the place of 11 in Table 1. */
+#define SIGMA_C 27501
 /* Standard deviation for the Gaussian masking the committed permutation
  * elements sigma_i of Lemma 5. These are monomials, so ||d * sigma_i|| equals
- * ||d|| = sqrt(NONZERO) ~ 4.5 exactly for a challenge d with NONZERO
- * coefficients of +-1, and SIGMA_S = 190 leaves a ratio of about 42 for the
- * rejection sampling. It must also stay small enough that the
- * extracted ||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S) = 24320
- * remains below sqrt(MODP / 2) ~ 35735, the bound under which Lemma 1
+ * ||d|| = sqrt(NONZERO) ~ 4.47 exactly for a challenge d with NONZERO
+ * coefficients of +-1, and SIGMA_S = ceil(21.485 * sqrt(NONZERO)) = 97 is the
+ * smallest width that keeps the same 2^-100 bound at M = 1.75, at a ratio of
+ * about 21.7. It must also stay small enough that the
+ * extracted ||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S) = 12416
+ * remains below sqrt(MODP / 2) ~ 35734, the bound under which Lemma 1
  * guarantees invertibility. */
-#define SIGMA_S 190
+#define SIGMA_S 97
 /* Standard deviation of the discrete Gaussian in the verifiable encryption.
  * Table 1 puts this at 11 * NONZERO * sqrt(VECTOR * DEGREE * (3 + BETA)) =
  * 28160, so the value below is conservative; it is kept unchanged because the

@@ -68,8 +68,8 @@ the tight constraint after `WIDTH` grows, `p` stays roughly where it was.
 | `WIDTH` | 3 | 4 |
 | `NONZERO` | 36 | 20 |
 | `MODP` | 3906450253 (2^31.86) | 2553802997 (2^31.25) |
-| `SIGMA_C` | 54000 | 34641 |
-| `SIGMA_S` | 256 | 190 |
+| `SIGMA_C` | 54000 | 27501 |
+| `SIGMA_S` | 256 | 97 |
 | `DIM` | 2 | 3 (now derived as `WIDTH - HEIGHT`) |
 | `VECTOR` | 3 | 4 (now derived as `WIDTH`) |
 | `Q` | 2^56 | 36028797018964429 (2^55) |
@@ -85,10 +85,28 @@ the explicit `sqrt(nu)`), so cutting `nu` from 36 improves binding and shrinks
 the responses at the same time. At 36 the challenge space was `2^257.0`, far more
 than soundness needs.
 
-`SIGMA_S = 190` rather than the size-optimal 76: the Lemma 1 floor at this `p`
-is `2^30.14`, well below `p`, so the headroom is free, and the wider Gaussian
-keeps the rejection-sampling cost at today's 3.07 expected repetitions instead
-of 5.6.
+Both Gaussian widths are the smallest that rejection sampling at the code's
+`M = 1.75` allows. Lyubashevsky's bound keeps the statistical distance at
+`2^-100` when `M >= exp(12 / alpha + 1 / (2 alpha^2))` for `alpha = sigma /
+T`, where `T` bounds the norm of the shift being masked; at `M = 1.75` that
+is `alpha >= 21.485`. The challenge `d` has `nu` coefficients of `+-1`, so:
+
+- `SIGMA_C = ceil(21.485 * nu * sqrt(k * N)) = 27501`, since `||d * r|| <=
+  nu * BETA * sqrt(k * N) = 1280` for ternary `r`. This replaces the 11 of
+  Table 1, which is not enough for `M = 1.75`, and the 27.06 the code used to
+  carry over by rescaling the paper's 54000, which left 21 % of slack.
+- `SIGMA_S = ceil(21.485 * sqrt(nu)) = 97`, since the `sigma_i` are monomials
+  and `||d * sigma_i|| = ||d|| = sqrt(nu)`. The Lemma 1 floor on `p` is then
+  `32 * N * SIGMA_S^2 = 2^28.20`, well below `p`.
+
+Narrowing the widths does not change the prover's running time. A rejection
+test whose ratio stays below `M` accepts with probability `1 / M` whatever
+`alpha` is, and the linear proof of the shuffle runs four of them (the three
+`SIGMA_C` masks and the `SIGMA_S` one) and repeats until all four accept, so
+it expects `M^4 = 9.38` repetitions either way. Instrumenting `lin_prover`
+over 150 linear proofs gave 10.05 repetitions and a per-test acceptance rate
+of 0.576 at these widths, against 9.09 and 0.563 at the previous 34641 and
+190, both consistent with `1 / M = 0.571`.
 
 `SIGMA_E` is left at 54000. Table 1 would allow 28160 at these dimensions, but
 the decryption bound in `vericrypt.c` has not been re-derived for a smaller
@@ -100,12 +118,18 @@ value, and 54000 is the conservative direction.
 | --- | --- | --- | --- |
 | | core-SVP | core-SVP | MATZOV |
 | MLWE, commitment hiding | 72 | **186** | 210 |
-| MSIS, commitment binding | 117 | **128** | 155 |
+| MSIS, commitment binding | 117 | **133** | 159 |
 | MLWE, encryption | 89 | **157** | 184 |
 
-Cost: the shuffle proof grows from 65.5 KB to 71.7 KB per message, about 9 %,
-and a ciphertext grows by one ring element. Prover time is unchanged, since the
-rejection-sampling rate is held at 3.07.
+Binding is 132.9 core-SVP (159.2 MATZOV), against 128.2 (154.7) at the
+previous `SIGMA_C = 34641`: the narrower width shrinks the MSIS bound
+`16 * SIGMA_C * sqrt(nu * N)` from `2^26.24` to `2^25.91`.
+
+Cost: the shuffle proof is 46.4 KB per message at `MSGS = 25` (1188970 bytes,
+measured by the serialisation test, at 16.25 bits a Gaussian coefficient),
+against 47.1 KB at the previous widths, and a ciphertext grows by one ring
+element. Prover time is unchanged: the linear proof expects `M^4 = 9.38`
+repetitions whatever the widths are.
 
 ## Caveats
 
