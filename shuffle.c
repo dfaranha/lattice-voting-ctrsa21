@@ -74,9 +74,12 @@ int rej_sampling(nmod_poly_t z[WIDTH], nmod_poly_t v[WIDTH], uint64_t s2) {
  * that used to check it, and re-derives the digest to confirm it matches. */
 static void challenge_from_hash(nmod_poly_t d,
 		const uint8_t hash[SHA256HashSize]) {
+	/* A local stream: keying the global one with public data would expose
+	 * the masks that the Gaussian sampler draws from it. */
+	prg_t prg;
 	uint32_t buf;
 
-	fastrandombytes_setseed((uint8_t *) hash);
+	prg_setseed(&prg, hash);
 	/* The challenge is the difference of two polynomials with NONZERO ones.
 	 * The 2 here belongs to that construction, not to any CRT splitting. */
 	nmod_poly_t c[2];
@@ -84,10 +87,10 @@ static void challenge_from_hash(nmod_poly_t d,
 		nmod_poly_init(c[i], MODP);
 		nmod_poly_fit_length(c[i], DEGREE);
 		for (int j = 0; j < NONZERO; j++) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 			buf = buf % DEGREE;
 			while (nmod_poly_get_coeff_ui(c[i], buf) != 0) {
-				fastrandombytes((unsigned char *)&buf, sizeof(buf));
+				prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 				buf = buf % DEGREE;
 			}
 			nmod_poly_set_coeff_ui(c[i], buf, 1);
