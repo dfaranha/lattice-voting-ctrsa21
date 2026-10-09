@@ -14,6 +14,7 @@
 #include "lnp.h"
 #include "test.h"
 #include "bench.h"
+#include "randombytes.h"
 #include "fastrandombytes.h"
 #include "sha.h"
 #include "gaussian.h"
@@ -1961,7 +1962,7 @@ static void binary_witness(pcrt_poly_t out, nmod_poly_t raw) {
 	nmod_poly_fit_length(raw, DEGREE);
 	for (int i = 0; i < DEGREE; i++) {
 		if (i % 64 == 0) {
-			getrandom(&buf, sizeof(buf), 0);
+			randombytes((unsigned char *)&buf, sizeof(buf));
 		}
 		nmod_poly_set_coeff_ui(raw, i, (buf >> (i % 64)) & 1);
 	}
@@ -2108,7 +2109,7 @@ static void test_isbin(void) {
 		nmod_poly_fit_length(s, DEGREE);
 		for (int i = 0; i < DEGREE; i++) {
 			if (i % 64 == 0) {
-				getrandom(&buf, sizeof(buf), 0);
+				randombytes((unsigned char *)&buf, sizeof(buf));
 			}
 			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
 		}
@@ -2123,7 +2124,7 @@ static void test_isbin(void) {
 		nmod_poly_fit_length(s, DEGREE);
 		for (int i = 0; i < DEGREE; i++) {
 			if (i % 64 == 0) {
-				getrandom(&buf, sizeof(buf), 0);
+				randombytes((unsigned char *)&buf, sizeof(buf));
 			}
 			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
 		}
@@ -2362,7 +2363,7 @@ static void test_isbin_full(void) {
 		nmod_poly_fit_length(s, DEGREE);
 		for (int i = 0; i < DEGREE; i++) {
 			if (i % 64 == 0) {
-				getrandom(&buf, sizeof(buf), 0);
+				randombytes((unsigned char *)&buf, sizeof(buf));
 			}
 			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
 		}
@@ -2374,7 +2375,7 @@ static void test_isbin_full(void) {
 		nmod_poly_fit_length(s, DEGREE);
 		for (int i = 0; i < DEGREE; i++) {
 			if (i % 64 == 0) {
-				getrandom(&buf, sizeof(buf), 0);
+				randombytes((unsigned char *)&buf, sizeof(buf));
 			}
 			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
 		}
@@ -2387,7 +2388,7 @@ static void test_isbin_full(void) {
 		nmod_poly_fit_length(s, DEGREE);
 		for (int i = 0; i < DEGREE; i++) {
 			if (i % 64 == 0) {
-				getrandom(&buf, sizeof(buf), 0);
+				randombytes((unsigned char *)&buf, sizeof(buf));
 			}
 			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
 		}
@@ -2441,7 +2442,7 @@ static void test_range(void) {
 		nmod_poly_fit_length(s, DEGREE);
 		for (int i = 0; i < DEGREE; i++) {
 			if (i % 64 == 0) {
-				getrandom(&buf, sizeof(buf), 0);
+				randombytes((unsigned char *)&buf, sizeof(buf));
 			}
 			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
 		}

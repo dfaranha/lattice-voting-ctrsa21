@@ -172,7 +172,12 @@ void vericrypt_hash(uint8_t hash[SHA256HashSize], publickey_t *pk,
 				SHA256Input(&sha, (const uint8_t *)str, strlen(str));
 				free(str);
 			}
-			fmpz_mod_poly_get_fmpz_poly(s, pk->t[i][j], *ctx);
+		}
+		/* t[i] is indexed by CRT component, not by a second module index: the
+		 * loop above walked it with DIM, which only covered it because both
+		 * happen to be 2. */
+		for (int k = 0; k < NCRT; k++) {
+			fmpz_mod_poly_get_fmpz_poly(s, pk->t[i][k], *ctx);
 			str = fmpz_poly_get_str(s);
 			SHA256Input(&sha, (const uint8_t *)str, strlen(str));
 			free(str);
