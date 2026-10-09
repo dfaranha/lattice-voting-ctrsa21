@@ -619,5 +619,7 @@ int main(int argc, char *arv[]) {
 
 	commit_finish();
 	flint_rand_clear(rand);
+
+	return test_failures() != 0;
 }
 #endif
