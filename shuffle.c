@@ -1855,4 +1855,6 @@ int main(int argc, char *argv[]) {
 		printf("\n** Benchmarks for lattice-based shuffle proof:\n\n");
 		bench();
 	}
+
+	return test_failures() != 0;
 }

@@ -2664,7 +2664,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	commit_finish();
-	return 0;
+	return test_failures() != 0;
 }
 
 #endif /* LNP_MAIN */
