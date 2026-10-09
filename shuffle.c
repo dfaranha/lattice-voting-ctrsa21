@@ -1172,14 +1172,17 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 		lnpkey_t *lkey,
 		lnpmaskkey_t *mkey, lnpmaskcom_t *mcom, lnpbatch_t *batch,
 		nmod_poly_t zm[MASK_WIDTH][2], lnpgarbkey_t *gkey, lnpgarbcom_t *gcom,
-		nmod_poly_t zg[GARB_WIDTH][2], nmod_poly_t bch[MSGS][2],
-		const uint8_t digest[SHA256HashSize]) {
+		nmod_poly_t zg[GARB_WIDTH][2], const uint8_t digest[SHA256HashSize]) {
 	int result = 1;
 	nmod_poly_t beta, alpha, gamma, pub, tau, rho, dch[NCRT];
+	nmod_poly_t bch[MSGS][2];
 	pcrt_poly_t acc[LNP_LAMBDA];
 
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_init(dch[k], MODP);
+		for (int l = 0; l < MSGS; l++) {
+			nmod_poly_init(bch[l][k], MODP);
+		}
 	}
 	for (int j = 0; j < LNP_LAMBDA; j++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -1197,6 +1200,10 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 	 * the prover did. */
 	shuffle_challenges(tau, rho, com, p, _m);
 	shuffle_hash(beta, com, p, d, _m, tau, rho);
+	/* The batching challenge, from the commitments as the prover drew it. It
+	 * is not sent, so it has to be derived here: taking the prover's would let
+	 * the prover choose it. */
+	rho_hash(bch, key, lkey, com, p, mcom);
 	for (int l = 0; l < MSGS; l++) {
 		lnp_bin_public(&ib[l].ctx, &ib[l].all, &p[l], mcom, lkey);
 	}
@@ -1249,6 +1256,9 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 	nmod_poly_clear(rho);
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_clear(dch[k]);
+		for (int l = 0; l < MSGS; l++) {
+			nmod_poly_clear(bch[l][k]);
+		}
 	}
 	for (int j = 0; j < LNP_LAMBDA; j++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -1354,8 +1364,11 @@ static void proof_walk(proof_t *pf, bitwriter_t *w, bitreader_t *r) {
 			serial_get_proj(r, pf->ib[l].all.zp, PROJ, SIGMA_P);
 		}
 	}
-	/* s[l] is a single ring element per message, held separately. */
-	for (int l = 0; l < MSGS; l++) {
+	/* s[l] is a single ring element per message, held separately. There are
+	 * MSGS - 1 of them: the last linear relation uses beta in place of s, so
+	 * s[MSGS - 1] is neither computed nor checked, and sending it cost a ring
+	 * element of zeros that anyone could alter. */
+	for (int l = 0; l < MSGS - 1; l++) {
 		nmod_poly_t crt[2];
 
 		if (w != NULL) {
@@ -1521,14 +1534,106 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		proof_walk(&pf, &bw, NULL);
 		assert(!bw.overflow);
 		proof_bytes = serial_bytes(&bw);
-		serial_reader_init(&br, buf, sizeof(buf));
-		proof_walk(&pf, NULL, &br);
-		assert(!br.overflow);
-	}
 
-	result = shuffle_verifier(y, w, _y, t, tp, _t, u, d, s, com, p, ib, _m,
-			key, lkey, &mkey, &mcom, &batch, zm, &gkey, &gcom,
-			zg, bch, digest);
+		/* Decode into objects of its own, so that a field the reader skipped
+		 * cannot pass the prover's value on to the verifier, and reject what
+		 * the reader flags. The first messages t, tp, _t and u, and those in
+		 * the batch, are rebuilt by the verifier, so they start empty too. */
+		static lnpcom_t p2[MSGS];
+		static isbin_t ib2[MSGS];
+		static nmod_poly_t w2[MSGS][LNP_WIDTH][2];
+		static nmod_poly_t zm2[MASK_WIDTH][2], zg2[GARB_WIDTH][2];
+		static uint8_t digest2[SHA256HashSize];
+		commit_t d2[MSGS];
+		lnpmaskcom_t mcom2;
+		lnpgarbcom_t gcom2;
+		lnpbatch_t batch2;
+		nmod_poly_t s2[MSGS], u2[MSGS][2];
+		nmod_poly_t y2[MSGS][WIDTH][2], _y2[MSGS][WIDTH][2];
+		nmod_poly_t t2[MSGS][2], tp2[MSGS][2], _t2[MSGS][2];
+
+		lnp_maskcom_init(&mcom2);
+		lnp_garbcom_init(&gcom2);
+		lnp_batch_init(&batch2);
+		for (int i = 0; i < MASK_WIDTH; i++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_init(zm2[i][k], MODP);
+			}
+		}
+		for (int i = 0; i < GARB_WIDTH; i++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_init(zg2[i][k], MODP);
+			}
+		}
+		for (int i = 0; i < MSGS; i++) {
+			commit_init(&d2[i]);
+			lnp_com_init(&p2[i]);
+			lnp_binproof_init(&ib2[i].all);
+			lnp_binctx_init(&ib2[i].ctx);
+			memset(ib2[i].all.zp, 0, sizeof(ib2[i].all.zp));
+			nmod_poly_init(s2[i], MODP);
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_init(t2[i][k], MODP);
+				nmod_poly_init(tp2[i][k], MODP);
+				nmod_poly_init(_t2[i][k], MODP);
+				nmod_poly_init(u2[i][k], MODP);
+				for (int j = 0; j < WIDTH; j++) {
+					nmod_poly_init(y2[i][j][k], MODP);
+					nmod_poly_init(_y2[i][j][k], MODP);
+				}
+				for (int j = 0; j < LNP_WIDTH; j++) {
+					nmod_poly_init(w2[i][j][k], MODP);
+				}
+			}
+		}
+		memset(digest2, 0, sizeof(digest2));
+		proof_t pf2 = { y2, _y2, w2, t2, tp2, _t2, u2, d2, s2, p2, ib2,
+				&mcom2, &gcom2, &batch2, zm2, zg2, digest2 };
+
+		serial_reader_init(&br, buf, sizeof(buf));
+		proof_walk(&pf2, NULL, &br);
+		result = !br.overflow && shuffle_verifier(y2, w2, _y2, t2, tp2, _t2,
+				u2, d2, s2, com, p2, ib2, _m, key, lkey, &mkey, &mcom2,
+				&batch2, zm2, &gkey, &gcom2, zg2, digest2);
+
+		lnp_maskcom_free(&mcom2);
+		lnp_garbcom_free(&gcom2);
+		lnp_batch_free(&batch2);
+		for (int i = 0; i < MASK_WIDTH; i++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_clear(zm2[i][k]);
+			}
+		}
+		for (int i = 0; i < GARB_WIDTH; i++) {
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_clear(zg2[i][k]);
+			}
+		}
+		for (int i = 0; i < MSGS; i++) {
+			commit_free(&d2[i]);
+			lnp_com_free(&p2[i]);
+			lnp_binproof_free(&ib2[i].all);
+			lnp_binctx_free(&ib2[i].ctx);
+			nmod_poly_clear(s2[i]);
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_clear(t2[i][k]);
+				nmod_poly_clear(tp2[i][k]);
+				nmod_poly_clear(_t2[i][k]);
+				nmod_poly_clear(u2[i][k]);
+				for (int j = 0; j < WIDTH; j++) {
+					nmod_poly_clear(y2[i][j][k]);
+					nmod_poly_clear(_y2[i][j][k]);
+				}
+				for (int j = 0; j < LNP_WIDTH; j++) {
+					nmod_poly_clear(w2[i][j][k]);
+				}
+			}
+		}
+	} else {
+		result = shuffle_verifier(y, w, _y, t, tp, _t, u, d, s, com, p, ib,
+				_m, key, lkey, &mkey, &mcom, &batch, zm, &gkey, &gcom, zg,
+				digest);
+	}
 
 	for (int i = 0; i < SLOTS; i++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -1724,6 +1829,70 @@ static void test(void) {
 		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey) == 1, end);
 	} TEST_END;
 
+	TEST_ONCE("decoder rejects encodings no writer produces") {
+		/* Large enough that no read below runs past the end, which would
+		 * set the flag for the wrong reason: all ones costs 88 bits a
+		 * coefficient. */
+		static uint8_t raw[1 << 16], ok[1 << 16];
+		static ulong z[PROJ];
+		bitreader_t br;
+		bitwriter_t bw;
+		nmod_poly_t a[2];
+		int n = serial_bits_uniform(), bad_u, bad_g, bad_p, bad_e, good;
+
+		nmod_poly_init(a[0], MODP);
+		nmod_poly_init(a[1], MODP);
+		/* A uniform coefficient of exactly MODP, the smallest value of
+		 * serial_bits_uniform() bits that is not a residue. */
+		memset(raw, 0, sizeof(raw));
+		for (int i = 0; i < n; i++) {
+			if ((MODP >> i) & 1) {
+				raw[i / 8] |= (uint8_t) (1u << (i % 8));
+			}
+		}
+		serial_reader_init(&br, raw, sizeof(raw));
+		serial_get_uniform(&br, a);
+		bad_u = br.overflow;
+		/* All ones: a Gaussian escape carrying INT64_MIN, whose negation used
+		 * to be undefined, in a ring element and in the projection. */
+		memset(raw, 0xFF, sizeof(raw));
+		serial_reader_init(&br, raw, sizeof(raw));
+		serial_get_gauss(&br, a, SIGMA_B);
+		bad_g = br.overflow;
+		serial_reader_init(&br, raw, sizeof(raw));
+		serial_get_proj(&br, z, PROJ, SIGMA_P);
+		bad_p = br.overflow;
+		/* An escape carrying zero, which the unary code would have written. */
+		memset(raw, 0, sizeof(raw));
+		raw[0] = raw[1] = raw[2] = 0xFF;
+		serial_reader_init(&br, raw, sizeof(raw));
+		serial_get_gauss(&br, a, SIGMA_B);
+		bad_e = br.overflow;
+		/* What a writer produces reads back without the flag, including the
+		 * largest residue and the extremes of the centred range. */
+		nmod_poly_zero(a[0]);
+		nmod_poly_zero(a[1]);
+		nmod_poly_set_coeff_ui(a[0], 0, MODP - 1);
+		nmod_poly_set_coeff_ui(a[0], 1, MODP / 2);
+		nmod_poly_set_coeff_ui(a[0], 2, MODP / 2 + 1);
+		memset(z, 0, sizeof(z));
+		z[0] = MODP / 2;
+		z[1] = MODP / 2 + 1;
+		serial_writer_init(&bw, ok, sizeof(ok));
+		serial_put_gauss(&bw, a, SIGMA_B);
+		serial_put_uniform(&bw, a);
+		serial_put_proj(&bw, z, PROJ, SIGMA_P);
+		serial_reader_init(&br, ok, sizeof(ok));
+		serial_get_gauss(&br, a, SIGMA_B);
+		serial_get_uniform(&br, a);
+		serial_get_proj(&br, z, PROJ, SIGMA_P);
+		good = !bw.overflow && !br.overflow && z[0] == MODP / 2 &&
+				z[1] == MODP / 2 + 1;
+		nmod_poly_clear(a[0]);
+		nmod_poly_clear(a[1]);
+		TEST_ASSERT(bad_u && bad_g && bad_p && bad_e && good, end);
+	} TEST_END;
+
 	/* Both of the next two need an honest witness, so they run before
 	 * sigma is CRT-mixed in place below. */
 	TEST_ONCE("proof survives serialisation, and measures what it should") {
@@ -1752,7 +1921,9 @@ static void test(void) {
 			double ngb = MSGS * (2.0 * WIDTH + LNP_WIDTH) * DEGREE
 					+ (MASK_WIDTH + GARB_WIDTH) * DEGREE;
 			double ngp = MSGS * (double) PROJ;
-			double fixed = MSGS * (2 + 1 + HEIGHT + SLOTS) * DEGREE * bu
+			/* Per message D_i and P_i, and s_i for all but the last. */
+			double fixed = MSGS * (2 + HEIGHT + SLOTS) * DEGREE * bu
+					+ (MSGS - 1) * DEGREE * bu
 					+ (2 * HEIGHT + 2 * LNP_LAMBDA + 2) * DEGREE * bu
 					+ SHA256HashSize * 8;
 			double flat = fixed + ngb * serial_bits_gauss(SIGMA_B)
