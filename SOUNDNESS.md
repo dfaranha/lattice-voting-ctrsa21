@@ -49,7 +49,7 @@ Section 7 has to accommodate.
 | `p_1, p_2` | irreducible factors of `x^n + 1` | degree `n/2 = 512` |
 | `sigma_C` | Gaussian width for commitment randomness (`SIGMA_C`) | 54000 |
 | `sigma_S` | Gaussian width for the committed `sigma_i` (`SIGMA_S`) | 256 |
-| `C_lin` | challenge set of the linear proof | `c_0 - c_1`, each `c_j` with `NONZERO = 36` ones |
+| `C_lin` | challenge set of the linear proof | `NONZERO = 36` coefficients of `+-1`, so `|C_lin| = 2^36 * C(n, 36) = 2^257.0` |
 | `C` | challenge set for `alpha, beta, gamma, lambda, tau, rho` | `{p in R : deg p < n/2}` |
 
 By Lemma 1 with `k = 2`, `R = R_1 x R_2` with `R_l = Z_q[x]/(p_l)` a field, and
@@ -58,12 +58,12 @@ By Lemma 1 with `k = 2`, `R = R_1 x R_2` with `R_l = Z_q[x]/(p_l)` a field, and
 
 Two norm facts used repeatedly:
 
-* For `d in C_lin`: coefficients in `{-1,0,1}`, at most 72 nonzero, so
-  `||d||_2 <= sqrt(72) ~ 8.49` and `||d||_1 <= 72`.
+* For `d in C_lin`: coefficients in `{-1,0,1}`, exactly 36 nonzero, so
+  `||d||_2 = 6` and `||d||_1 = 36`.
 * For a difference `delta = d - d'` of two challenges: coefficients in
-  `{-2,...,2}`, at most 144 nonzero, so `||delta||_2 <= 24` and
-  `||delta||_1 <= 144`. By (Inv), **every nonzero challenge difference is
-  invertible**, since `24 << 62501`.
+  `{-2,...,2}` and `||delta||_1 <= 72`, so `||delta||_2 <=
+  sqrt(||delta||_oo ||delta||_1) <= 12`. By (Inv), **every nonzero challenge
+  difference is invertible**, since `12 << 62501`.
 
 For `c, c'` distinct in `C`, `c - c'` is nonzero of degree `< n/2 = deg p_l`,
 hence nonzero modulo each `p_l`, hence invertible. This is why the challenge
@@ -216,12 +216,12 @@ with `delta = 1`. Allowing a general invertible `delta` is what accommodates a
 relaxed proof.
 
 **Discharging (H).** By (Short), `||delta * sigma*_i|| <= 32768`, and
-`g(j) = x^j` is a monomial, so `||delta * g(j)||_2 = ||delta||_2 <= 24`
+`g(j) = x^j` is a monomial, so `||delta * g(j)||_2 = ||delta||_2 <= 12`
 (multiplication by a monomial is a signed rotation and preserves the l2-norm
 exactly). Hence
 
 ```
-|| delta * (sigma*_i - g(j)) ||_2  <=  32768 + 24  =  32792  <  62501.6 ,
+|| delta * (sigma*_i - g(j)) ||_2  <=  32768 + 12  =  32780  <  62501.6 ,
 ```
 
 so by (Inv) it is zero or invertible, which is (H).
@@ -230,7 +230,7 @@ so by (Inv) it is zero or invertible, which is (H).
 
 ```
 ceiling            q^(1/2)                          =  62501.6
-extracted norm     4 sqrt(n) sigma_S + ||delta||_2  =  32792
+extracted norm     4 sqrt(n) sigma_S + ||delta||_2  =  32780
 margin                                                 1.91x
 ```
 
@@ -238,10 +238,10 @@ margin                                                 1.91x
 
 | bound | value | source |
 | --- | --- | --- |
-| `sigma_S <= (q^(1/2) - 24) / (4 sqrt n)` | 488 | (H) via (Inv) |
-| `sigma_S >= 21.5 * ||d * sigma_i||` | 183 | rejection sampling at `M = 1.75` |
+| `sigma_S <= (q^(1/2) - 12) / (4 sqrt n)` | 488 | (H) via (Inv) |
+| `sigma_S >= 21.5 * ||d * sigma_i||` | 129 | rejection sampling at `M = 1.75` |
 
-The feasible window is roughly `[183, 488]`, a factor of 2.7 wide; the
+The feasible window is roughly `[129, 488]`, a factor of 3.8 wide; the
 implementation uses 256. **This window is the fragile part of the construction.**
 It is narrow because `k = 2`, so (Inv) only reaches `q^(1/2)`, which is small
 against `n = 1024`-dimensional Gaussian responses.
@@ -257,8 +257,8 @@ and `g` stays injective up to `N = n`.
 
 *Completeness.* An honest `z_sigma` has `||z_sigma|| ~ sigma_S sqrt(n) = 8192`
 against a bound of 16384, so the added check fails with negligible probability.
-The added rejection sampling runs at `alpha = sigma_S / ||d sigma_i|| ~ 30`,
-giving `M ~ 1.49`, within the `M = 1.75` used by the code.
+The added rejection sampling runs at `alpha = sigma_S / ||d sigma_i|| ~ 43`,
+giving `M ~ 1.32`, within the `M = 1.75` used by the code.
 
 *Zero-knowledge.* The proof carries one extra masked value. The simulator picks
 `z_p` and `z_sigma` from their distributions and sets

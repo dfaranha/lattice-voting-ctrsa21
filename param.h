@@ -49,8 +49,9 @@
 #define SIGMA_C 54000
 /* Standard deviation for the Gaussian masking the committed permutation
  * elements sigma_i of Lemma 5. These are monomials, so ||d * sigma_i|| equals
- * ||d|| <= sqrt(2 * NONZERO) ~ 8.5 exactly, and SIGMA_S = 256 leaves a ratio of
- * about 30 for the rejection sampling. It must also stay small enough that the
+ * ||d|| = sqrt(NONZERO) = 6 exactly for a challenge d with NONZERO coefficients
+ * of +-1, and SIGMA_S = 256 leaves a ratio of about 43 for the rejection
+ * sampling. It must also stay small enough that the
  * extracted ||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S) = 32768
  * remains below sqrt(MODP) ~ 62501, the bound under which Lemma 1 guarantees
  * invertibility. */
