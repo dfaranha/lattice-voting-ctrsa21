@@ -596,6 +596,57 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t w[WIDTH][2],
 	return result;
 }
 
+/**
+ * Derive the challenges X1 = tau and X2 = rho of Lemma 5 from the statement and
+ * the commitments to the permutation elements.
+ *
+ * The product identity of Lemma 5 only shows that _m is a permutation of the
+ * committed messages if tau and rho are fixed after the statement and after
+ * the sigma_i, and cannot be chosen by the prover, which is what a verifier
+ * drawing them at random gives an interactive proof. Here nobody is left to
+ * draw them, so they are a hash of the input commitments, the output list and
+ * the commitments P_i to the sigma_i -- everything the prover has fixed before
+ * them, and all of which the verifier holds: the first two are the statement,
+ * the P_i travel in the proof.
+ *
+ * Unlike a single evaluation point, no condition on public values has to be
+ * avoided: the factor that must be invertible, b_i = _m_i + sigma_i * tau -
+ * rho, involves the secret sigma_i, so only the prover can test it, and it
+ * does so by committing to the sigma_i afresh, which re-derives both
+ * challenges.
+ *
+ * @param[out] tau			- the challenge X1.
+ * @param[out] rho			- the challenge X2.
+ * @param[in] com			- the commitments to the input messages.
+ * @param[in] p				- the commitments to the permutation elements.
+ * @param[in] _m			- the output list.
+ */
+static void shuffle_challenges(nmod_poly_t tau, nmod_poly_t rho,
+		commit_t com[MSGS], commit_t p[MSGS], nmod_poly_t _m[MSGS]) {
+	SHA256Context sha;
+	uint8_t hash[SHA256HashSize];
+	prg_t prg;
+
+	SHA256Reset(&sha);
+	SHA256Input(&sha, (const uint8_t *)"tau,rho", 7);
+	for (int i = 0; i < MSGS; i++) {
+		hash_poly(&sha, _m[i]);
+		for (int j = 0; j < NCRT; j++) {
+			hash_poly(&sha, com[i].c1[j]);
+			hash_poly(&sha, com[i].c2[j]);
+			hash_poly(&sha, p[i].c1[j]);
+			hash_poly(&sha, p[i].c2[j]);
+		}
+	}
+	SHA256Result(&sha, hash);
+
+	/* Of degree below N/2, so that differences of distinct challenges are
+	 * invertible. */
+	prg_setseed(&prg, hash);
+	commit_sample_rand(tau, &prg, DEGCRT);
+	commit_sample_rand(rho, &prg, DEGCRT);
+}
+
 void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t p[MSGS],
 		commit_t d[MSGS], nmod_poly_t _m[MSGS], nmod_poly_t tau,
 		nmod_poly_t rho) {
@@ -706,13 +757,15 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 		nmod_poly_t vs[MSGS][2], nmod_poly_t u[MSGS][2], commit_t d[MSGS],
 		nmod_poly_t s[MSGS], commit_t com[MSGS], commit_t p[MSGS],
 		nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS], nmod_poly_t sigma[MSGS],
-		nmod_poly_t r[MSGS][WIDTH][2], nmod_poly_t pr[MSGS][WIDTH][2],
-		nmod_poly_t tau, nmod_poly_t rho, commitkey_t *key,
+		nmod_poly_t r[MSGS][WIDTH][2], commitkey_t *key,
 		uint8_t digest[MSGS][SHA256HashSize]) {
-	nmod_poly_t beta, alpha, gamma, pub, t0, t1;
+	int flag;
+	nmod_poly_t beta, alpha, gamma, pub, tau, rho, t0, t1;
 	nmod_poly_t a[MSGS], b[MSGS], theta[MSGS], _r[MSGS][WIDTH][2];
-	nmod_poly_t sig[MSGS][2];
+	nmod_poly_t pr[MSGS][WIDTH][2], sig[MSGS][2];
 
+	nmod_poly_init(tau, MODP);
+	nmod_poly_init(rho, MODP);
 	nmod_poly_init(t0, MODP);
 	nmod_poly_init(t1, MODP);
 	nmod_poly_init(beta, MODP);
@@ -729,29 +782,46 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 			pcrt_poly_reduce(sig[i][k], sigma[i], k);
 			for (int j = 0; j < WIDTH; j++) {
 				nmod_poly_init(_r[i][j][k], MODP);
+				nmod_poly_init(pr[i][j][k], MODP);
 			}
 		}
 	}
 
-	/* Build the factors of the product from Lemma 5:
-	 *     a_i = m_i + g(i) * tau - rho,
-	 *     b_i = _m_i + sigma_i * tau - rho,
-	 * with sigma_i = g(pi(i)) committed in P[i]. Tying the index to every
-	 * message is what forces the permutations of the two CRT components to
-	 * coincide, and is what the original product a_i - rho lacked. */
-	for (int i = 0; i < MSGS; i++) {
-		int_to_monomial(t1, i);
-		commit_poly_mulmod(t0, t1, tau);
-		nmod_poly_add(a[i], m[i], t0);
-		nmod_poly_sub(a[i], a[i], rho);
+	do {
+		/* Prover commits to the permutation elements sigma_i of Lemma 5.
+		 * This must happen *before* the challenges tau and rho: the soundness
+		 * argument needs the sigma_i to be fixed independently of them, which
+		 * deriving the challenges from the P_i enforces. */
+		for (int i = 0; i < MSGS; i++) {
+			for (int j = 0; j < WIDTH; j++) {
+				commit_sample_short_crt(pr[i][j]);
+			}
+			commit_doit(&p[i], sigma[i], key, pr[i]);
+		}
+		shuffle_challenges(tau, rho, com, p, _m);
 
-		commit_poly_mulmod(t0, sigma[i], tau);
-		nmod_poly_add(b[i], _m[i], t0);
-		nmod_poly_sub(b[i], b[i], rho);
-		/* The product argument inverts the b_i. This fails only with the
-		 * negligible probability accounted for in the completeness error. */
-		assert(is_invertible(b[i]));
-	}
+		/* Build the factors of the product from Lemma 5:
+		 *     a_i = m_i + g(i) * tau - rho,
+		 *     b_i = _m_i + sigma_i * tau - rho,
+		 * with sigma_i = g(pi(i)) committed in P[i]. Tying the index to every
+		 * message is what forces the permutations of the two CRT components
+		 * to coincide, and is what the original product a_i - rho lacked. */
+		flag = 1;
+		for (int i = 0; i < MSGS; i++) {
+			int_to_monomial(t1, i);
+			commit_poly_mulmod(t0, t1, tau);
+			nmod_poly_add(a[i], m[i], t0);
+			nmod_poly_sub(a[i], a[i], rho);
+
+			commit_poly_mulmod(t0, sigma[i], tau);
+			nmod_poly_add(b[i], _m[i], t0);
+			nmod_poly_sub(b[i], b[i], rho);
+			/* The product argument inverts the b_i. This fails only with
+			 * negligible probability, and then the prover commits to the
+			 * sigma_i afresh, which re-derives the challenges. */
+			flag &= is_invertible(b[i]);
+		}
+	} while (flag == 0);
 
 	/* Prover samples theta_i and computes commitments D_i. */
 	commit_sample_rand(theta[0], NULL, DEGREE);
@@ -799,6 +869,8 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 				r[l], pr[l], _r[l], sig[l]);
 	}
 
+	nmod_poly_clear(tau);
+	nmod_poly_clear(rho);
 	nmod_poly_clear(t0);
 	nmod_poly_clear(t1);
 	nmod_poly_clear(beta);
@@ -813,6 +885,7 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 			nmod_poly_clear(sig[i][k]);
 			for (int j = 0; j < WIDTH; j++) {
 				nmod_poly_clear(_r[i][j][k]);
+				nmod_poly_clear(pr[i][j][k]);
 			}
 		}
 	}
@@ -824,16 +897,21 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 		nmod_poly_t tp[MSGS][2], nmod_poly_t _t[MSGS][2],
 		nmod_poly_t vs[MSGS][2], nmod_poly_t u[MSGS][2], commit_t d[MSGS],
 		nmod_poly_t s[MSGS], commit_t com[MSGS], commit_t p[MSGS],
-		nmod_poly_t _m[MSGS], nmod_poly_t tau, nmod_poly_t rho,
-		commitkey_t *key, uint8_t digest[MSGS][SHA256HashSize]) {
+		nmod_poly_t _m[MSGS], commitkey_t *key,
+		uint8_t digest[MSGS][SHA256HashSize]) {
 	int result = 1;
-	nmod_poly_t beta, alpha, gamma, pub;
+	nmod_poly_t beta, alpha, gamma, pub, tau, rho;
 
+	nmod_poly_init(tau, MODP);
+	nmod_poly_init(rho, MODP);
 	nmod_poly_init(beta, MODP);
 	nmod_poly_init(alpha, MODP);
 	nmod_poly_init(gamma, MODP);
 	nmod_poly_init(pub, MODP);
 
+	/* Verifier derives the challenges from the statement and the received P_i,
+	 * as the prover did. */
+	shuffle_challenges(tau, rho, com, p, _m);
 	shuffle_hash(beta, com, p, d, _m, tau, rho);
 	/* Now verify each \Prod_LIN instance, one for each commitment. */
 	for (int l = 0; l < MSGS; l++) {
@@ -844,6 +922,8 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 				digest[l]);
 	}
 
+	nmod_poly_clear(tau);
+	nmod_poly_clear(rho);
 	nmod_poly_clear(beta);
 	nmod_poly_clear(alpha);
 	nmod_poly_clear(gamma);
@@ -953,14 +1033,11 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		commitkey_t *key) {
 	int result = 1;
 	commit_t d[MSGS], p[MSGS];
-	nmod_poly_t tau, rho, s[MSGS], u[MSGS][2];
-	nmod_poly_t pr[MSGS][WIDTH][2];
+	nmod_poly_t s[MSGS], u[MSGS][2];
 	nmod_poly_t y[MSGS][WIDTH][2], w[MSGS][WIDTH][2], _y[MSGS][WIDTH][2];
 	nmod_poly_t ys[MSGS][1][2], vs[MSGS][2];
 	nmod_poly_t t[MSGS][2], tp[MSGS][2], _t[MSGS][2];
 
-	nmod_poly_init(tau, MODP);
-	nmod_poly_init(rho, MODP);
 	for (int i = 0; i < MSGS; i++) {
 		commit_init(&d[i]);
 		commit_init(&p[i]);
@@ -976,31 +1053,17 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 				nmod_poly_init(y[i][j][k], MODP);
 				nmod_poly_init(w[i][j][k], MODP);
 				nmod_poly_init(_y[i][j][k], MODP);
-				nmod_poly_init(pr[i][j][k], MODP);
 			}
 		}
 	}
 
-	/* Prover commits to the permutation elements sigma_i of Lemma 5. This must
-	 * happen *before* the challenges tau and rho are drawn: the soundness
-	 * argument needs the sigma_i to be fixed independently of them. */
-	for (int i = 0; i < MSGS; i++) {
-		for (int j = 0; j < WIDTH; j++) {
-			commit_sample_short_crt(pr[i][j]);
-		}
-		commit_doit(&p[i], sigma[i], key, pr[i]);
-	}
-
-	/* Verifier samples the two challenges X1 = tau and X2 = rho of Lemma 5,
-	 * of degree below N/2 so that differences of distinct challenges are
-	 * invertible. */
-	commit_sample_rand(tau, NULL, DEGCRT);
-	commit_sample_rand(rho, NULL, DEGCRT);
-
 	static uint8_t digest[MSGS][SHA256HashSize];
 
+	/* The prover commits to the sigma_i and derives tau and rho from those
+	 * commitments itself; the verifier re-derives them from the P_i it
+	 * receives, so neither side is handed challenges from outside. */
 	shuffle_prover(y, w, _y, ys, t, tp, _t, vs, u, d, s, com, p, m, _m, sigma,
-			r, pr, tau, rho, key, digest);
+			r, key, digest);
 
 	/* Round-trip the proof through its serialisation before verifying it, so
 	 * that the measured size is the size of something that actually verifies
@@ -1019,10 +1082,8 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	}
 
 	result = shuffle_verifier(y, w, _y, ys, t, tp, _t, vs, u, d, s, com, p, _m,
-			tau, rho, key, digest);
+			key, digest);
 
-	nmod_poly_clear(tau);
-	nmod_poly_clear(rho);
 	for (int i = 0; i < MSGS; i++) {
 		commit_free(&d[i]);
 		commit_free(&p[i]);
@@ -1038,7 +1099,6 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 				nmod_poly_clear(y[i][j][k]);
 				nmod_poly_clear(w[i][j][k]);
 				nmod_poly_clear(_y[i][j][k]);
-				nmod_poly_clear(pr[i][j][k]);
 			}
 		}
 	}
@@ -1106,9 +1166,10 @@ static void crt_swap(nmod_poly_t out0, nmod_poly_t out1, nmod_poly_t in0,
 
 static void test(void) {
 	commitkey_t key;
-	commit_t com[MSGS];
+	commit_t com[MSGS], com0[MSGS];
 	int pi[MSGS];
 	nmod_poly_t m[MSGS], _m[MSGS], am[MSGS], sigma[MSGS], r[MSGS][WIDTH][2];
+	nmod_poly_t m0[MSGS], _m0[MSGS], sigma0[MSGS];
 	nmod_poly_t rho, p0, p1, g0, g1;
 
 	nmod_poly_init(rho, MODP);
@@ -1121,6 +1182,10 @@ static void test(void) {
 		nmod_poly_init(_m[i], MODP);
 		nmod_poly_init(am[i], MODP);
 		nmod_poly_init(sigma[i], MODP);
+		nmod_poly_init(m0[i], MODP);
+		nmod_poly_init(_m0[i], MODP);
+		nmod_poly_init(sigma0[i], MODP);
+		commit_init(&com0[i]);
 		for (int j = 0; j < WIDTH; j++) {
 			for (int k = 0; k < NCRT; k++) {
 				nmod_poly_init(r[i][j][k], MODP);
@@ -1189,6 +1254,42 @@ static void test(void) {
 		TEST_ASSERT(run(com, m, _m, sigma, r, &key) == 1, end);
 	} TEST_END;
 
+	/* The proof must work on the caller's statement without altering it, so
+	 * that a proof leaves nothing behind for the next one. */
+	TEST_ONCE("shuffle proof leaves its statement untouched") {
+		for (int i = 0; i < MSGS; i++) {
+			nmod_poly_set(m0[i], m[i]);
+			nmod_poly_set(_m0[i], _m[i]);
+			nmod_poly_set(sigma0[i], sigma[i]);
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_set(com0[i].c1[k], com[i].c1[k]);
+				nmod_poly_set(com0[i].c2[k], com[i].c2[k]);
+			}
+		}
+		TEST_ASSERT(run(com, m, _m, sigma, r, &key) == 1, end);
+		for (int i = 0; i < MSGS; i++) {
+			TEST_ASSERT(nmod_poly_equal(m0[i], m[i]) == 1, end);
+			TEST_ASSERT(nmod_poly_equal(_m0[i], _m[i]) == 1, end);
+			TEST_ASSERT(nmod_poly_equal(sigma0[i], sigma[i]) == 1, end);
+			for (int k = 0; k < NCRT; k++) {
+				TEST_ASSERT(nmod_poly_equal(com0[i].c1[k], com[i].c1[k]), end);
+				TEST_ASSERT(nmod_poly_equal(com0[i].c2[k], com[i].c2[k]), end);
+			}
+		}
+	} TEST_END;
+
+	TEST_ONCE("shuffle proof rejects a list that is not a permutation") {
+		for (int i = 0; i < MSGS; i++) {
+			nmod_poly_set(_m0[i], _m[i]);
+		}
+		/* Replace one output by a message that is not among the inputs, and
+		 * keep the honest permutation elements. */
+		nmod_poly_set(_m0[0], m[1]);
+		nmod_poly_set_coeff_ui(_m0[0], 0,
+				(nmod_poly_get_coeff_ui(_m0[0], 0) + 2) % MODP);
+		TEST_ASSERT(run(com, m, _m0, sigma, r, &key) == 0, end);
+	} TEST_END;
+
 	/* Mount the attack of Section 4.1: the output list is obtained from the
 	 * input list by swapping the first CRT component of two messages. It is
 	 * therefore *not* a permutation of the input over R_p, yet the product
@@ -1255,10 +1356,14 @@ static void test(void) {
 	nmod_poly_clear(g1);
 	for (int i = 0; i < MSGS; i++) {
 		commit_free(&com[i]);
+		commit_free(&com0[i]);
 		nmod_poly_clear(m[i]);
 		nmod_poly_clear(_m[i]);
 		nmod_poly_clear(am[i]);
 		nmod_poly_clear(sigma[i]);
+		nmod_poly_clear(m0[i]);
+		nmod_poly_clear(_m0[i]);
+		nmod_poly_clear(sigma0[i]);
 		for (int j = 0; j < WIDTH; j++) {
 			for (int k = 0; k < NCRT; k++) {
 				nmod_poly_clear(r[i][j][k]);
