@@ -13,6 +13,7 @@
 #include <flint/nmod_poly.h>
 
 #include "param.h"
+#include "fastrandombytes.h"
 
 /*============================================================================*/
 /* Constant definitions                                                       */
@@ -117,12 +118,11 @@ int commit_norm2_leq(nmod_poly_t r, uint64_t bound);
 void commit_keyinit(commitkey_t *key);
 
 /**
- * Generate a key pair for the commitment scheme using a PRNG.
+ * Generate a key pair for the commitment scheme.
  *
  * @param[out] key 		- the generated key pair.
- * @param[in] rand		- the random number generator.
  */
-void commit_keygen(commitkey_t *key, flint_rand_t rand);
+void commit_keygen(commitkey_t *key);
 
 /**
  * Free a key pair for the commitment scheme.
@@ -140,11 +140,15 @@ void commit_keyfree(commitkey_t *key);
 void commit_sample_short(nmod_poly_t r);
 
 /**
- * Sample a random polynomial.
+ * Sample a uniformly random polynomial.
  *
  * @param[out] r		- the polynomial to sample.
+ * @param[in] prg		- the stream to draw from, or NULL for the global one,
+ * 						  which is seeded by the operating system and is what
+ * 						  anything secret must use.
+ * @param[in] degree	- the number of coefficients to sample.
  */
-void commit_sample_rand(nmod_poly_t r, flint_rand_t rand, int degree);
+void commit_sample_rand(nmod_poly_t r, prg_t *prg, int degree);
 
 /**
  * Sample a random challenge.

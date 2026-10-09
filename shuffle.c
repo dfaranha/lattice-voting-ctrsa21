@@ -306,10 +306,9 @@ static int lin_verifier(nmod_poly_t y[WIDTH], nmod_poly_t _y[WIDTH],
 
 void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS],
 		nmod_poly_t _m[MSGS], nmod_poly_t rho) {
-	flint_rand_t rand;
 	SHA256Context sha;
 	uint8_t hash[SHA256HashSize];
-	uint64_t seed0, seed1, seed2, seed3;
+	prg_t prg;
 
 	SHA256Reset(&sha);
 
@@ -329,16 +328,10 @@ void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS],
 			rho->alloc * sizeof(uint64_t));
 	SHA256Result(&sha, hash);
 
-	flint_rand_init(rand);
-	memcpy(&seed0, hash, sizeof(uint64_t));
-	memcpy(&seed1, hash + sizeof(uint64_t), sizeof(uint64_t));
-	memcpy(&seed2, hash + 2 * sizeof(uint64_t), sizeof(uint64_t));
-	memcpy(&seed3, hash + 3 * sizeof(uint64_t), sizeof(uint64_t));
-	seed0 ^= seed2;
-	seed1 ^= seed3;
-	flint_rand_set_seed(rand, seed0, seed1);
-	commit_sample_rand(beta, rand, DEGREE);
-	flint_rand_clear(rand);
+	/* beta is public and must be reproducible by the verifier, so it is drawn
+	 * from a stream keyed by the hash rather than from the global one. */
+	prg_setseed(&prg, hash);
+	commit_sample_rand(beta, &prg, DEGREE);
 }
 
 static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH],
@@ -346,8 +339,7 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH],
 		nmod_poly_t _t[MSGS], nmod_poly_t u[MSGS], commit_t d[MSGS],
 		nmod_poly_t s[MSGS], commit_t com[MSGS], nmod_poly_t m[MSGS],
 		nmod_poly_t _m[MSGS], nmod_poly_t r[MSGS][WIDTH], nmod_poly_t rho,
-		commitkey_t *key, uint8_t digest[MSGS][SHA256HashSize],
-		flint_rand_t rng) {
+		commitkey_t *key, uint8_t digest[MSGS][SHA256HashSize]) {
 	nmod_poly_t beta, t0, t1, theta[MSGS], _r[MSGS][WIDTH];
 
 	nmod_poly_init(t0, MODP);
@@ -367,14 +359,14 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH],
 	}
 
 	/* Prover samples theta_i and computes commitments D_i. */
-	commit_sample_rand(theta[0], rng, DEGREE);
+	commit_sample_rand(theta[0], NULL, DEGREE);
 	commit_poly_mulmod(t0, theta[0], _m[0]);
 	for (int j = 0; j < WIDTH; j++) {
 		commit_sample_short(_r[0][j]);
 	}
 	commit_doit(&d[0], t0, key, _r[0]);
 	for (int i = 1; i < MSGS - 1; i++) {
-		commit_sample_rand(theta[i], rng, DEGREE);
+		commit_sample_rand(theta[i], NULL, DEGREE);
 		commit_poly_mulmod(t0, theta[i - 1], m[i]);
 		commit_poly_mulmod(t1, theta[i], _m[i]);
 		nmod_poly_add(t0, t0, t1);
@@ -531,7 +523,7 @@ static int measure_proof = 0;
 static size_t proof_bytes = 0;
 
 static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
-		nmod_poly_t r[MSGS][WIDTH], commitkey_t *key, flint_rand_t rng) {
+		nmod_poly_t r[MSGS][WIDTH], commitkey_t *key) {
 	int flag, result = 1;
 	commit_t d[MSGS];
 	nmod_poly_t t0, t1, rho, s[MSGS], u[MSGS];
@@ -555,7 +547,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	/* Verifier samples \rho that is different from the messages, and \beta. */
 	do {
 		flag = 1;
-		commit_sample_rand(rho, rng, DEGREE);
+		commit_sample_rand(rho, NULL, DEGREE);
 		for (int i = 0; i < MSGS; i++) {
 			if (nmod_poly_equal(rho, _m[i]) == 1) {
 				flag = 0;
@@ -570,7 +562,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 
 	static uint8_t digest[MSGS][SHA256HashSize];
 
-	shuffle_prover(y, _y, t, _t, u, d, s, com, m, _m, r, rho, key, digest, rng);
+	shuffle_prover(y, _y, t, _t, u, d, s, com, m, _m, r, rho, key, digest);
 
 	/* Round-trip the proof through its serialisation before verifying it, so
 	 * that the measured size is the size of something that actually verifies
@@ -609,7 +601,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	return result;
 }
 
-static void test(flint_rand_t rand) {
+static void test(void) {
 	commitkey_t key;
 	commit_t com[MSGS];
 	nmod_poly_t m[MSGS], _m[MSGS], r[MSGS][WIDTH];
@@ -625,7 +617,7 @@ static void test(flint_rand_t rand) {
 	/* Generate commitment key-> */
 	commit_setup();
 	commit_keyinit(&key);
-	commit_keygen(&key, rand);
+	commit_keygen(&key);
 
 	for (int i = 0; i < MSGS; i++) {
 		for (int j = 0; j < WIDTH; j++) {
@@ -643,7 +635,7 @@ static void test(flint_rand_t rand) {
 
 	TEST_ONCE("proof survives serialisation, and measures what it should") {
 		measure_proof = 1;
-		TEST_ASSERT(run(com, m, _m, r, &key, rand) == 1, end);
+		TEST_ASSERT(run(com, m, _m, r, &key) == 1, end);
 		measure_proof = 0;
 		printf("\n    %zu bytes, %.1f KB per message\n", proof_bytes,
 				proof_bytes / 1024.0 / MSGS);
@@ -673,7 +665,7 @@ static void test(flint_rand_t rand) {
 	} TEST_END;
 
 	TEST_ONCE("shuffle proof is consistent") {
-		TEST_ASSERT(run(com, m, _m, r, &key, rand) == 1, end);
+		TEST_ASSERT(run(com, m, _m, r, &key) == 1, end);
 	} TEST_END;
 
   end:
@@ -690,7 +682,7 @@ static void test(flint_rand_t rand) {
 	commit_keyfree(&key);
 }
 
-static void bench(flint_rand_t rand) {
+static void bench(void) {
 	commitkey_t key;
 	commit_t com[MSGS];
 	nmod_poly_t m[MSGS], _m[MSGS];
@@ -713,7 +705,7 @@ static void bench(flint_rand_t rand) {
 	/* Generate commitment key-> */
 	commit_setup();
 	commit_keyinit(&key);
-	commit_keygen(&key, rand);
+	commit_keygen(&key);
 
 	for (int i = 0; i < MSGS; i++) {
 		for (int j = 0; j < WIDTH; j++) {
@@ -730,7 +722,7 @@ static void bench(flint_rand_t rand) {
 	}
 
 	BENCH_BEGIN("shuffle-proof (N messages)") {
-		BENCH_ADD(run(com, m, _m, r, &key, rand));
+		BENCH_ADD(run(com, m, _m, r, &key));
 	} BENCH_END;
 
 	nmod_poly_init(t, MODP);
@@ -746,8 +738,8 @@ static void bench(flint_rand_t rand) {
 	/* The randomness must stay the one the commitments were formed with:
 	 * resampling it here would benchmark a proof whose witness does not match
 	 * its statement, and a verifier that always rejects. */
-	commit_sample_rand(beta, rand, DEGREE);
-	commit_sample_rand(alpha, rand, DEGREE);
+	commit_sample_rand(beta, NULL, DEGREE);
+	commit_sample_rand(alpha, NULL, DEGREE);
 	uint8_t dg[SHA256HashSize];
 
 	BENCH_BEGIN("linear proof") {
@@ -793,19 +785,13 @@ static int phase_selected(int argc, char *argv[], const char *phase) {
 }
 
 int main(int argc, char *argv[]) {
-	flint_rand_t rand;
-
-	flint_rand_init(rand);
-
 	if (phase_selected(argc, argv, "test")) {
 		printf("\n** Tests for lattice-based shuffle proof:\n\n");
-		test(rand);
+		test();
 	}
 
 	if (phase_selected(argc, argv, "bench")) {
 		printf("\n** Benchmarks for lattice-based shuffle proof:\n\n");
-		bench(rand);
+		bench();
 	}
-
-	flint_rand_clear(rand);
 }
