@@ -687,5 +687,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	encrypt_finish();
+
+	return test_failures() != 0;
 }
 #endif
