@@ -512,7 +512,7 @@ static void test(flint_rand_t rand) {
 	fmpz_mod_poly_init(v, *encrypt_modulus_ctx());
 
 	encrypt_keyinit(&pk, &sk);
-	encrypt_keygen(&pk, &sk, rand);
+	encrypt_keygen(&pk, &sk);
 	vericrypt_init(&cipher);
 
 	TEST_BEGIN("verifiable encryption is consistent") {
@@ -578,7 +578,7 @@ static void bench(flint_rand_t rand) {
 	fmpz_mod_poly_init(u, *encrypt_modulus_ctx());
 
 	encrypt_keyinit(&pk, &sk);
-	encrypt_keygen(&pk, &sk, rand);
+	encrypt_keygen(&pk, &sk);
 	vericrypt_init(&cipher);
 
 	fmpz_mod_poly_zero(u, *encrypt_modulus_ctx());

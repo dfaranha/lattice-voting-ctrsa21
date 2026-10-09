@@ -256,7 +256,7 @@ void commit_keyinit(commitkey_t *key) {
 }
 
 // Generate a key pair.
-void commit_keygen(commitkey_t *key, flint_rand_t rand) {
+void commit_keygen(commitkey_t *key) {
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < WIDTH; j++) {
 			for (int k = 0; k < NCRT; k++) {
@@ -271,7 +271,7 @@ void commit_keygen(commitkey_t *key, flint_rand_t rand) {
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = HEIGHT; j < WIDTH; j++) {
 			for (int k = 0; k < NCRT; k++) {
-				commit_sample_rand(key->B1[i][j][k], rand, DEGCRT);
+				commit_sample_rand(key->B1[i][j][k], NULL, DEGCRT);
 			}
 		}
 	}
@@ -282,7 +282,7 @@ void commit_keygen(commitkey_t *key, flint_rand_t rand) {
 				nmod_poly_set_coeff_ui(key->b2[i][j], 0, 1);
 			}
 			if (i > HEIGHT) {
-				commit_sample_rand(key->b2[i][j], rand, DEGCRT);
+				commit_sample_rand(key->b2[i][j], NULL, DEGCRT);
 			}
 		}
 	}
@@ -350,22 +350,34 @@ void commit_sample_short_crt(pcrt_poly_t r) {
 	nmod_poly_clear(t);
 }
 
-// Sample a random polynomial.
-void commit_sample_rand(nmod_poly_t r, flint_rand_t rand, int degree) {
+// Sample a uniformly random polynomial.
+void commit_sample_rand(nmod_poly_t r, prg_t *prg, int degree) {
+	/* 2^64 mod MODP. Words at or above 2^64 minus this fall in an incomplete
+	 * copy of [0, MODP), so rejecting them leaves the reduction unbiased. */
+	const uint64_t rem = (UINT64_MAX % MODP + 1) % MODP;
+	uint64_t buf;
+
 	nmod_poly_fit_length(r, degree);
 	for (int i = 0; i < degree; i++) {
-		r->coeffs[i] = n_randtest(rand) % MODP;
+		do {
+			if (prg == NULL) {
+				fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			} else {
+				prg_bytes(prg, (unsigned char *)&buf, sizeof(buf));
+			}
+		} while (rem != 0 && buf >= (uint64_t) 0 - rem);
+		r->coeffs[i] = buf % MODP;
 	}
 	r->length = degree;
 	_nmod_poly_normalise(r);
 }
 
 // Sample a random polynomial in CRT representation.
-void commit_sample_rand_crt(pcrt_poly_t r, flint_rand_t rand) {
+void commit_sample_rand_crt(pcrt_poly_t r, prg_t *prg) {
 	nmod_poly_t t;
 
 	nmod_poly_init(t, MODP);
-	commit_sample_rand(t, rand, DEGREE);
+	commit_sample_rand(t, prg, DEGREE);
 	for (int i = 0; i < NCRT; i++) {
 		pcrt_poly_reduce(r[i], t, i);
 	}
@@ -579,7 +591,7 @@ static void test(flint_rand_t rand) {
 
 	/* Generate commitment key. */
 	commit_keyinit(&key);
-	commit_keygen(&key, rand);
+	commit_keygen(&key);
 	commit_init(&com);
 	commit_init(&_com);
 	for (int i = 0; i < WIDTH; i++) {
@@ -650,7 +662,7 @@ static void bench(flint_rand_t rand) {
 	}
 
 	commit_keyinit(&key);
-	commit_keygen(&key, rand);
+	commit_keygen(&key);
 	commit_init(&com);
 	nmod_poly_randtest(m, rand, DEGREE);
 
@@ -685,7 +697,7 @@ static void bench(flint_rand_t rand) {
 	}
 }
 
-static void microbench(flint_rand_t rand) {
+static void microbench(void) {
 	nmod_poly_t alpha, beta, t[2], u[2];
 
 	nmod_poly_init(alpha, MODP);
@@ -695,8 +707,8 @@ static void microbench(flint_rand_t rand) {
 		nmod_poly_init(u[i], MODP);
 	}
 
-	commit_sample_rand(beta, rand, DEGREE);
-	commit_sample_rand(alpha, rand, DEGREE);
+	commit_sample_rand(beta, NULL, DEGREE);
+	commit_sample_rand(alpha, NULL, DEGREE);
 
 	BENCH_BEGIN("Polynomial addition") {
 		BENCH_ADD(nmod_poly_add(alpha, alpha, beta));
@@ -706,8 +718,8 @@ static void microbench(flint_rand_t rand) {
 		BENCH_ADD(commit_poly_mulmod(alpha, alpha, beta));
 	} BENCH_END;
 
-	commit_sample_rand_crt(t, rand);
-	commit_sample_rand_crt(u, rand);
+	commit_sample_rand_crt(t, NULL);
+	commit_sample_rand_crt(u, NULL);
 
 	BENCH_BEGIN("Polynomial mult in CRT form") {
 		BENCH_ADD(pcrt_poly_mulmod(t[0], t[0], u[0], 0));
@@ -746,7 +758,7 @@ int main(int argc, char *arv[]) {
 
 	if (phase_selected(argc, arv, "bench")) {
 		printf("\n** Microbenchmarks for polynomial arithmetic:\n\n");
-		microbench(rand);
+		microbench();
 
 		printf("\n** Benchmarks for lattice-based commitments:\n\n");
 		bench(rand);
