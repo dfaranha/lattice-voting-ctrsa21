@@ -114,6 +114,19 @@ void pcrt_poly_mulmod(nmod_poly_t c, const nmod_poly_t a, const nmod_poly_t b,
 void commit_poly_mulmod(nmod_poly_t c, const nmod_poly_t a,
 		const nmod_poly_t b);
 
+/* Multiply two polynomials in the cyclotomic ring Rp, the first of them sparse.
+ *
+ * The result is the same as commit_poly_mulmod's, at a cost proportional to the
+ * number of non-zero coefficients of d, which makes it the product to use for
+ * a challenge. The output may alias either input.
+ *
+ * @param[out] c		- the resulting polynomial.
+ * @param[in] d			- the sparse polynomial.
+ * @param[in] a			- the other polynomial.
+ */
+void commit_poly_mul_sparse(nmod_poly_t c, const nmod_poly_t d,
+		const nmod_poly_t a);
+
 /* Reduce a polynomial into the i-th CRT component.
  *
  * The output may alias the input.
@@ -274,6 +287,14 @@ void commit_sample_gauss_crt(pcrt_poly_t r);
 /**
  * Sample a masking polynomial at the batch width SIGMA_B, for a proof whose
  * rejection test spans every message at once.
+ *
+ * @param[out] r		- the polynomial to sample, in coefficient form.
+ */
+void commit_sample_gauss_batch(nmod_poly_t r);
+
+/**
+ * Sample a masking polynomial at the batch width SIGMA_B, in CRT
+ * representation.
  */
 void commit_sample_gauss_batch_crt(pcrt_poly_t r);
 
@@ -340,13 +361,13 @@ double commit_uniform_double(void);
  * with aborts. Shared by the shuffle proof and the LNP machinery so that this
  * security-critical step exists only once.
  *
- * @param[in] z				- the masked responses, in CRT representation.
- * @param[in] v				- the terms they mask, in CRT representation.
+ * @param[in] z				- the masked responses, in coefficient form.
+ * @param[in] v				- the terms they mask, in coefficient form.
  * @param[in] s2			- the square of the standard deviation.
  * @param[in] width			- the number of responses.
  * @return 1 if the transcript must be rejected, 0 if it may be emitted.
  */
-int commit_rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
+int commit_rej_sampling(nmod_poly_t z[], nmod_poly_t v[], uint64_t s2,
 		int width);
 
 /**
@@ -355,12 +376,39 @@ int commit_rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
  * challenge across many statements has to test their concatenation, not each
  * piece: testing them separately would multiply the abort probabilities.
  *
+ * The responses are taken in coefficient form, which is what the test reads:
+ * reconstructing them from CRT form costs a product at full degree each, and
+ * a prover that keeps its masks and products in coefficient form need not pay
+ * it on every attempt.
+ *
  * @param[in,out] dot		- running inner product of the responses and the
  *							  terms they mask.
  * @param[in,out] norm		- running squared norm of the masked terms.
+ * @param[in] z				- the masked responses, in coefficient form.
+ * @param[in] v				- the terms they mask, in coefficient form.
+ * @param[in] width			- the number of responses.
  */
-void commit_rej_accumulate(int64_t *dot, int64_t *norm, nmod_poly_t z[][2],
-		nmod_poly_t v[][2], int width);
+void commit_rej_accumulate(int64_t *dot, int64_t *norm, nmod_poly_t z[],
+		nmod_poly_t v[], int width);
+
+/**
+ * Answer a challenge: z = y + d * v for each of width masks y and witnesses v,
+ * accumulating what the rejection test needs and reducing each response into
+ * the CRT form a proof carries. Everything is in coefficient form except the
+ * output, so that the test reads the responses without reconstructing them,
+ * and d being a challenge, each product is a sparse rotation.
+ *
+ * @param[out] z			- the responses, in CRT representation.
+ * @param[in,out] y			- the masks; on return, the responses, both in
+ *							  coefficient form.
+ * @param[in] v				- the witness, in coefficient form.
+ * @param[in] d				- the challenge, in coefficient form.
+ * @param[in] width			- the number of responses.
+ * @param[in,out] dot		- as in commit_rej_accumulate.
+ * @param[in,out] norm		- as in commit_rej_accumulate.
+ */
+void commit_rej_respond(nmod_poly_t z[][2], nmod_poly_t y[], nmod_poly_t v[],
+		nmod_poly_t d, int width, int64_t *dot, int64_t *norm);
 
 /**
  * Decide from accumulated quantities.

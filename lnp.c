@@ -1524,8 +1524,9 @@ static void challenge_from_digest(pcrt_poly_t d,
 	nmod_poly_clear(c);
 }
 
-static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
-		lnpbinproof_t *pi, pcrt_poly_t ajtai[HEIGHT], uint8_t *digest) {
+static void bin_local_hash(pcrt_poly_t d, nmod_poly_t dc, lnpkey_t *key,
+		lnpcom_t *com, lnpbinproof_t *pi, pcrt_poly_t ajtai[HEIGHT],
+		uint8_t *digest) {
 	/* A local stream: keying the global one with public data would expose
 	 * the masks that the Gaussian sampler draws from it. */
 	prg_t prg;
@@ -1583,6 +1584,11 @@ static void bin_local_hash(pcrt_poly_t d, lnpkey_t *key, lnpcom_t *com,
 	}
 	pcrt_poly_reduce(d[0], c, 0);
 	pcrt_poly_reduce(d[1], c, 1);
+	/* The prover also wants it in coefficient form, for the rejection
+	 * test. */
+	if (dc != NULL) {
+		nmod_poly_set(dc, c);
+	}
 	nmod_poly_clear(c);
 }
 
@@ -1638,8 +1644,12 @@ static void tst_rho_hash(pcrt_poly_t rho, lnpkey_t *key, lnpcom_t *com) {
 static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 		pcrt_poly_t s, pcrt_poly_t f, nmod_poly_t w, pcrt_poly_t g[LNP_LAMBDA],
 		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]) {
-	pcrt_poly_t y[LNP_WIDTH], cr[LNP_WIDTH], ym[MASK_WIDTH], cm[MASK_WIDTH], d;
-	pcrt_poly_t yg[GARB_WIDTH], cg[GARB_WIDTH], garb[2];
+	/* As in the shuffle, the masks and the witness are held in coefficient
+	 * form, which is what the rejection test reads, so that nothing has to be
+	 * reconstructed from CRT form on each attempt. */
+	pcrt_poly_t y[LNP_WIDTH], ym[MASK_WIDTH], yg[GARB_WIDTH], d, garb[2];
+	nmod_poly_t yc[LNP_WIDTH], rc[LNP_WIDTH], ymc[MASK_WIDTH], mrc[MASK_WIDTH];
+	nmod_poly_t ygc[GARB_WIDTH], grc[GARB_WIDTH], dc;
 	int64_t dot, norm;
 	int rej, ok;
 
@@ -1652,22 +1662,29 @@ static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 	}
 	lnp_mask_commit(&tst_mcom, g, &tst_mkey, tst_mr);
 
+	nmod_poly_init(dc, MODP);
 	for (int i = 0; i < LNP_WIDTH; i++) {
+		nmod_poly_init(yc[i], MODP);
+		nmod_poly_init(rc[i], MODP);
+		pcrt_poly_rec(rc[i], r[i]);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(y[i][k], MODP);
-			nmod_poly_init(cr[i][k], MODP);
 		}
 	}
 	for (int i = 0; i < MASK_WIDTH; i++) {
+		nmod_poly_init(ymc[i], MODP);
+		nmod_poly_init(mrc[i], MODP);
+		pcrt_poly_rec(mrc[i], tst_mr[i]);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(ym[i][k], MODP);
-			nmod_poly_init(cm[i][k], MODP);
 		}
 	}
 	for (int i = 0; i < GARB_WIDTH; i++) {
+		nmod_poly_init(ygc[i], MODP);
+		nmod_poly_init(grc[i], MODP);
+		pcrt_poly_rec(grc[i], tst_rg[i]);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(yg[i][k], MODP);
-			nmod_poly_init(cg[i][k], MODP);
 		}
 	}
 	for (int k = 0; k < NCRT; k++) {
@@ -1702,13 +1719,22 @@ static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 			nmod_poly_zero(garb[1][k]);
 		}
 		for (int i = 0; i < LNP_WIDTH; i++) {
-			commit_sample_gauss_batch_crt(y[i]);
+			commit_sample_gauss_batch(yc[i]);
+			for (int k = 0; k < NCRT; k++) {
+				pcrt_poly_reduce(y[i][k], yc[i], k);
+			}
 		}
 		for (int i = 0; i < MASK_WIDTH; i++) {
-			commit_sample_gauss_batch_crt(ym[i]);
+			commit_sample_gauss_batch(ymc[i]);
+			for (int k = 0; k < NCRT; k++) {
+				pcrt_poly_reduce(ym[i][k], ymc[i], k);
+			}
 		}
 		for (int i = 0; i < GARB_WIDTH; i++) {
-			commit_sample_gauss_batch_crt(yg[i]);
+			commit_sample_gauss_batch(ygc[i]);
+			for (int k = 0; k < NCRT; k++) {
+				pcrt_poly_reduce(yg[i][k], ygc[i], k);
+			}
 		}
 		lnp_bin_first(ctx, &tst_batch, com, s, key, r, y, tst_rho, garb);
 		lnp_garb_commit(&tst_gcom, garb, &tst_gkey, tst_rg);
@@ -1717,48 +1743,34 @@ static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 		for (int i = 0; i < HEIGHT; i++) {
 			inner(tst_ajtai[i], key->B1[i], y, LNP_WIDTH);
 		}
-		bin_local_hash(d, key, com, pi, tst_ajtai, tst_digest);
+		bin_local_hash(d, dc, key, com, pi, tst_ajtai, tst_digest);
 		dot = norm = 0;
-		for (int i = 0; i < LNP_WIDTH; i++) {
-			for (int k = 0; k < NCRT; k++) {
-				pcrt_poly_mulmod(cr[i][k], d[k], r[i][k], k);
-				nmod_poly_add(tst_z[i][k], y[i][k], cr[i][k]);
-			}
-		}
-		for (int i = 0; i < MASK_WIDTH; i++) {
-			for (int k = 0; k < NCRT; k++) {
-				pcrt_poly_mulmod(cm[i][k], d[k], tst_mr[i][k], k);
-				nmod_poly_add(tst_zm[i][k], ym[i][k], cm[i][k]);
-			}
-		}
-		for (int i = 0; i < GARB_WIDTH; i++) {
-			for (int k = 0; k < NCRT; k++) {
-				pcrt_poly_mulmod(cg[i][k], d[k], tst_rg[i][k], k);
-				nmod_poly_add(tst_zg[i][k], yg[i][k], cg[i][k]);
-			}
-		}
-		commit_rej_accumulate(&dot, &norm, tst_z, cr, LNP_WIDTH);
-		commit_rej_accumulate(&dot, &norm, tst_zm, cm, MASK_WIDTH);
-		commit_rej_accumulate(&dot, &norm, tst_zg, cg, GARB_WIDTH);
+		commit_rej_respond(tst_z, yc, rc, dc, LNP_WIDTH, &dot, &norm);
+		commit_rej_respond(tst_zm, ymc, mrc, dc, MASK_WIDTH, &dot, &norm);
+		commit_rej_respond(tst_zg, ygc, grc, dc, GARB_WIDTH, &dot, &norm);
 		rej = commit_rej_decide(dot, norm, (uint64_t) SIGMA_B * SIGMA_B);
 	} while (rej);
 
+	nmod_poly_clear(dc);
 	for (int i = 0; i < LNP_WIDTH; i++) {
+		nmod_poly_clear(yc[i]);
+		nmod_poly_clear(rc[i]);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(y[i][k]);
-			nmod_poly_clear(cr[i][k]);
 		}
 	}
 	for (int i = 0; i < MASK_WIDTH; i++) {
+		nmod_poly_clear(ymc[i]);
+		nmod_poly_clear(mrc[i]);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(ym[i][k]);
-			nmod_poly_clear(cm[i][k]);
 		}
 	}
 	for (int i = 0; i < GARB_WIDTH; i++) {
+		nmod_poly_clear(ygc[i]);
+		nmod_poly_clear(grc[i]);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(yg[i][k]);
-			nmod_poly_clear(cg[i][k]);
 		}
 	}
 	for (int k = 0; k < NCRT; k++) {
@@ -1823,7 +1835,7 @@ static int bin_verify_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(ignored[k], MODP);
 		}
-		bin_local_hash(ignored, key, com, pi, tst_ajtai, rebuilt);
+		bin_local_hash(ignored, NULL, key, com, pi, tst_ajtai, rebuilt);
 		result &= (memcmp(rebuilt, tst_digest, SHA256HashSize) == 0);
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_clear(ignored[k]);

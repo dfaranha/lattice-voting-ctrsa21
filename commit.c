@@ -150,19 +150,17 @@ double commit_uniform_double(void) {
 	return (double)(bits >> 11) * 0x1.0p-53;
 }
 
-void commit_rej_accumulate(int64_t *dot, int64_t *norm, nmod_poly_t z[][2],
-		nmod_poly_t v[][2], int width) {
+/* z and v are in coefficient representation: the test needs their centred
+ * coefficients, and the provers keep them that way so as not to reconstruct
+ * them from CRT form on every attempt. */
+void commit_rej_accumulate(int64_t *dot, int64_t *norm, nmod_poly_t z[],
+		nmod_poly_t v[], int width) {
 	int64_t c0, c1;
-	nmod_poly_t t0, t1;
 
-	nmod_poly_init(t0, MODP);
-	nmod_poly_init(t1, MODP);
 	for (int i = 0; i < width; i++) {
-		pcrt_poly_rec(t0, z[i]);
-		pcrt_poly_rec(t1, v[i]);
 		for (int j = 0; j < DEGREE; j++) {
-			c0 = nmod_poly_get_coeff_ui(t0, j);
-			c1 = nmod_poly_get_coeff_ui(t1, j);
+			c0 = nmod_poly_get_coeff_ui(z[i], j);
+			c1 = nmod_poly_get_coeff_ui(v[i], j);
 			if (c0 > MODP / 2)
 				c0 -= MODP;
 			if (c1 > MODP / 2)
@@ -171,8 +169,22 @@ void commit_rej_accumulate(int64_t *dot, int64_t *norm, nmod_poly_t z[][2],
 			*norm += c1 * c1;
 		}
 	}
-	nmod_poly_clear(t0);
-	nmod_poly_clear(t1);
+}
+
+void commit_rej_respond(nmod_poly_t z[][2], nmod_poly_t y[], nmod_poly_t v[],
+		nmod_poly_t d, int width, int64_t *dot, int64_t *norm) {
+	nmod_poly_t dv;
+
+	nmod_poly_init(dv, MODP);
+	for (int i = 0; i < width; i++) {
+		commit_poly_mul_sparse(dv, d, v[i]);
+		nmod_poly_add(y[i], y[i], dv);
+		commit_rej_accumulate(dot, norm, &y[i], &dv, 1);
+		for (int k = 0; k < NCRT; k++) {
+			pcrt_poly_reduce(z[i][k], y[i], k);
+		}
+	}
+	nmod_poly_clear(dv);
 }
 
 int commit_rej_decide(int64_t dot, int64_t norm, uint64_t s2) {
@@ -181,7 +193,7 @@ int commit_rej_decide(int64_t dot, int64_t norm, uint64_t s2) {
 	return commit_uniform_double() > exp(r) / 1.75;
 }
 
-int commit_rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
+int commit_rej_sampling(nmod_poly_t z[], nmod_poly_t v[], uint64_t s2,
 		int width) {
 	int64_t dot = 0, norm = 0;
 
@@ -245,6 +257,46 @@ void commit_poly_mulmod(nmod_poly_t c, const nmod_poly_t a,
 		const nmod_poly_t b) {
 	nmod_poly_mul(mul_tmp, a, b);
 	fold_mod(c, mul_tmp, DEGREE, 1);
+}
+
+// Multiply by a sparse polynomial in Rp.
+void commit_poly_mul_sparse(nmod_poly_t c, const nmod_poly_t d,
+		const nmod_poly_t a) {
+	nmod_t mod = a->mod;
+	slong la = FLINT_MIN(a->length, DEGREE);
+	ulong *out = (ulong *) flint_calloc(DEGREE, sizeof(ulong));
+
+	/* Each non-zero coefficient of d adds a signed rotation of a: x^p * x^j
+	 * is x^(p + j), or -x^(p + j - DEGREE) once it wraps past x^DEGREE = -1.
+	 * The challenges have NONZERO coefficients of +-1, so this costs
+	 * NONZERO * DEGREE additions where a full product costs a multiplication
+	 * at full degree. */
+	for (slong p = 0; p < FLINT_MIN(d->length, DEGREE); p++) {
+		ulong v = d->coeffs[p];
+
+		if (v == 0) {
+			continue;
+		}
+		for (slong j = 0; j < la; j++) {
+			ulong t = a->coeffs[j];
+
+			if (v != 1) {
+				t = (v == mod.n - 1) ? nmod_neg(t, mod) : nmod_mul(t, v, mod);
+			}
+			if (p + j < DEGREE) {
+				out[p + j] = nmod_add(out[p + j], t, mod);
+			} else {
+				out[p + j - DEGREE] = nmod_sub(out[p + j - DEGREE], t, mod);
+			}
+		}
+	}
+	nmod_poly_fit_length(c, DEGREE);
+	for (slong j = 0; j < DEGREE; j++) {
+		c->coeffs[j] = out[j];
+	}
+	c->length = DEGREE;
+	_nmod_poly_normalise(c);
+	flint_free(out);
 }
 
 // Reduce a polynomial into the i-th CRT component.
@@ -588,17 +640,23 @@ void commit_sample_gauss_crt(nmod_poly_t r[2]) {
 	nmod_poly_clear(t);
 }
 
-void commit_sample_gauss_batch_crt(nmod_poly_t r[2]) {
-	nmod_poly_t t;
+void commit_sample_gauss_batch(nmod_poly_t t) {
 	int64_t coeff;
 
-	nmod_poly_init(t, MODP);
+	nmod_poly_zero(t);
 	nmod_poly_fit_length(t, DEGREE);
 	for (int i = 0; i < DEGREE; i++) {
 		coeff = discrete_gaussian_batch(0.0);
 		nmod_poly_set_coeff_ui(t, i,
 				(coeff < 0) ? MODP - ((-coeff) % MODP) : (ulong)(coeff % MODP));
 	}
+}
+
+void commit_sample_gauss_batch_crt(nmod_poly_t r[2]) {
+	nmod_poly_t t;
+
+	nmod_poly_init(t, MODP);
+	commit_sample_gauss_batch(t);
 	for (int i = 0; i < NCRT; i++) {
 		pcrt_poly_reduce(r[i], t, i);
 	}
@@ -830,6 +888,28 @@ static void test(flint_rand_t rand) {
 		}
 		nmod_poly_sub(m, m, rho);
 		TEST_ASSERT(commit_open(&com, m, &key, s, f) == 1, end);
+	} TEST_END;
+
+	TEST_BEGIN("sparse product agrees with the full one") {
+		nmod_poly_t a, c0, c1;
+
+		nmod_poly_init(a, MODP);
+		nmod_poly_init(c0, MODP);
+		nmod_poly_init(c1, MODP);
+		/* A challenge, and a dense polynomial with a coefficient other than
+		 * +-1, which the sparse product has to handle as well. */
+		commit_sample_chall(rho);
+		nmod_poly_set_coeff_ui(rho, DEGREE - 1, 5);
+		nmod_poly_randtest(a, rand, DEGREE);
+		commit_poly_mulmod(c0, rho, a);
+		commit_poly_mul_sparse(c1, rho, a);
+		/* The output may alias an input. */
+		commit_poly_mul_sparse(a, rho, a);
+		int ok = nmod_poly_equal(c0, c1) && nmod_poly_equal(c0, a);
+		nmod_poly_clear(a);
+		nmod_poly_clear(c0);
+		nmod_poly_clear(c1);
+		TEST_ASSERT(ok, end);
 	} TEST_END;
 
   end:
