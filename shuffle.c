@@ -597,10 +597,9 @@ static int lin_verifier(nmod_poly_t y[WIDTH][2], nmod_poly_t w[WIDTH][2],
 void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t p[MSGS],
 		commit_t d[MSGS], nmod_poly_t _m[MSGS], nmod_poly_t tau,
 		nmod_poly_t rho) {
-	flint_rand_t rand;
 	SHA256Context sha;
 	uint8_t hash[SHA256HashSize];
-	uint64_t seed0, seed1, seed2, seed3;
+	prg_t prg;
 
 	SHA256Reset(&sha);
 
@@ -619,19 +618,13 @@ void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t p[MSGS],
 	hash_poly(&sha, rho);
 	SHA256Result(&sha, hash);
 
-	flint_rand_init(rand);
-	memcpy(&seed0, hash, sizeof(uint64_t));
-	memcpy(&seed1, hash + sizeof(uint64_t), sizeof(uint64_t));
-	memcpy(&seed2, hash + 2 * sizeof(uint64_t), sizeof(uint64_t));
-	memcpy(&seed3, hash + 3 * sizeof(uint64_t), sizeof(uint64_t));
-	seed0 ^= seed2;
-	seed1 ^= seed3;
-	flint_rand_set_seed(rand, seed0, seed1);
+	/* beta is public and must be reproducible by the verifier, so it is drawn
+	 * from a stream keyed by the hash rather than from the global one. */
+	prg_setseed(&prg, hash);
 	/* Challenges are sampled of degree below DEGCRT = N/2, so that the
 	 * difference of two distinct challenges is non-zero in both CRT components
 	 * and hence invertible. */
-	commit_sample_rand(beta, rand, DEGCRT);
-	flint_rand_clear(rand);
+	commit_sample_rand(beta, &prg, DEGCRT);
 }
 
 /**
@@ -713,7 +706,7 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 		nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS], nmod_poly_t sigma[MSGS],
 		nmod_poly_t r[MSGS][WIDTH][2], nmod_poly_t pr[MSGS][WIDTH][2],
 		nmod_poly_t tau, nmod_poly_t rho, commitkey_t *key,
-		uint8_t digest[MSGS][SHA256HashSize], flint_rand_t rng) {
+		uint8_t digest[MSGS][SHA256HashSize]) {
 	nmod_poly_t beta, alpha, gamma, pub, t0, t1;
 	nmod_poly_t a[MSGS], b[MSGS], theta[MSGS], _r[MSGS][WIDTH][2];
 	nmod_poly_t sig[MSGS][2];
@@ -759,14 +752,14 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 	}
 
 	/* Prover samples theta_i and computes commitments D_i. */
-	commit_sample_rand(theta[0], rng, DEGREE);
+	commit_sample_rand(theta[0], NULL, DEGREE);
 	commit_poly_mulmod(t0, theta[0], b[0]);
 	for (int j = 0; j < WIDTH; j++) {
 		commit_sample_short_crt(_r[0][j]);
 	}
 	commit_doit(&d[0], t0, key, _r[0]);
 	for (int i = 1; i < MSGS - 1; i++) {
-		commit_sample_rand(theta[i], rng, DEGREE);
+		commit_sample_rand(theta[i], NULL, DEGREE);
 		commit_poly_mulmod(t0, theta[i - 1], a[i]);
 		commit_poly_mulmod(t1, theta[i], b[i]);
 		nmod_poly_add(t0, t0, t1);
@@ -867,7 +860,6 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
  *							  permutation with _m[i] = m[pi[i]].
  * @param[in] r				- the randomness of the input commitments.
  * @param[in] key			- the commitment key.
- * @param[in] rng			- the random number generator.
  * @return 1 if the proof verifies, 0 otherwise.
  */
 /*
@@ -956,7 +948,7 @@ static size_t proof_bytes = 0;
 
 static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		nmod_poly_t sigma[MSGS], nmod_poly_t r[MSGS][WIDTH][2],
-		commitkey_t *key, flint_rand_t rng) {
+		commitkey_t *key) {
 	int result = 1;
 	commit_t d[MSGS], p[MSGS];
 	nmod_poly_t tau, rho, s[MSGS], u[MSGS][2];
@@ -1000,13 +992,13 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	/* Verifier samples the two challenges X1 = tau and X2 = rho of Lemma 5,
 	 * of degree below N/2 so that differences of distinct challenges are
 	 * invertible. */
-	commit_sample_rand(tau, rng, DEGCRT);
-	commit_sample_rand(rho, rng, DEGCRT);
+	commit_sample_rand(tau, NULL, DEGCRT);
+	commit_sample_rand(rho, NULL, DEGCRT);
 
 	static uint8_t digest[MSGS][SHA256HashSize];
 
 	shuffle_prover(y, w, _y, ys, t, tp, _t, vs, u, d, s, com, p, m, _m, sigma,
-			r, pr, tau, rho, key, digest, rng);
+			r, pr, tau, rho, key, digest);
 
 	/* Round-trip the proof through its serialisation before verifying it, so
 	 * that the measured size is the size of something that actually verifies
@@ -1110,7 +1102,7 @@ static void crt_swap(nmod_poly_t out0, nmod_poly_t out1, nmod_poly_t in0,
 	}
 }
 
-static void test(flint_rand_t rand) {
+static void test(void) {
 	commitkey_t key;
 	commit_t com[MSGS];
 	int pi[MSGS];
@@ -1137,7 +1129,7 @@ static void test(flint_rand_t rand) {
 	/* Generate commitment key-> */
 	commit_setup();
 	commit_keyinit(&key);
-	commit_keygen(&key, rand);
+	commit_keygen(&key);
 
 	for (int i = 0; i < MSGS; i++) {
 		for (int j = 0; j < WIDTH; j++) {
@@ -1158,7 +1150,7 @@ static void test(flint_rand_t rand) {
 
 	TEST_ONCE("proof survives serialisation, and measures what it should") {
 		measure_proof = 1;
-		TEST_ASSERT(run(com, m, _m, sigma, r, &key, rand) == 1, end);
+		TEST_ASSERT(run(com, m, _m, sigma, r, &key) == 1, end);
 		measure_proof = 0;
 		printf("\n    %zu bytes, %.1f KB per message\n", proof_bytes,
 				proof_bytes / 1024.0 / MSGS);
@@ -1192,7 +1184,7 @@ static void test(flint_rand_t rand) {
 	} TEST_END;
 
 	TEST_ONCE("shuffle proof is consistent") {
-		TEST_ASSERT(run(com, m, _m, sigma, r, &key, rand) == 1, end);
+		TEST_ASSERT(run(com, m, _m, sigma, r, &key) == 1, end);
 	} TEST_END;
 
 	/* Mount the attack of Section 4.1: the output list is obtained from the
@@ -1207,7 +1199,7 @@ static void test(flint_rand_t rand) {
 	TEST_ONCE("CRT-mixed list is not a permutation but passes Neff's product") {
 		TEST_ASSERT(nmod_poly_equal(am[0], m[0]) == 0, end);
 		TEST_ASSERT(nmod_poly_equal(am[0], m[1]) == 0, end);
-		commit_sample_rand(rho, rand, DEGCRT);
+		commit_sample_rand(rho, NULL, DEGCRT);
 		neff_product(p0, m, rho);
 		neff_product(p1, am, rho);
 		TEST_ASSERT(nmod_poly_equal(p0, p1) == 1, end);
@@ -1221,7 +1213,7 @@ static void test(flint_rand_t rand) {
 	}
 
 	TEST_ONCE("shuffle proof rejects the CRT-mixing attack") {
-		TEST_ASSERT(run(com, m, am, sigma, r, &key, rand) == 0, end);
+		TEST_ASSERT(run(com, m, am, sigma, r, &key) == 0, end);
 	} TEST_END;
 
 	/* Second-order attack, targeting the missing is_bin(sigma_i) sub-proof:
@@ -1248,7 +1240,7 @@ static void test(flint_rand_t rand) {
 	} TEST_END;
 
 	TEST_ONCE("shuffle proof rejects the CRT-mixing attack on sigma") {
-		TEST_ASSERT(run(com, m, am, sigma, r, &key, rand) == 0, end);
+		TEST_ASSERT(run(com, m, am, sigma, r, &key) == 0, end);
 	} TEST_END;
 
   end:
@@ -1274,7 +1266,7 @@ static void test(flint_rand_t rand) {
 	commit_keyfree(&key);
 }
 
-static void bench(flint_rand_t rand) {
+static void bench(void) {
 	commitkey_t key;
 	commit_t com[MSGS];
 	int pi[MSGS];
@@ -1301,7 +1293,7 @@ static void bench(flint_rand_t rand) {
 	/* Generate commitment key-> */
 	commit_setup();
 	commit_keyinit(&key);
-	commit_keygen(&key, rand);
+	commit_keygen(&key);
 
 	for (int i = 0; i < MSGS; i++) {
 		for (int j = 0; j < WIDTH; j++) {
@@ -1320,7 +1312,7 @@ static void bench(flint_rand_t rand) {
 	}
 
 	BENCH_BEGIN("shuffle-proof (N messages)") {
-		BENCH_ADD(run(com, m, _m, sigma, r, &key, rand));
+		BENCH_ADD(run(com, m, _m, sigma, r, &key));
 	} BENCH_END;
 
 	for (int i = 0; i < NCRT; i++) {
@@ -1346,9 +1338,9 @@ static void bench(flint_rand_t rand) {
 			commit_sample_short_crt(r[i][j]);
 		}
 	}
-	commit_sample_rand(alpha, rand, DEGCRT);
-	commit_sample_rand(gamma, rand, DEGCRT);
-	commit_sample_rand(beta, rand, DEGREE);
+	commit_sample_rand(alpha, NULL, DEGCRT);
+	commit_sample_rand(gamma, NULL, DEGCRT);
+	commit_sample_rand(beta, NULL, DEGREE);
 	uint8_t dg[SHA256HashSize];
 
 	BENCH_BEGIN("linear proof") {
@@ -1406,19 +1398,13 @@ static int phase_selected(int argc, char *argv[], const char *phase) {
 }
 
 int main(int argc, char *argv[]) {
-	flint_rand_t rand;
-
-	flint_rand_init(rand);
-
 	if (phase_selected(argc, argv, "test")) {
 		printf("\n** Tests for lattice-based shuffle proof:\n\n");
-		test(rand);
+		test();
 	}
 
 	if (phase_selected(argc, argv, "bench")) {
 		printf("\n** Benchmarks for lattice-based shuffle proof:\n\n");
-		bench(rand);
+		bench();
 	}
-
-	flint_rand_clear(rand);
 }

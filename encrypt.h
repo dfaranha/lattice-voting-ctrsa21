@@ -169,13 +169,12 @@ fmpz_mod_poly_t *encrypt_large_irred(int i);
 fmpz_mod_poly_t *encrypt_poly();
 
 /**
- * Generate a key pair for the encryption scheme using a PRNG.
+ * Generate a key pair for the encryption scheme.
  *
  * @param[out] pk 		- the generated public key.
  * @param[out] sk 		- the generated private key.
- * @param[in] rand		- the random number generator.
  */
-void encrypt_keygen(publickey_t *pk, privatekey_t *sk, flint_rand_t rand);
+void encrypt_keygen(publickey_t *pk, privatekey_t *sk);
 
 /**
  * Free a key pair for the encryption scheme.
