@@ -306,6 +306,100 @@ static int lin_verifier(nmod_poly_t y[WIDTH], nmod_poly_t _y[WIDTH],
 	return result;
 }
 
+/**
+ * Absorb a polynomial into a hash computation in a canonical way.
+ *
+ * The coefficients are absorbed one by one up to DEGREE, so that the digest
+ * depends only on the value of the polynomial. Absorbing the raw coefficient
+ * array instead makes the digest depend on the capacity FLINT happens to have
+ * allocated, which is a function of how the polynomial was built and therefore
+ * need not agree between the prover and the verifier.
+ *
+ * @param[in,out] sha		- the hash context.
+ * @param[in] p				- the polynomial to absorb.
+ */
+static void hash_poly(SHA256Context *sha, nmod_poly_t p) {
+	uint64_t buf[DEGREE];
+
+	for (int i = 0; i < DEGREE; i++) {
+		buf[i] = nmod_poly_get_coeff_ui(p, i);
+	}
+	SHA256Input(sha, (const uint8_t *)buf, sizeof(buf));
+}
+
+/**
+ * Derive the evaluation point rho from the statement.
+ *
+ * The products of (m_i - rho) and (_m_i - rho) agreeing only shows that _m is
+ * a permutation of m if rho is fixed after the statement and cannot be chosen
+ * by the prover, which is what a verifier picking it at random gives an
+ * interactive proof. Here nobody is left to pick it, so it is a hash of the
+ * input commitments and the output list, which both sides compute alike. rho
+ * must also differ from every _m_i, or the prover would have to invert zero;
+ * a counter absorbed into the hash re-derives it in that case, which keeps it
+ * deterministic.
+ *
+ * @param[out] rho			- the evaluation point.
+ * @param[in] com			- the commitments to the input messages.
+ * @param[in] _m			- the output list.
+ */
+static void shuffle_rho(nmod_poly_t rho, commit_t com[MSGS],
+		nmod_poly_t _m[MSGS]) {
+	SHA256Context sha;
+	uint8_t hash[SHA256HashSize];
+	prg_t prg;
+	int flag;
+
+	for (uint8_t ctr = 0;; ctr++) {
+		SHA256Reset(&sha);
+		SHA256Input(&sha, (const uint8_t *)"rho", 3);
+		SHA256Input(&sha, &ctr, 1);
+		for (int i = 0; i < MSGS; i++) {
+			hash_poly(&sha, _m[i]);
+			/* No CRT splitting here: each component is a single polynomial. */
+			hash_poly(&sha, com[i].c1);
+			hash_poly(&sha, com[i].c2);
+		}
+		SHA256Result(&sha, hash);
+
+		prg_setseed(&prg, hash);
+		commit_sample_rand(rho, &prg, DEGREE);
+		flag = 1;
+		for (int i = 0; i < MSGS; i++) {
+			if (nmod_poly_equal(rho, _m[i]) == 1) {
+				flag = 0;
+			}
+		}
+		if (flag) {
+			return;
+		}
+	}
+}
+
+/**
+ * Shift the statement by rho into fresh copies, leaving the caller's intact.
+ *
+ * @param[out] sc			- the commitments with rho subtracted from c2.
+ * @param[out] sm			- the list with rho subtracted from each entry.
+ * @param[in] com			- the commitments.
+ * @param[in] m				- the list.
+ * @param[in] rho			- the evaluation point.
+ */
+static void shuffle_shift(commit_t sc[MSGS], nmod_poly_t sm[MSGS],
+		commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t rho) {
+	for (int i = 0; i < MSGS; i++) {
+		nmod_poly_sub(sm[i], m[i], rho);
+	}
+	if (sc != NULL) {
+		/* Ring elements are kept in coefficient representation, so rho is
+		 * subtracted as it is, with no reduction into CRT components. */
+		for (int i = 0; i < MSGS; i++) {
+			nmod_poly_set(sc[i].c1, com[i].c1);
+			nmod_poly_sub(sc[i].c2, com[i].c2, rho);
+		}
+	}
+}
+
 void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS],
 		nmod_poly_t _m[MSGS], nmod_poly_t rho) {
 	SHA256Context sha;
@@ -339,26 +433,32 @@ void shuffle_hash(nmod_poly_t beta, commit_t c[MSGS], commit_t d[MSGS],
 static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH],
 		nmod_poly_t _y[MSGS][WIDTH], nmod_poly_t t[MSGS],
 		nmod_poly_t _t[MSGS], nmod_poly_t u[MSGS], commit_t d[MSGS],
-		nmod_poly_t s[MSGS], commit_t com[MSGS], nmod_poly_t m[MSGS],
-		nmod_poly_t _m[MSGS], nmod_poly_t r[MSGS][WIDTH], nmod_poly_t rho,
+		nmod_poly_t s[MSGS], commit_t com_in[MSGS], nmod_poly_t m_in[MSGS],
+		nmod_poly_t _m_in[MSGS], nmod_poly_t r[MSGS][WIDTH],
 		commitkey_t *key, uint8_t digest[MSGS][SHA256HashSize]) {
-	nmod_poly_t beta, t0, t1, theta[MSGS], _r[MSGS][WIDTH];
+	nmod_poly_t beta, rho, t0, t1, theta[MSGS], _r[MSGS][WIDTH];
+	/* The statement shifted by rho. */
+	commit_t com[MSGS];
+	nmod_poly_t m[MSGS], _m[MSGS];
 
 	nmod_poly_init(t0, MODP);
 	nmod_poly_init(t1, MODP);
 	nmod_poly_init(beta, MODP);
+	nmod_poly_init(rho, MODP);
 	for (int i = 0; i < MSGS; i++) {
+		commit_init(&com[i]);
+		nmod_poly_init(m[i], MODP);
+		nmod_poly_init(_m[i], MODP);
 		nmod_poly_init(theta[i], MODP);
 		for (int j = 0; j < WIDTH; j++) {
 			nmod_poly_init(_r[i][j], MODP);
 		}
 	}
 
-	/* Prover shifts the messages by rho. */
-	for (int i = 0; i < MSGS; i++) {
-		nmod_poly_sub(m[i], m[i], rho);
-		nmod_poly_sub(_m[i], _m[i], rho);
-	}
+	/* Prover derives rho and shifts the commitments and both lists by it. */
+	shuffle_rho(rho, com_in, _m_in);
+	shuffle_shift(com, m, com_in, m_in, rho);
+	shuffle_shift(NULL, _m, NULL, _m_in, rho);
 
 	/* Prover samples theta_i and computes commitments D_i. */
 	commit_sample_rand(theta[0], NULL, DEGREE);
@@ -418,7 +518,11 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH],
 	nmod_poly_clear(t0);
 	nmod_poly_clear(t1);
 	nmod_poly_clear(beta);
+	nmod_poly_clear(rho);
 	for (int i = 0; i < MSGS; i++) {
+		commit_free(&com[i]);
+		nmod_poly_clear(m[i]);
+		nmod_poly_clear(_m[i]);
 		nmod_poly_clear(theta[i]);
 		for (int j = 0; j < WIDTH; j++) {
 			nmod_poly_clear(_r[i][j]);
@@ -429,14 +533,25 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH],
 static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH],
 		nmod_poly_t _y[MSGS][WIDTH], nmod_poly_t t[MSGS],
 		nmod_poly_t _t[MSGS], nmod_poly_t u[MSGS], commit_t d[MSGS],
-		nmod_poly_t s[MSGS], commit_t com[MSGS], nmod_poly_t _m[MSGS],
-		nmod_poly_t rho, commitkey_t *key,
-		uint8_t digest[MSGS][SHA256HashSize]) {
+		nmod_poly_t s[MSGS], commit_t com_in[MSGS], nmod_poly_t _m_in[MSGS],
+		commitkey_t *key, uint8_t digest[MSGS][SHA256HashSize]) {
 	int result = 1;
-	nmod_poly_t beta, t0;
+	nmod_poly_t beta, rho, t0;
+	/* The statement shifted by rho. */
+	commit_t com[MSGS];
+	nmod_poly_t _m[MSGS];
 
 	nmod_poly_init(t0, MODP);
 	nmod_poly_init(beta, MODP);
+	nmod_poly_init(rho, MODP);
+	for (int i = 0; i < MSGS; i++) {
+		commit_init(&com[i]);
+		nmod_poly_init(_m[i], MODP);
+	}
+
+	/* Verifier derives rho from the statement alone, as the prover did. */
+	shuffle_rho(rho, com_in, _m_in);
+	shuffle_shift(com, _m, com_in, _m_in, rho);
 
 	shuffle_hash(beta, com, d, _m, rho);
 	/* Now verify each \Prod_LIN instance, one for each commitment. */
@@ -460,6 +575,11 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH],
 
 	nmod_poly_clear(t0);
 	nmod_poly_clear(beta);
+	nmod_poly_clear(rho);
+	for (int i = 0; i < MSGS; i++) {
+		commit_free(&com[i]);
+		nmod_poly_clear(_m[i]);
+	}
 	return result;
 }
 
@@ -526,14 +646,11 @@ static size_t proof_bytes = 0;
 
 static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		nmod_poly_t r[MSGS][WIDTH], commitkey_t *key) {
-	int flag, result = 1;
+	int result = 1;
 	commit_t d[MSGS];
-	nmod_poly_t t0, t1, rho, s[MSGS], u[MSGS];
+	nmod_poly_t s[MSGS], u[MSGS];
 	nmod_poly_t y[MSGS][WIDTH], _y[MSGS][WIDTH], t[MSGS], _t[MSGS];
 
-	nmod_poly_init(t0, MODP);
-	nmod_poly_init(t1, MODP);
-	nmod_poly_init(rho, MODP);
 	for (int i = 0; i < MSGS; i++) {
 		commit_init(&d[i]);
 		nmod_poly_init(s[i], MODP);
@@ -546,25 +663,9 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		}
 	}
 
-	/* Verifier samples \rho that is different from the messages, and \beta. */
-	do {
-		flag = 1;
-		commit_sample_rand(rho, NULL, DEGREE);
-		for (int i = 0; i < MSGS; i++) {
-			if (nmod_poly_equal(rho, _m[i]) == 1) {
-				flag = 0;
-			}
-		}
-	} while (flag == 0);
-
-	/* Verifier shifts the commitments by rho. */
-	for (int i = 0; i < MSGS; i++) {
-		nmod_poly_sub(com[i].c2, com[i].c2, rho);
-	}
-
 	static uint8_t digest[MSGS][SHA256HashSize];
 
-	shuffle_prover(y, _y, t, _t, u, d, s, com, m, _m, r, rho, key, digest);
+	shuffle_prover(y, _y, t, _t, u, d, s, com, m, _m, r, key, digest);
 
 	/* Round-trip the proof through its serialisation before verifying it, so
 	 * that the measured size is the size of something that actually verifies
@@ -582,12 +683,8 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		proof_walk(&pf, NULL, &br);
 	}
 
-	result = shuffle_verifier(y, _y, t, _t, u, d, s, com, _m, rho, key,
-			digest);
+	result = shuffle_verifier(y, _y, t, _t, u, d, s, com, _m, key, digest);
 
-	nmod_poly_clear(t0);
-	nmod_poly_clear(t1);
-	nmod_poly_clear(rho);
 	for (int i = 0; i < MSGS; i++) {
 		commit_free(&d[i]);
 		nmod_poly_clear(s[i]);
@@ -605,12 +702,15 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 
 static void test(void) {
 	commitkey_t key;
-	commit_t com[MSGS];
-	nmod_poly_t m[MSGS], _m[MSGS], r[MSGS][WIDTH];
+	commit_t com[MSGS], com0[MSGS];
+	nmod_poly_t m[MSGS], _m[MSGS], m0[MSGS], _m0[MSGS], r[MSGS][WIDTH];
 
 	for (int i = 0; i < MSGS; i++) {
 		nmod_poly_init(m[i], MODP);
 		nmod_poly_init(_m[i], MODP);
+		nmod_poly_init(m0[i], MODP);
+		nmod_poly_init(_m0[i], MODP);
+		commit_init(&com0[i]);
 		for (int j = 0; j < WIDTH; j++) {
 			nmod_poly_init(r[i][j], MODP);
 		}
@@ -670,13 +770,45 @@ static void test(void) {
 		TEST_ASSERT(run(com, m, _m, r, &key) == 1, end);
 	} TEST_END;
 
+	/* Shifting by rho used to happen in place, so every proof left the
+	 * statement shifted for the next one. */
+	TEST_ONCE("shuffle proof leaves its statement untouched") {
+		for (int i = 0; i < MSGS; i++) {
+			nmod_poly_set(m0[i], m[i]);
+			nmod_poly_set(_m0[i], _m[i]);
+			nmod_poly_set(com0[i].c1, com[i].c1);
+			nmod_poly_set(com0[i].c2, com[i].c2);
+		}
+		TEST_ASSERT(run(com, m, _m, r, &key) == 1, end);
+		for (int i = 0; i < MSGS; i++) {
+			TEST_ASSERT(nmod_poly_equal(m0[i], m[i]) == 1, end);
+			TEST_ASSERT(nmod_poly_equal(_m0[i], _m[i]) == 1, end);
+			TEST_ASSERT(nmod_poly_equal(com0[i].c1, com[i].c1), end);
+			TEST_ASSERT(nmod_poly_equal(com0[i].c2, com[i].c2), end);
+		}
+	} TEST_END;
+
+	TEST_ONCE("shuffle proof rejects a list that is not a permutation") {
+		for (int i = 0; i < MSGS; i++) {
+			nmod_poly_set(_m0[i], _m[i]);
+		}
+		/* Replace one output by a message that is not among the inputs. */
+		nmod_poly_set(_m0[0], m[1]);
+		nmod_poly_set_coeff_ui(_m0[0], 0,
+				(nmod_poly_get_coeff_ui(_m0[0], 0) + 2) % MODP);
+		TEST_ASSERT(run(com, m, _m0, r, &key) == 0, end);
+	} TEST_END;
+
   end:
 	commit_finish();
 
 	for (int i = 0; i < MSGS; i++) {
 		commit_free(&com[i]);
+		commit_free(&com0[i]);
 		nmod_poly_clear(m[i]);
 		nmod_poly_clear(_m[i]);
+		nmod_poly_clear(m0[i]);
+		nmod_poly_clear(_m0[i]);
 		for (int j = 0; j < WIDTH; j++) {
 			nmod_poly_clear(r[i][j]);
 		}
