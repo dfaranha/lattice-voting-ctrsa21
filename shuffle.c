@@ -179,9 +179,11 @@ static void lin_prover(uint8_t digest[SHA256HashSize],
 		int l) {
 	nmod_poly_t tmp, d[2], dr[WIDTH][2], _dr[WIDTH][2];
 	int rej0, rej1;
-	// Compute sigma^2 = (11 * v * beta * sqrt(k * N))^2.
-	uint64_t sigma_sqr = 11 * NONZERO * BETA;
-	sigma_sqr *= sigma_sqr * DEGREE * WIDTH;
+	/* Rejection sampling only makes z independent of the witness when it
+	 * tests against the width y was actually sampled at, which is the SIGMA_C
+	 * the Gaussian sampler is compiled with, not the paper's lower bound
+	 * 11 * v * beta * sqrt(k * N) on that width. */
+	const uint64_t sigma_sqr = (uint64_t) SIGMA_C * SIGMA_C;
 
 	for (int i = 0; i < WIDTH; i++) {
 		for (int j = 0; j < NCRT; j++) {
