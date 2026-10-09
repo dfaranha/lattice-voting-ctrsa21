@@ -51,7 +51,6 @@ proof. This table is the reference for what each costs and what each is worth.
 | branch | modulus | `DEGREE` | `WIDTH` | `NONZERO` | proof, per message | MSIS binding | MLWE hiding | MLWE encryption | security level |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `master` | `2^31.86` | 1024 | 3 | 36 | 25.4 KB | 117.4 | 72.7 | 88.8 | **72.7** |
-| `nocrt` | `2^31.86` | 1024 | 3 | 36 | 25.4 KB | 117.4 | 72.7 | 88.8 | **72.7** |
 | `fix-pkc` | `2^31.86` | 1024 | 3 | 36 | 41.4 KB | 117.4 | 72.7 | 88.8 | **72.7** |
 | `balanced-params` | `2^31.25` | 1024 | 4 | 20 | 47.1 KB | 128.2 | 191.6 | 159.7 | **128.2** |
 | `lnp` | `2^40` | 2048 | 3 | 18 | 132.9 KB | 352.2 | 140.2 | 326.2 | **140.2** |
@@ -73,12 +72,12 @@ first messages, which the verifier recovers rather than receiving.
 Six things the table is worth reading for.
 
 **The published parameters give about 73 bits as per latest estimates, not the 100 claimed in the
-paper at the time.** `master`, `nocrt` and `fix-pkc` are all limited by the hiding property
+paper at the time.** `master` and `fix-pkc` are both limited by the hiding property
 of the commitment, which is MLWE of rank `WIDTH - HEIGHT - 1`, and at
 `WIDTH = 3` that rank is 1. Binding and encryption are comfortable; hiding is
 not. `balanced-params` exists to fix this, and does, at `WIDTH = 4`.
 
-**`master` and `nocrt` are the unpatched protocol.** Their proofs are the
+**`master` is the unpatched protocol.** Its proofs are the
 smallest in the table and establish the least: the attack of ePrint 2025/658
 breaks them, and the test suites on the patched branches demonstrate it
 succeeding. The 25.4 KB is a reference point, not a recommendation.
@@ -93,7 +92,6 @@ and brackets the byte count by it -- below a flat encoding, above the entropy
 | branch | achieved | flat | entropy | was | is |
 | --- | --- | --- | --- | --- | --- |
 | `master` | 17.86 | 20 | 17.77 | 27.0 KB | 25.4 KB |
-| `nocrt` | 17.85 | 20 | 17.77 | 27.0 KB | 25.4 KB |
 | `fix-pkc` | 17.09 | 19.20 | 17.00 | 44.0 KB | 41.4 KB |
 | `balanced-params` | 16.65 | 18.46 | 16.55 | 50.0 KB | 47.1 KB |
 | `lnp` | 19.50 | 20.95 | 19.33 | 137.0 KB | 132.9 KB |
@@ -127,5 +125,13 @@ Every branch omits the first messages from the proof and carries the 32-byte
 Fiat-Shamir digest instead, the verifier recovering each first message from the
 equation that used to check it. That is worth 25 to 31 per cent and is already
 included above.
+
+The CRT splitting of the commitment ring buys no speed. A `nocrt` branch did
+the same arithmetic on whole polynomials, and once master stopped hashing each
+CRT component as if it were a full polynomial, the two did the same work per
+prover attempt, within 2 per cent of instructions retired. FLINT multiplies in
+quasi-linear time, so two products of half the degree cost about what one of
+the full degree does, and the conversions between the representations take the
+rest. The branch is gone; its last state is the tag `archive/nocrt`.
 
 `LNP-PARAMS.md` on the `lnp` branch has the derivations and the caveats.
