@@ -291,6 +291,30 @@ void commit_keyinit(commitkey_t *key) {
 	}
 }
 
+static_assert(MODP < ((uint64_t) 1 << 32),
+		"commit_hash_poly absorbs coefficients as four bytes");
+
+static void hash_coeffs(SHA256Context *sha, nmod_poly_t p, int len) {
+	uint32_t buf[DEGREE];
+
+	for (int i = 0; i < len; i++) {
+		buf[i] = (uint32_t) nmod_poly_get_coeff_ui(p, i);
+	}
+	SHA256Input(sha, (const uint8_t *)buf, len * sizeof(uint32_t));
+}
+
+void commit_hash_poly(SHA256Context *sha, nmod_poly_t p) {
+	hash_coeffs(sha, p, DEGREE);
+}
+
+void commit_hash_crt(SHA256Context *sha, nmod_poly_t p) {
+	if (nmod_poly_length(p) > DEGCRT) {
+		fprintf(stderr, "commit_hash_crt: CRT component is not reduced\n");
+		abort();
+	}
+	hash_coeffs(sha, p, DEGCRT);
+}
+
 // Generate a key pair.
 void commit_keygen(commitkey_t *key) {
 	for (int i = 0; i < HEIGHT; i++) {
@@ -322,6 +346,23 @@ void commit_keygen(commitkey_t *key) {
 			}
 		}
 	}
+
+	SHA256Context sha;
+
+	SHA256Reset(&sha);
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int j = 0; j < WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				commit_hash_crt(&sha, key->B1[i][j][k]);
+			}
+		}
+	}
+	for (int j = 0; j < WIDTH; j++) {
+		for (int k = 0; k < NCRT; k++) {
+			commit_hash_crt(&sha, key->b2[j][k]);
+		}
+	}
+	SHA256Result(&sha, key->digest);
 }
 
 // Free a commitment key pair.
