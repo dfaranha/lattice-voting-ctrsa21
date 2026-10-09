@@ -201,9 +201,12 @@ int rej_sampling(nmod_poly_t z[][2], nmod_poly_t v[][2], uint64_t s2,
  * that used to check it, and re-derives the digest to confirm it matches. */
 static void challenge_from_hash(nmod_poly_t d[2],
 		const uint8_t hash[SHA256HashSize]) {
+	/* A local stream: keying the global one with public data would expose
+	 * the masks that the Gaussian sampler draws from it. */
+	prg_t prg;
 	uint32_t buf;
 
-	fastrandombytes_setseed((uint8_t *) hash);
+	prg_setseed(&prg, hash);
 	/* The two slots of d are reused as the halves of the challenge d[0] - d[1]
 	 * before being reduced into CRT components below, so this 2 belongs to the
 	 * challenge construction rather than to the CRT decomposition. */
@@ -211,10 +214,10 @@ static void challenge_from_hash(nmod_poly_t d[2],
 		nmod_poly_zero(d[i]);
 		nmod_poly_fit_length(d[i], DEGREE);
 		for (int j = 0; j < NONZERO; j++) {
-			fastrandombytes((unsigned char *)&buf, sizeof(buf));
+			prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 			buf = buf % DEGREE;
 			while (nmod_poly_get_coeff_ui(d[i], buf) != 0) {
-				fastrandombytes((unsigned char *)&buf, sizeof(buf));
+				prg_bytes(&prg, (unsigned char *)&buf, sizeof(buf));
 				buf = buf % DEGREE;
 			}
 			nmod_poly_set_coeff_ui(d[i], buf, 1);
