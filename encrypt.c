@@ -170,7 +170,12 @@ void encrypt_sample_short(fmpz_mod_poly_t r, fmpz_mod_ctx_t ctx) {
 	fmpz_mod_poly_zero(r, ctx);
 	fmpz_mod_poly_fit_length(r, DEGREE, ctx);
 	for (int i = 0; i < DEGREE; i += 32) {
-		getrandom(&buf, sizeof(buf), 0);
+		/* The secret key and the encryption randomness come from here, so a
+		 * failed read must not leave buf as whatever was on the stack. */
+		if (getrandom(&buf, sizeof(buf), 0) != sizeof(buf)) {
+			perror("getrandom");
+			abort();
+		}
 		for (int j = 0; j < 64; j += 2) {
 			fmpz_set_ui(coeff, ((buf >> (j + 1)) & 1));
 			if ((buf >> j) & 1) {
