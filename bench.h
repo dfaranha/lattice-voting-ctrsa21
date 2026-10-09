@@ -117,6 +117,6 @@ void bench_print(void);
  *
  * @return the last benchmark.
  */
-unsigned long long bench_total(void);
+unsigned long long bench_get_total(void);
 
 #endif /* !BENCH_H */

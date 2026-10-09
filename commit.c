@@ -13,6 +13,7 @@
 #include "test.h"
 #include "bench.h"
 #include "gaussian.h"
+#include "randombytes.h"
 #include "fastrandombytes.h"
 
 /*============================================================================*/
@@ -400,7 +401,7 @@ void commit_sample_short(nmod_poly_t r) {
 
 	do {
 		if (j == s) {
-			getrandom(&buf, sizeof(buf), 0);
+			randombytes((unsigned char *)&buf, sizeof(buf));
 			j = 0;
 		}
 
@@ -477,7 +478,7 @@ void commit_sample_chall(nmod_poly_t f) {
 			uint32_t pos;
 
 			do {
-				getrandom(&buf, sizeof(buf), 0);
+				randombytes((unsigned char *)&buf, sizeof(buf));
 				pos = buf % DEGREE;
 			} while (nmod_poly_get_coeff_ui(c[i], pos) != 0);
 			nmod_poly_set_coeff_ui(c[i], pos, (buf >> 31) ? MODP - 1 : 1);
@@ -877,7 +878,7 @@ int main(int argc, char *arv[]) {
 	flint_rand_t rand;
 	uint64_t buf[2];
 
-	getrandom(buf, sizeof(buf), GRND_RANDOM);
+	randombytes((unsigned char *)buf, sizeof(buf));
 	flint_rand_init(rand);
 	flint_rand_set_seed(rand, buf[0], buf[1]);
 

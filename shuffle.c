@@ -8,6 +8,7 @@
 #include "serial.h"
 #include "assert.h"
 #include "fastrandombytes.h"
+#include "randombytes.h"
 #include "sha.h"
 
 /*============================================================================*/
@@ -117,7 +118,7 @@ static int is_invertible(nmod_poly_t a) {
 static double uniform_double(void) {
 	uint64_t bits;
 
-	getrandom(&bits, sizeof(bits), 0);
+	randombytes((unsigned char *)&bits, sizeof(bits));
 	/* Keep the top 53 bits, the precision of the mantissa of a double. */
 	return (double)(bits >> 11) * 0x1.0p-53;
 }
@@ -1527,14 +1528,17 @@ static void bench(void) {
 	commit_t com[MSGS];
 	int pi[MSGS];
 	nmod_poly_t m[MSGS], _m[MSGS], sigma[MSGS];
-	nmod_poly_t alpha, gamma, beta;
-	nmod_poly_t r[MSGS][WIDTH][2];
+	commit_t p, _com;
+	nmod_poly_t alpha, gamma, beta, _mm, t0;
+	nmod_poly_t r[MSGS][WIDTH][2], pr[WIDTH][2], _r[WIDTH][2];
 	nmod_poly_t y[WIDTH][2], w[WIDTH][2], _y[WIDTH][2], ys[1][2];
 	nmod_poly_t t[2], tp[2], _t[2], vs[2], u[2], sig[2];
 
 	nmod_poly_init(alpha, MODP);
 	nmod_poly_init(gamma, MODP);
 	nmod_poly_init(beta, MODP);
+	nmod_poly_init(_mm, MODP);
+	nmod_poly_init(t0, MODP);
 	for (int i = 0; i < MSGS; i++) {
 		nmod_poly_init(m[i], MODP);
 		nmod_poly_init(_m[i], MODP);
@@ -1586,28 +1590,42 @@ static void bench(void) {
 			nmod_poly_init(y[i][j], MODP);
 			nmod_poly_init(w[i][j], MODP);
 			nmod_poly_init(_y[i][j], MODP);
+			nmod_poly_init(pr[i][j], MODP);
+			nmod_poly_init(_r[i][j], MODP);
 		}
 	}
 
-	for (int i = 0; i < MSGS; i++) {
-		for (int j = 0; j < WIDTH; j++) {
-			commit_sample_short_crt(r[i][j]);
-		}
-	}
+	/* A statement the witness satisfies: com[0] opens to m[0] under r[0], p
+	 * to the permutation element sigma[1] under randomness of its own, and
+	 * _com to alpha * m[0] + gamma * sigma[1] + beta under randomness of its
+	 * own. This used to pair com[0], com[1] and com[2] with freshly resampled
+	 * randomness, and com[1] with sigma[1] it does not commit to: a false
+	 * statement whose proof the verifier always rejected. */
 	commit_sample_rand(alpha, NULL, DEGCRT);
 	commit_sample_rand(gamma, NULL, DEGCRT);
 	commit_sample_rand(beta, NULL, DEGREE);
+	for (int i = 0; i < WIDTH; i++) {
+		commit_sample_short_crt(pr[i]);
+		commit_sample_short_crt(_r[i]);
+	}
+	commit_init(&p);
+	commit_doit(&p, sigma[1], &key, pr);
+	commit_poly_mulmod(_mm, alpha, m[0]);
+	commit_poly_mulmod(t0, gamma, sigma[1]);
+	nmod_poly_add(_mm, _mm, t0);
+	nmod_poly_add(_mm, _mm, beta);
+	commit_init(&_com);
+	commit_doit(&_com, _mm, &key, _r);
 	uint8_t dg[SHA256HashSize];
 
 	BENCH_BEGIN("linear proof") {
-		BENCH_ADD(lin_prover(dg, y, w, _y, ys, t, tp, _t, vs, u, com[0],
-						com[1], com[2], &key, alpha, gamma, beta, r[0], r[1],
-						r[2], sig));
+		BENCH_ADD(lin_prover(dg, y, w, _y, ys, t, tp, _t, vs, u, com[0], p,
+						_com, &key, alpha, gamma, beta, r[0], pr, _r, sig));
 	} BENCH_END;
 
 	BENCH_BEGIN("linear verifier") {
-		BENCH_ADD(lin_verifier(y, w, _y, ys, t, tp, _t, vs, u, com[0], com[1],
-						com[2], &key, alpha, gamma, beta, dg));
+		BENCH_ADD(lin_verifier(y, w, _y, ys, t, tp, _t, vs, u, com[0], p,
+						_com, &key, alpha, gamma, beta, dg));
 	} BENCH_END;
 
 	commit_finish();
@@ -1640,8 +1658,14 @@ static void bench(void) {
 			nmod_poly_clear(y[i][j]);
 			nmod_poly_clear(w[i][j]);
 			nmod_poly_clear(_y[i][j]);
+			nmod_poly_clear(pr[i][j]);
+			nmod_poly_clear(_r[i][j]);
 		}
 	}
+	commit_free(&p);
+	commit_free(&_com);
+	nmod_poly_clear(_mm);
+	nmod_poly_clear(t0);
 
 	commit_keyfree(&key);
 }
