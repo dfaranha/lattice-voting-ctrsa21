@@ -202,7 +202,7 @@ int lnp_auto_swaps(slong k);
  * Initialise, generate and free a multi-slot commitment key.
  */
 void lnp_keyinit(lnpkey_t *key);
-void lnp_keygen(lnpkey_t *key, flint_rand_t rand);
+void lnp_keygen(lnpkey_t *key);
 void lnp_keyfree(lnpkey_t *key);
 
 /**
@@ -254,12 +254,12 @@ void lnp_isbin_product(pcrt_poly_t f, pcrt_poly_t s);
 
 /**
  * Sample a polynomial uniformly at random subject to its constant coefficient
- * being zero. These are the masks of the constant-coefficient proof.
+ * being zero. These are the masks of the constant-coefficient proof, which
+ * are secret, so they are drawn from the global stream.
  *
  * @param[out] g			- the sampled polynomial, in CRT representation.
- * @param[in] rand			- the source of randomness.
  */
-void lnp_sample_ct_zero(pcrt_poly_t g, flint_rand_t rand);
+void lnp_sample_ct_zero(pcrt_poly_t g);
 
 
 
@@ -301,7 +301,7 @@ void lnp_binproof_free(lnpbinproof_t *pi);
  * Initialise, generate and free the batch-mask key and commitment.
  */
 void lnp_maskkey_init(lnpmaskkey_t *key);
-void lnp_maskkey_gen(lnpmaskkey_t *key, flint_rand_t rand);
+void lnp_maskkey_gen(lnpmaskkey_t *key);
 void lnp_maskkey_free(lnpmaskkey_t *key);
 void lnp_maskcom_init(lnpmaskcom_t *com);
 void lnp_maskcom_free(lnpmaskcom_t *com);
@@ -316,7 +316,7 @@ void lnp_batch_zero(lnpbatch_t *b);
  * Initialise, generate and free the garbage-term key and commitment.
  */
 void lnp_garbkey_init(lnpgarbkey_t *key);
-void lnp_garbkey_gen(lnpgarbkey_t *key, flint_rand_t rand);
+void lnp_garbkey_gen(lnpgarbkey_t *key);
 void lnp_garbkey_free(lnpgarbkey_t *key);
 void lnp_garbcom_init(lnpgarbcom_t *com);
 void lnp_garbcom_free(lnpgarbcom_t *com);

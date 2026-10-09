@@ -91,7 +91,7 @@ void lnp_keyfree(lnpkey_t *key) {
 	}
 }
 
-void lnp_keygen(lnpkey_t *key, flint_rand_t rand) {
+void lnp_keygen(lnpkey_t *key) {
 	/* Hermite normal form: the Ajtai rows start with the identity, and each
 	 * message row puts its 1 in the randomness component reserved for it. The
 	 * remaining LNP_RANK components carry the MLWE secret that hides all of
@@ -103,7 +103,7 @@ void lnp_keygen(lnpkey_t *key, flint_rand_t rand) {
 				if (i == j) {
 					nmod_poly_set_coeff_ui(key->B1[i][j][k], 0, 1);
 				} else if (j >= HEIGHT) {
-					commit_sample_rand(key->B1[i][j][k], rand, DEGCRT);
+					commit_sample_rand(key->B1[i][j][k], NULL, DEGCRT);
 				}
 			}
 		}
@@ -115,7 +115,7 @@ void lnp_keygen(lnpkey_t *key, flint_rand_t rand) {
 				if (j == HEIGHT + i) {
 					nmod_poly_set_coeff_ui(key->b2[i][j][k], 0, 1);
 				} else if (j >= HEIGHT + SLOTS) {
-					commit_sample_rand(key->b2[i][j][k], rand, DEGCRT);
+					commit_sample_rand(key->b2[i][j][k], NULL, DEGCRT);
 				}
 			}
 		}
@@ -661,11 +661,11 @@ void lnp_ones(pcrt_poly_t out) {
 
 
 
-void lnp_sample_ct_zero(pcrt_poly_t g, flint_rand_t rand) {
+void lnp_sample_ct_zero(pcrt_poly_t g) {
 	nmod_poly_t t;
 
 	nmod_poly_init(t, MODP);
-	commit_sample_rand(t, rand, DEGREE);
+	commit_sample_rand(t, NULL, DEGREE);
 	nmod_poly_set_coeff_ui(t, 0, 0);
 	pcrt_poly_reduce(g[0], t, 0);
 	pcrt_poly_reduce(g[1], t, 1);
@@ -999,7 +999,7 @@ void lnp_maskkey_free(lnpmaskkey_t *key) {
 	}
 }
 
-void lnp_maskkey_gen(lnpmaskkey_t *key, flint_rand_t rand) {
+void lnp_maskkey_gen(lnpmaskkey_t *key) {
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < MASK_WIDTH; j++) {
 			for (int k = 0; k < NCRT; k++) {
@@ -1007,7 +1007,7 @@ void lnp_maskkey_gen(lnpmaskkey_t *key, flint_rand_t rand) {
 				if (i == j) {
 					nmod_poly_set_coeff_ui(key->B1[i][j][k], 0, 1);
 				} else if (j >= HEIGHT) {
-					commit_sample_rand(key->B1[i][j][k], rand, DEGCRT);
+					commit_sample_rand(key->B1[i][j][k], NULL, DEGCRT);
 				}
 			}
 		}
@@ -1019,7 +1019,7 @@ void lnp_maskkey_gen(lnpmaskkey_t *key, flint_rand_t rand) {
 				if (j == HEIGHT + i) {
 					nmod_poly_set_coeff_ui(key->b2[i][j][k], 0, 1);
 				} else if (j >= HEIGHT + LNP_LAMBDA) {
-					commit_sample_rand(key->b2[i][j][k], rand, DEGCRT);
+					commit_sample_rand(key->b2[i][j][k], NULL, DEGCRT);
 				}
 			}
 		}
@@ -1099,7 +1099,7 @@ void lnp_garbkey_free(lnpgarbkey_t *key) {
 	}
 }
 
-void lnp_garbkey_gen(lnpgarbkey_t *key, flint_rand_t rand) {
+void lnp_garbkey_gen(lnpgarbkey_t *key) {
 	for (int i = 0; i < HEIGHT; i++) {
 		for (int j = 0; j < GARB_WIDTH; j++) {
 			for (int k = 0; k < NCRT; k++) {
@@ -1107,7 +1107,7 @@ void lnp_garbkey_gen(lnpgarbkey_t *key, flint_rand_t rand) {
 				if (i == j) {
 					nmod_poly_set_coeff_ui(key->B1[i][j][k], 0, 1);
 				} else if (j >= HEIGHT) {
-					commit_sample_rand(key->B1[i][j][k], rand, DEGCRT);
+					commit_sample_rand(key->B1[i][j][k], NULL, DEGCRT);
 				}
 			}
 		}
@@ -1119,7 +1119,7 @@ void lnp_garbkey_gen(lnpgarbkey_t *key, flint_rand_t rand) {
 				if (j == HEIGHT + i) {
 					nmod_poly_set_coeff_ui(key->b2[i][j][k], 0, 1);
 				} else if (j >= HEIGHT + 2) {
-					commit_sample_rand(key->b2[i][j][k], rand, DEGCRT);
+					commit_sample_rand(key->b2[i][j][k], NULL, DEGCRT);
 				}
 			}
 		}
@@ -1453,15 +1453,15 @@ static uint8_t tst_digest[SHA256HashSize];
 static pcrt_poly_t tst_mr[MASK_WIDTH];
 static int tst_ready = 0;
 
-static void tst_setup(flint_rand_t rng) {
+static void tst_setup(void) {
 	if (tst_ready) {
 		return;
 	}
 	lnp_maskkey_init(&tst_mkey);
-	lnp_maskkey_gen(&tst_mkey, rng);
+	lnp_maskkey_gen(&tst_mkey);
 	lnp_maskcom_init(&tst_mcom);
 	lnp_garbkey_init(&tst_gkey);
-	lnp_garbkey_gen(&tst_gkey, rng);
+	lnp_garbkey_gen(&tst_gkey);
 	lnp_garbcom_init(&tst_gcom);
 	for (int i = 0; i < GARB_WIDTH; i++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -1637,13 +1637,13 @@ static void tst_rho_hash(pcrt_poly_t rho, lnpkey_t *key, lnpcom_t *com) {
 
 static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 		pcrt_poly_t s, pcrt_poly_t f, nmod_poly_t w, pcrt_poly_t g[LNP_LAMBDA],
-		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH], flint_rand_t rng) {
+		lnpkey_t *key, pcrt_poly_t r[LNP_WIDTH]) {
 	pcrt_poly_t y[LNP_WIDTH], cr[LNP_WIDTH], ym[MASK_WIDTH], cm[MASK_WIDTH], d;
 	pcrt_poly_t yg[GARB_WIDTH], cg[GARB_WIDTH], garb[2];
 	int64_t dot, norm;
 	int rej, ok;
 
-	tst_setup(rng);
+	tst_setup();
 	for (int i = 0; i < MASK_WIDTH; i++) {
 		commit_sample_short_crt(tst_mr[i]);
 	}
@@ -1849,7 +1849,7 @@ static int bin_verify_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
  * sigma_{-1}(s) (s - ones), and the constant-coefficient proof says its
  * constant coefficient is zero. Together they say that every coefficient of s
  * is 0 or 1, given the norm bound that B5 would supply. */
-static int isbin_full(lnpkey_t *key, flint_rand_t rng, nmod_poly_t s) {
+static int isbin_full(lnpkey_t *key, nmod_poly_t s) {
 	lnpcom_t com;
 	lnpproof_t pi;
 	lnpbinproof_t pc;
@@ -1883,7 +1883,7 @@ static int isbin_full(lnpkey_t *key, flint_rand_t rng, nmod_poly_t s) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(g[i][k], MODP);
 		}
-		lnp_sample_ct_zero(g[i], rng);
+		lnp_sample_ct_zero(g[i]);
 	}
 	pcrt_poly_reduce(m[0][0], s, 0);
 	pcrt_poly_reduce(m[0][1], s, 1);
@@ -1899,7 +1899,7 @@ static int isbin_full(lnpkey_t *key, flint_rand_t rng, nmod_poly_t s) {
 		}
 		lnp_commit(&com, m, key, r);
 		if (bin_prove_local(&pc, &ctx_pc, &com, m[0], m[SLOT_F], wraw, g, key,
-				r, rng)) {
+				r)) {
 			break;
 		}
 	}
@@ -1957,7 +1957,7 @@ static void binary_witness(pcrt_poly_t out, nmod_poly_t raw) {
 	pcrt_poly_reduce(out[1], raw, 1);
 }
 
-static void test_auto(flint_rand_t rng) {
+static void test_auto(void) {
 	nmod_poly_t a, b, d, e;
 	pcrt_poly_t ca, cb;
 	/* 2*DEGREE-1 = -1 mod 2*DEGREE, so this is sigma_{-1}. */
@@ -1973,15 +1973,15 @@ static void test_auto(flint_rand_t rng) {
 	}
 
 	TEST_BEGIN("sigma_{-1} matches its definition") {
-		commit_sample_rand(a, rng, DEGREE);
+		commit_sample_rand(a, NULL, DEGREE);
 		lnp_auto(b, a, minus1);
 		auto_inverse_ref(d, a);
 		TEST_ASSERT(nmod_poly_equal(b, d) == 1, end);
 	} TEST_END;
 
 	TEST_BEGIN("sigma_k is a ring homomorphism") {
-		commit_sample_rand(a, rng, DEGREE);
-		commit_sample_rand(b, rng, DEGREE);
+		commit_sample_rand(a, NULL, DEGREE);
+		commit_sample_rand(b, NULL, DEGREE);
 		/* sigma_k(a*b) = sigma_k(a)*sigma_k(b). */
 		commit_poly_mulmod(d, a, b);
 		lnp_auto(d, d, minus1);
@@ -1992,15 +1992,15 @@ static void test_auto(flint_rand_t rng) {
 	} TEST_END;
 
 	TEST_BEGIN("sigma_{-1} is an involution") {
-		commit_sample_rand(a, rng, DEGREE);
+		commit_sample_rand(a, NULL, DEGREE);
 		lnp_auto(b, a, minus1);
 		lnp_auto(b, b, minus1);
 		TEST_ASSERT(nmod_poly_equal(a, b) == 1, end);
 	} TEST_END;
 
 	TEST_BEGIN("constant coefficient of sigma_{-1}(a)*b is <a, b>") {
-		commit_sample_rand(a, rng, DEGREE);
-		commit_sample_rand(b, rng, DEGREE);
+		commit_sample_rand(a, NULL, DEGREE);
+		commit_sample_rand(b, NULL, DEGREE);
 		lnp_auto(d, a, minus1);
 		commit_poly_mulmod(d, d, b);
 		nmod_poly_zero(e);
@@ -2016,7 +2016,7 @@ static void test_auto(flint_rand_t rng) {
 
 	TEST_BEGIN("CRT-aware sigma_k agrees with the coefficient reference") {
 		for (slong k = 1; k < 8; k += 2) {
-			commit_sample_rand(a, rng, DEGREE);
+			commit_sample_rand(a, NULL, DEGREE);
 			/* Reference: map in coefficient representation, then reduce. */
 			lnp_auto(b, a, k);
 			pcrt_poly_reduce(cb[0], b, 0);
@@ -2054,7 +2054,7 @@ static void test_auto(flint_rand_t rng) {
 }
 
 
-static void test_isbin(flint_rand_t rng) {
+static void test_isbin(void) {
 	lnpkey_t key;
 	lnpcom_t com;
 	lnpbinproof_t pi;
@@ -2069,7 +2069,7 @@ static void test_isbin(flint_rand_t rng) {
 	lnp_binproof_init(&pi);
 	lnp_binctx_init(&ctx_pi);
 	nmod_poly_init(wraw, MODP);
-	lnp_keygen(&key, rng);
+	lnp_keygen(&key);
 	nmod_poly_init(s, MODP);
 	for (int i = 0; i < LNP_WIDTH; i++) {
 		for (int k = 0; k < NCRT; k++) {
@@ -2131,7 +2131,7 @@ static void test_isbin(flint_rand_t rng) {
 		binary_witness(m[SLOT_S], s);
 		lnp_isbin_product(m[SLOT_F], m[SLOT_S]);
 		for (int i = 0; i < LNP_LAMBDA; i++) {
-			lnp_sample_ct_zero(g[i], rng);
+			lnp_sample_ct_zero(g[i]);
 		}
 		/* The projection can be rejected, and the honest prover recommits and
 		 * tries again rather than sending the rejected attempt. */
@@ -2144,7 +2144,7 @@ static void test_isbin(flint_rand_t rng) {
 			}
 			lnp_commit(&com, m, &key, r);
 			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F],
-					wraw, g, &key, r, rng)) {
+					wraw, g, &key, r)) {
 				break;
 			}
 		}
@@ -2167,7 +2167,7 @@ static void test_isbin(flint_rand_t rng) {
 					m[SLOT_F][k]->mod));
 		}
 		for (int i = 0; i < LNP_LAMBDA; i++) {
-			lnp_sample_ct_zero(g[i], rng);
+			lnp_sample_ct_zero(g[i]);
 		}
 		/* The projection can be rejected, and the honest prover recommits and
 		 * tries again rather than sending the rejected attempt. */
@@ -2180,7 +2180,7 @@ static void test_isbin(flint_rand_t rng) {
 			}
 			lnp_commit(&com, m, &key, r);
 			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F],
-					wraw, g, &key, r, rng)) {
+					wraw, g, &key, r)) {
 				break;
 			}
 		}
@@ -2215,7 +2215,7 @@ static void test_isbin(flint_rand_t rng) {
 	nmod_poly_clear(wraw);
 }
 
-static void test_adaptive(flint_rand_t rng) {
+static void test_adaptive(void) {
 	lnpkey_t key;
 	lnpcom_t com;
 	lnpbinproof_t pi;
@@ -2232,7 +2232,7 @@ static void test_adaptive(flint_rand_t rng) {
 	for (int k = 0; k < NCRT; k++) {
 		nmod_poly_init(wc[k], MODP);
 	}
-	lnp_keygen(&key, rng);
+	lnp_keygen(&key);
 	for (int i = 0; i < LNP_WIDTH; i++) {
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(r[i][k], MODP);
@@ -2272,7 +2272,7 @@ static void test_adaptive(flint_rand_t rng) {
 		pcrt_poly_reduce(m[SLOT_S][1], tw, 1);
 		lnp_isbin_product(m[SLOT_F], m[SLOT_S]);
 		for (int i = 0; i < LNP_LAMBDA; i++) {
-			lnp_sample_ct_zero(g[i], rng);
+			lnp_sample_ct_zero(g[i]);
 		}
 		/* The projection can be rejected, and the honest prover recommits and
 		 * tries again rather than sending the rejected attempt. */
@@ -2285,7 +2285,7 @@ static void test_adaptive(flint_rand_t rng) {
 			}
 			lnp_commit(&com, m, &key, r);
 			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F],
-					wraw, g, &key, r, rng)) {
+					wraw, g, &key, r)) {
 				break;
 			}
 		}
@@ -2303,7 +2303,7 @@ static void test_adaptive(flint_rand_t rng) {
 		/* Committing the adapted masks changes the commitment, so the scalars
 		 * it now faces are not the ones it prepared for. */
 		lnp_commit(&com, m, &key, r);
-		bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r, rng);
+		bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r);
 		nmod_poly_clear(tt);
 		nmod_poly_clear(tw);
 		TEST_ASSERT(bin_verify_local(&pi, &ctx_pi, &com, &key) == 0, end);
@@ -2336,13 +2336,13 @@ static void test_adaptive(flint_rand_t rng) {
 	}
 }
 
-static void test_isbin_full(flint_rand_t rng) {
+static void test_isbin_full(void) {
 	lnpkey_t key;
 	nmod_poly_t s;
 	uint64_t buf;
 
 	lnp_keyinit(&key);
-	lnp_keygen(&key, rng);
+	lnp_keygen(&key);
 	nmod_poly_init(s, MODP);
 
 	TEST_BEGIN("is_bin accepts a binary witness") {
@@ -2354,7 +2354,7 @@ static void test_isbin_full(flint_rand_t rng) {
 			}
 			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
 		}
-		TEST_ASSERT(isbin_full(&key, rng, s) == 1, end);
+		TEST_ASSERT(isbin_full(&key, s) == 1, end);
 	} TEST_END;
 
 	TEST_BEGIN("is_bin rejects a witness with a coefficient of 2") {
@@ -2367,7 +2367,7 @@ static void test_isbin_full(flint_rand_t rng) {
 			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
 		}
 		nmod_poly_set_coeff_ui(s, 11, 2);
-		TEST_ASSERT(isbin_full(&key, rng, s) == 0, end);
+		TEST_ASSERT(isbin_full(&key, s) == 0, end);
 	} TEST_END;
 
 	TEST_BEGIN("is_bin rejects a witness with a coefficient of -1") {
@@ -2380,7 +2380,7 @@ static void test_isbin_full(flint_rand_t rng) {
 			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
 		}
 		nmod_poly_set_coeff_ui(s, 23, MODP - 1);
-		TEST_ASSERT(isbin_full(&key, rng, s) == 0, end);
+		TEST_ASSERT(isbin_full(&key, s) == 0, end);
 	} TEST_END;
 
   end:
@@ -2388,7 +2388,7 @@ static void test_isbin_full(flint_rand_t rng) {
 	lnp_keyfree(&key);
 }
 
-static void test_range(flint_rand_t rng) {
+static void test_range(void) {
 	lnpkey_t key;
 	lnpcom_t com;
 	lnpbinproof_t pi;
@@ -2402,7 +2402,7 @@ static void test_range(flint_rand_t rng) {
 	lnp_com_init(&com);
 	lnp_binproof_init(&pi);
 	lnp_binctx_init(&ctx_pi);
-	lnp_keygen(&key, rng);
+	lnp_keygen(&key);
 	nmod_poly_init(s, MODP);
 	nmod_poly_init(wraw, MODP);
 	for (int i = 0; i < LNP_WIDTH; i++) {
@@ -2454,11 +2454,11 @@ static void test_range(flint_rand_t rng) {
 				nmod_poly_set(m[SLOT_W][k], w[k]);
 			}
 			for (int i = 0; i < LNP_LAMBDA; i++) {
-				lnp_sample_ct_zero(g[i], rng);
+				lnp_sample_ct_zero(g[i]);
 			}
 			lnp_commit(&com, m, &key, r);
 			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F],
-					wraw, g, &key, r, rng)) {
+					wraw, g, &key, r)) {
 				break;
 			}
 		}
@@ -2488,10 +2488,10 @@ static void test_range(flint_rand_t rng) {
 			nmod_poly_set(m[SLOT_W][k], w[k]);
 		}
 		for (int i = 0; i < LNP_LAMBDA; i++) {
-			lnp_sample_ct_zero(g[i], rng);
+			lnp_sample_ct_zero(g[i]);
 		}
 		lnp_commit(&com, m, &key, r);
-		bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r, rng);
+		bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F], wraw, g, &key, r);
 		TEST_ASSERT(bin_verify_local(&pi, &ctx_pi, &com, &key) == 0, end);
 	} TEST_END;
 
@@ -2520,11 +2520,11 @@ static void test_range(flint_rand_t rng) {
 				nmod_poly_set(m[SLOT_W][k], w[k]);
 			}
 			for (int i = 0; i < LNP_LAMBDA; i++) {
-				lnp_sample_ct_zero(g[i], rng);
+				lnp_sample_ct_zero(g[i]);
 			}
 			lnp_commit(&com, m, &key, r);
 			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F],
-					wraw, g, &key, r, rng)) {
+					wraw, g, &key, r)) {
 				break;
 			}
 		}
@@ -2560,11 +2560,11 @@ static void test_range(flint_rand_t rng) {
 				nmod_poly_set(m[SLOT_W][k], w[k]);
 			}
 			for (int i = 0; i < LNP_LAMBDA; i++) {
-				lnp_sample_ct_zero(g[i], rng);
+				lnp_sample_ct_zero(g[i]);
 			}
 			lnp_commit(&com, m, &key, r);
 			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F],
-					wraw, g, &key, r, rng)) {
+					wraw, g, &key, r)) {
 				break;
 			}
 		}
@@ -2603,11 +2603,11 @@ static void test_range(flint_rand_t rng) {
 				nmod_poly_set(m[SLOT_W][k], w[k]);
 			}
 			for (int i = 0; i < LNP_LAMBDA; i++) {
-				lnp_sample_ct_zero(g[i], rng);
+				lnp_sample_ct_zero(g[i]);
 			}
 			lnp_commit(&com, m, &key, r);
 			if (bin_prove_local(&pi, &ctx_pi, &com, m[SLOT_S], m[SLOT_F],
-					wraw, g, &key, r, rng)) {
+					wraw, g, &key, r)) {
 				break;
 			}
 		}
@@ -2652,22 +2652,18 @@ static void test_range(flint_rand_t rng) {
 }
 
 int main(int argc, char *argv[]) {
-	flint_rand_t rand;
-
-	flint_rand_init(rand);
 	commit_setup();
 
 	if (phase_selected(argc, argv, "test")) {
 		printf("\n** Tests for the LNP proof machinery:\n\n");
-		test_auto(rand);
-			test_isbin(rand);
-		test_adaptive(rand);
-		test_isbin_full(rand);
-		test_range(rand);
+		test_auto();
+			test_isbin();
+		test_adaptive();
+		test_isbin_full();
+		test_range();
 	}
 
 	commit_finish();
-	flint_rand_clear(rand);
 	return 0;
 }
 

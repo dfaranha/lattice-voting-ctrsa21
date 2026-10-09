@@ -320,8 +320,41 @@ void encrypt_keyinit(publickey_t *pk, privatekey_t *sk) {
 	}
 }
 
+/**
+ * Sample a uniformly random polynomial modulo q.
+ *
+ * The public matrix has to be uniform for the MLWE assumption to apply, which
+ * FLINT's randtest functions are not: they favour small and sparse values by
+ * design.
+ *
+ * @param[out] r		- the polynomial to sample.
+ * @param[in] degree	- the number of coefficients to sample.
+ */
+static void encrypt_sample_rand(fmpz_mod_poly_t r, int degree) {
+	/* q fits in a word, so a word is reduced modulo q after rejecting the
+	 * words at or above 2^64 - (2^64 mod q), which would bias the result. */
+	const uint64_t modulus = fmpz_get_ui(q);
+	const uint64_t rem = (UINT64_MAX % modulus + 1) % modulus;
+	uint64_t buf;
+
+	if (fmpz_bits(q) > 64) {
+		fprintf(stderr, "encrypt_sample_rand: q does not fit in a word\n");
+		abort();
+	}
+	fmpz_mod_poly_zero(r, ctx_q);
+	for (int i = 0; i < degree; i++) {
+		do {
+			if (getrandom(&buf, sizeof(buf), 0) != sizeof(buf)) {
+				perror("getrandom");
+				abort();
+			}
+		} while (rem != 0 && buf >= (uint64_t) 0 - rem);
+		fmpz_mod_poly_set_coeff_ui(r, i, buf % modulus, ctx_q);
+	}
+}
+
 // Generate a key pair.
-void encrypt_keygen(publickey_t *pk, privatekey_t *sk, flint_rand_t rand) {
+void encrypt_keygen(publickey_t *pk, privatekey_t *sk) {
 	fmpz_mod_poly_t t;
 
 	fmpz_mod_poly_init(t, ctx_q);
@@ -335,7 +368,7 @@ void encrypt_keygen(publickey_t *pk, privatekey_t *sk, flint_rand_t rand) {
 		}
 		for (int j = 0; j < DIM; j++) {
 			for (int k = 0; k < NCRT; k++) {
-				fmpz_mod_poly_randtest(pk->A[i][j][k], rand, DEGCRT, ctx_q);
+				encrypt_sample_rand(pk->A[i][j][k], DEGCRT);
 			}
 		}
 		for (int k = 0; k < NCRT; k++) {
@@ -587,7 +620,7 @@ static void test(flint_rand_t rand) {
 
 	TEST_BEGIN("encryption and decryption are consistent") {
 		encrypt_sample_short(m, ctx_p);
-		encrypt_keygen(&pk, &sk, rand);
+		encrypt_keygen(&pk, &sk);
 		encrypt_doit(&c, m, &pk, rand);
 		TEST_ASSERT(encrypt_undo(_m, NULL, &c, &sk) == 1, end);
 		TEST_ASSERT(fmpz_mod_poly_equal(m, _m, ctx_p) == 1, end);
@@ -612,7 +645,7 @@ static void bench(flint_rand_t rand) {
 
 	encrypt_sample_short(m, ctx_p);
 	encrypt_keyinit(&pk, &sk);
-	encrypt_keygen(&pk, &sk, rand);
+	encrypt_keygen(&pk, &sk);
 	encrypt_cipher_init(&c);
 
 	BENCH_BEGIN("encrypt_doit") {
