@@ -50,8 +50,9 @@ Writing `N = DEGREE`, `k = WIDTH`, `n = HEIGHT`, `nu = NONZERO`:
    (paper, Table 1). The factor is `2^22`, so `q` scales linearly with `p`.
 5. **Quasi-unique responses**: `q > 24 * SIGMA_E^2 = 2^36`. Never binding.
 6. **Challenge space**: Theorem 1 has a `4 * tau * t` term, so `|C|` should
-   exceed about `2^135`. The sampler in `shuffle.c` draws binary challenges, so
-   `|C| = C(N, nu)`, which is `2^139` at `nu = 20`.
+   exceed about `2^135`. The sampler in `shuffle.c` draws challenges with `nu`
+   coefficients of `+-1`, so `|C| = 2^nu * C(N, nu)`, which is `2^158.7` at
+   `nu = 20`.
 7. Both `p` and `q` must be prime and congruent to 5 mod 8, so that
    `x^N + 1` splits into exactly `NCRT = 2` factors.
 
@@ -81,7 +82,7 @@ smaller degree with a higher rank, which cuts against raising `DEGREE` later.
 `NONZERO = 20` pays for most of `WIDTH = 4`. The MSIS bound grows as
 `nu^1.5` (once through `SIGMA_C`, which is linear in `nu`, and again through
 the explicit `sqrt(nu)`), so cutting `nu` from 36 improves binding and shrinks
-the responses at the same time. At 36 the challenge space was `2^222`, far more
+the responses at the same time. At 36 the challenge space was `2^257.0`, far more
 than soundness needs.
 
 `SIGMA_S = 190` rather than the size-optimal 76: the Lemma 1 floor at this `p`

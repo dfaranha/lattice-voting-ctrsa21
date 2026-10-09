@@ -60,11 +60,14 @@
 #define WIDTH 	4
 /* Height n of the commitment matrix. */
 #define HEIGHT 	1
-/* Maximum l1-norm nu of a challenge in C. The binding bound of the commitment
- * scheme is 16 * SIGMA_C * sqrt(NONZERO * DEGREE) and SIGMA_C itself grows
- * linearly in NONZERO, so the MSIS bound grows as NONZERO^1.5: keeping nu no
- * larger than the soundness error needs is worth more than it looks. At 20 the
- * challenge space is C(1024, 20) ~ 2^139, which covers the 4 * tau * t term of
+/* Parameter nu in the commitment scheme: the number of non-zero coefficients,
+ * each +-1, of a challenge in C, and so its l1-norm. A difference of two
+ * challenges, which is what an opening carries, has l1-norm at most
+ * 2 * NONZERO. The binding bound of the commitment scheme is
+ * 16 * SIGMA_C * sqrt(NONZERO * DEGREE) and SIGMA_C itself grows linearly in
+ * NONZERO, so the MSIS bound grows as NONZERO^1.5: keeping nu no larger than
+ * the soundness error needs is worth more than it looks. At 20 the challenge
+ * space is 2^20 * C(1024, 20) ~ 2^158.7, which covers the 4 * tau * t term of
  * Theorem 1 with room to spare. */
 #define NONZERO 20
 /* The infinity-norm bound beta_oo on the commitment randomness. */
@@ -81,8 +84,9 @@
 #define SIGMA_C 34641
 /* Standard deviation for the Gaussian masking the committed permutation
  * elements sigma_i of Lemma 5. These are monomials, so ||d * sigma_i|| equals
- * ||d|| <= sqrt(2 * NONZERO) ~ 6.3 exactly, and SIGMA_S = 190 leaves a ratio of
- * about 30 for the rejection sampling. It must also stay small enough that the
+ * ||d|| = sqrt(NONZERO) ~ 4.5 exactly for a challenge d with NONZERO
+ * coefficients of +-1, and SIGMA_S = 190 leaves a ratio of about 42 for the
+ * rejection sampling. It must also stay small enough that the
  * extracted ||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S) = 24320
  * remains below sqrt(MODP / 2) ~ 35735, the bound under which Lemma 1
  * guarantees invertibility. */
