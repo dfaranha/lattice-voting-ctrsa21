@@ -533,18 +533,23 @@ void commit_init(commit_t *com) {
 	}
 }
 
-// Sample a polynomial according to a narrow Gaussian distribution in CRT rep.
-void commit_sample_gauss_small_crt(nmod_poly_t r[NCRT]) {
-	nmod_poly_t t;
+// Sample a polynomial according to a narrow Gaussian distribution.
+void commit_sample_gauss_small(nmod_poly_t r) {
 	int64_t coeff;
-
-	nmod_poly_init(t, MODP);
 	for (int i = 0; i < DEGREE; i++) {
 		coeff = discrete_gaussian_small(0.0);
 		if (coeff < 0)
 			coeff += MODP;
-		nmod_poly_set_coeff_ui(t, i, coeff);
+		nmod_poly_set_coeff_ui(r, i, coeff);
 	}
+}
+
+// Sample a polynomial according to a narrow Gaussian distribution in CRT rep.
+void commit_sample_gauss_small_crt(nmod_poly_t r[NCRT]) {
+	nmod_poly_t t;
+
+	nmod_poly_init(t, MODP);
+	commit_sample_gauss_small(t);
 	for (int i = 0; i < NCRT; i++) {
 		pcrt_poly_reduce(r[i], t, i);
 	}

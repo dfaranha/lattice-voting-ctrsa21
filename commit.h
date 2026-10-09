@@ -261,6 +261,14 @@ void commit_init(commit_t *com);
 
 /**
  * Sample a random polynomial following a narrow Gaussian distribution of
+ * standard deviation SIGMA_S, in coefficient representation.
+ *
+ * @param[out] r		- the polynomial to sample.
+ */
+void commit_sample_gauss_small(nmod_poly_t r);
+
+/**
+ * Sample a random polynomial following a narrow Gaussian distribution of
  * standard deviation SIGMA_S, in CRT representation. Used to mask committed
  * messages that must be proven short.
  *
