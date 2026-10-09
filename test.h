@@ -84,4 +84,12 @@ void test_fail(void);
  */
 void test_pass(void);
 
+/**
+ * Returns the number of failed assertions so far. A test binary returns
+ * non-zero from main when this is, which is how make and CI see a failure.
+ *
+ * @return the number of failures.
+ */
+int test_failures(void);
+
 #endif /* !RLC_TEST_H */
