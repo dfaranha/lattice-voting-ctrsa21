@@ -1155,6 +1155,9 @@ static int phase_selected(int argc, char *argv[], const char *phase) {
 }
 
 int main(int argc, char *argv[]) {
+	/* Unbuffered, so that a binary that dies still shows which test it
+	 * was in: a crash used to take the buffered output with it. */
+	setvbuf(stdout, NULL, _IONBF, 0);
 	if (phase_selected(argc, argv, "test")) {
 		printf("\n** Tests for lattice-based shuffle proof:\n\n");
 		test();
