@@ -1038,14 +1038,19 @@ static void proof_walk(proof_t *pf, bitwriter_t *bw, bitreader_t *r) {
 		walk_uniform(bw, r, pf->p[l].c1);
 		walk_uniform(bw, r, pf->p[l].c2);
 		/* s is held in coefficient representation, so it is converted rather
-		 * than walked directly; the cost is the same DEGREE coefficients. */
-		if (bw != NULL) {
-			pcrt_poly_reduce(crt[0], pf->s[l], 0);
-			pcrt_poly_reduce(crt[1], pf->s[l], 1);
-			serial_put_uniform(bw, crt);
-		} else {
-			serial_get_uniform(r, crt);
-			pcrt_poly_rec(pf->s[l], crt);
+		 * than walked directly; the cost is the same DEGREE coefficients.
+		 * There are MSGS - 1 of them: the last linear proof uses beta in
+		 * place of s, so s[MSGS - 1] is neither computed nor checked, and
+		 * sending it cost a ring element of zeros that anyone could alter. */
+		if (l < MSGS - 1) {
+			if (bw != NULL) {
+				pcrt_poly_reduce(crt[0], pf->s[l], 0);
+				pcrt_poly_reduce(crt[1], pf->s[l], 1);
+				serial_put_uniform(bw, crt);
+			} else {
+				serial_get_uniform(r, crt);
+				pcrt_poly_rec(pf->s[l], crt);
+			}
 		}
 		for (int i = 0; i < SHA256HashSize; i++) {
 			if (bw != NULL) {
@@ -1113,12 +1118,53 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		serial_writer_init(&bw, buf, sizeof(buf));
 		proof_walk(&pf, &bw, NULL);
 		proof_bytes = bw.overflow ? 0 : serial_bytes(&bw);
-		serial_reader_init(&br, buf, sizeof(buf));
-		proof_walk(&pf, NULL, &br);
-	}
 
-	result = shuffle_verifier(y, w, _y, ys, t, tp, _t, vs, u, d, s, com, p, _m,
-			key, digest);
+		/* Decode into objects of its own, so that a field the reader skipped
+		 * cannot pass the prover's value on to the verifier, and reject what
+		 * the reader flags. */
+		commit_t d2[MSGS], p2[MSGS];
+		nmod_poly_t s2[MSGS], ys2[MSGS][1][2];
+		nmod_poly_t y2[MSGS][WIDTH][2], w2[MSGS][WIDTH][2], _y2[MSGS][WIDTH][2];
+		static uint8_t digest2[MSGS][SHA256HashSize];
+
+		for (int i = 0; i < MSGS; i++) {
+			commit_init(&d2[i]);
+			commit_init(&p2[i]);
+			nmod_poly_init(s2[i], MODP);
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_init(ys2[i][0][k], MODP);
+				for (int j = 0; j < WIDTH; j++) {
+					nmod_poly_init(y2[i][j][k], MODP);
+					nmod_poly_init(w2[i][j][k], MODP);
+					nmod_poly_init(_y2[i][j][k], MODP);
+				}
+			}
+		}
+		memset(digest2, 0, sizeof(digest2));
+		proof_t pf2 = { y2, w2, _y2, ys2, d2, p2, s2, digest2 };
+
+		serial_reader_init(&br, buf, sizeof(buf));
+		proof_walk(&pf2, NULL, &br);
+		result = !br.overflow && shuffle_verifier(y2, w2, _y2, ys2, t, tp, _t,
+				vs, u, d2, s2, com, p2, _m, key, digest2);
+
+		for (int i = 0; i < MSGS; i++) {
+			commit_free(&d2[i]);
+			commit_free(&p2[i]);
+			nmod_poly_clear(s2[i]);
+			for (int k = 0; k < NCRT; k++) {
+				nmod_poly_clear(ys2[i][0][k]);
+				for (int j = 0; j < WIDTH; j++) {
+					nmod_poly_clear(y2[i][j][k]);
+					nmod_poly_clear(w2[i][j][k]);
+					nmod_poly_clear(_y2[i][j][k]);
+				}
+			}
+		}
+	} else {
+		result = shuffle_verifier(y, w, _y, ys, t, tp, _t, vs, u, d, s, com, p,
+				_m, key, digest);
+	}
 
 	for (int i = 0; i < MSGS; i++) {
 		commit_free(&d[i]);
@@ -1275,6 +1321,46 @@ static void test(void) {
 		TEST_ASSERT(ternary && ones == NONZERO, end);
 	} TEST_END;
 
+	TEST_ONCE("decoder rejects encodings no writer produces") {
+		static uint8_t raw[1 << 14], ok[1 << 14];
+		bitreader_t br;
+		bitwriter_t bw;
+		nmod_poly_t a[2];
+		int bad_u, bad_g, bad_e, good;
+
+		nmod_poly_init(a[0], MODP);
+		nmod_poly_init(a[1], MODP);
+		/* All ones: a uniform coefficient of 2^32 - 1, at or above MODP, and a
+		 * Gaussian escape carrying INT64_MIN, whose negation used to be
+		 * undefined. */
+		memset(raw, 0xFF, sizeof(raw));
+		serial_reader_init(&br, raw, sizeof(raw));
+		serial_get_uniform(&br, a);
+		bad_u = br.overflow;
+		serial_reader_init(&br, raw, sizeof(raw));
+		serial_get_gauss(&br, a, SIGMA_C);
+		bad_g = br.overflow;
+		/* An escape carrying zero, which the unary code would have written. */
+		memset(raw, 0, sizeof(raw));
+		raw[0] = raw[1] = raw[2] = 0xFF;
+		serial_reader_init(&br, raw, sizeof(raw));
+		serial_get_gauss(&br, a, SIGMA_C);
+		bad_e = br.overflow;
+		/* What a writer produces reads back without the flag. */
+		nmod_poly_zero(a[0]);
+		nmod_poly_zero(a[1]);
+		serial_writer_init(&bw, ok, sizeof(ok));
+		serial_put_gauss(&bw, a, SIGMA_C);
+		serial_put_uniform(&bw, a);
+		serial_reader_init(&br, ok, sizeof(ok));
+		serial_get_gauss(&br, a, SIGMA_C);
+		serial_get_uniform(&br, a);
+		good = !br.overflow;
+		nmod_poly_clear(a[0]);
+		nmod_poly_clear(a[1]);
+		TEST_ASSERT(bad_u && bad_g && bad_e && good, end);
+	} TEST_END;
+
 	TEST_ONCE("proof survives serialisation, and measures what it should") {
 		measure_proof = 1;
 		TEST_ASSERT(run(com, m, _m, sigma, r, &key) == 1, end);
@@ -1291,8 +1377,11 @@ static void test(void) {
 			 * widths here, since the opening of the permutation element is
 			 * sampled at SIGMA_S, so the figure printed is their average. */
 			double ncoef = 3.0 * WIDTH * DEGREE + DEGREE;
-			double fixed = 5.0 * DEGREE * serial_bits_uniform()
-					+ SHA256HashSize * 8;
+			/* Per message: D_i, P_i, and the digest; and s_i for all but the
+			 * last. */
+			double fixed = (4.0 * DEGREE * serial_bits_uniform()
+					+ SHA256HashSize * 8)
+					+ (MSGS - 1.0) / MSGS * DEGREE * serial_bits_uniform();
 			double flat = fixed
 					+ 3.0 * WIDTH * DEGREE * serial_bits_gauss(SIGMA_C)
 					+ DEGREE * serial_bits_gauss(SIGMA_S);

@@ -51,7 +51,9 @@ typedef struct _bitreader_t {
 	const uint8_t *buf;
 	size_t cap;
 	size_t bits;
-	int overflow;
+	int overflow;				/* set if a read ran past the end, or met an
+								 * encoding no writer produces; a proof
+								 * read with it set is to be rejected */
 } bitreader_t;
 
 /*============================================================================*/

@@ -113,7 +113,14 @@ static int64_t get_rice(bitreader_t *r, int k) {
 		q++;
 	}
 	if (q >= RICE_ESCAPE) {
-		return unzigzag(get_bits(r, 64));
+		u = get_bits(r, 64);
+		/* The writer escapes only what the unary run cannot carry, so a short
+		 * value behind an escape is an encoding nothing produces. Accepting it
+		 * would give one proof several byte strings. */
+		if ((u >> k) < RICE_ESCAPE) {
+			r->overflow = 1;
+		}
+		return unzigzag(u);
 	}
 	u = (uint64_t) q << k;
 	if (k > 0) {
@@ -179,7 +186,15 @@ void serial_get_uniform(bitreader_t *r, nmod_poly_t a[2]) {
 		nmod_poly_zero(a[k]);
 		nmod_poly_fit_length(a[k], DEGCRT);
 		for (int i = 0; i < DEGCRT; i++) {
-			nmod_poly_set_coeff_ui(a[k], i, get_bits(r, n));
+			uint64_t v = get_bits(r, n);
+
+			/* A residue is below MODP; anything else is an encoding no
+			 * writer produces, which reducing would quietly accept. */
+			if (v >= MODP) {
+				r->overflow = 1;
+				v = 0;
+			}
+			nmod_poly_set_coeff_ui(a[k], i, v);
 		}
 	}
 }
@@ -204,9 +219,17 @@ void serial_get_gauss(bitreader_t *r, nmod_poly_t a[2], ulong sigma) {
 	nmod_poly_fit_length(rec, DEGREE);
 	for (int i = 0; i < DEGREE; i++) {
 		int64_t c = get_rice(r, k);
-		ulong v = (c < 0) ? MODP - ((ulong) (-c) % MODP) : (ulong) c % MODP;
+		ulong v;
 
-		nmod_poly_set_coeff_ui(rec, i, v == MODP ? 0 : v);
+		/* The writer centres every coefficient into (-p/2, p/2], so anything
+		 * outside is an encoding it never produces. Checking before negating
+		 * also keeps -c defined: an escape can carry INT64_MIN. */
+		if (c < -(int64_t) (MODP / 2) || c > (int64_t) (MODP / 2)) {
+			r->overflow = 1;
+			c = 0;
+		}
+		v = (c < 0) ? (ulong) (MODP + c) : (ulong) c;
+		nmod_poly_set_coeff_ui(rec, i, v);
 	}
 	pcrt_poly_reduce(a[0], rec, 0);
 	pcrt_poly_reduce(a[1], rec, 1);
