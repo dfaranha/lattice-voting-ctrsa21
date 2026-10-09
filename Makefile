@@ -30,32 +30,32 @@ bench: all
 # time, so each width needs its own object file. Sharing a single gaussian.o
 # between targets made a parallel build race on that file, and could link a
 # sampler of the wrong width into a binary.
-gaussian_c.o: gaussian_ct.cpp ${INCLUDES}
+gaussian_c.o: gaussian_ct.cpp fastrandombytes.h ${INCLUDES}
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_C -c gaussian_ct.cpp -o $@
 
-gaussian_e.o: gaussian_ct.cpp ${INCLUDES}
+gaussian_e.o: gaussian_ct.cpp fastrandombytes.h ${INCLUDES}
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_E -c gaussian_ct.cpp -o $@
 
 # The proof of shuffle also masks the committed permutation elements, with a
 # much narrower Gaussian. Renaming the entry point lets both widths be linked
 # into the same binary.
-gaussian_s.o: gaussian_ct.cpp ${INCLUDES}
+gaussian_s.o: gaussian_ct.cpp fastrandombytes.h ${INCLUDES}
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_S \
 		-Ddiscrete_gaussian=discrete_gaussian_small -c gaussian_ct.cpp -o $@
 
 encrypt.o: encrypt.c encrypt.h ${INCLUDES}
 	${CPP} ${CFLAGS} -c encrypt.c -o $@
 
-commit: commit.c commit.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
+commit: commit.c commit.h ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
 	${CPP} ${CFLAGS} -DMAIN commit.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
 encrypt: encrypt.c encrypt.h ${TEST} ${BENCH} ${INCLUDES}
 	${CPP} ${CFLAGS} -DMAIN encrypt.c ${TEST} ${BENCH} -o $@ ${LIBS}
 
-vericrypt: vericrypt.c encrypt.o ${TEST} ${BENCH} ${INCLUDES} gaussian_e.o
+vericrypt: vericrypt.c encrypt.o sha224-256.c ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_e.o
 	${CPP} ${CFLAGS} -DMAIN vericrypt.c encrypt.o sha224-256.c gaussian_e.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
-shuffle: shuffle.c commit.c commit.h serial.c serial.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
+shuffle: shuffle.c commit.c commit.h serial.c serial.h sha224-256.c ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
 	${CPP} ${CFLAGS} commit.c serial.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
 clean:
