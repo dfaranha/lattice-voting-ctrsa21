@@ -180,7 +180,7 @@ repetitions and leaves the certified bound a factor 1.78 inside the ceiling.
 | | was | after B5 | now |
 | --- | --- | --- | --- |
 | `DEGREE` | 1024 | 1024 | 2048 |
-| `MODP` | 3906450253 (`2^31.86`) | 1099511627917 (`2^40`) | unchanged |
+| `MODP` | 3906450253 (`2^31.86`) | 1099511627917 (`2^40 + 141`) | 1099511627581 (`2^40 - 195`) |
 | `WIDTH` | 3 | 4 | 3 |
 | `DIM` | 2 | 3 | 3 |
 | `Q` | `2^56` | 18446744073709551557 (`2^64 - 59`) | unchanged |
@@ -319,8 +319,14 @@ of struct fields. At `DEGREE = 1024` it came to 2575104 bytes, or 100.6 KB per
 message, exactly what the hand-maintained model in earlier versions of this
 section said; at 2048 it is 5230080 bytes, or 204.3 KB.
 
-Two details the packing makes concrete. `MODP` is 141 above `2^40`, so a
-uniform coefficient costs 41 bits and not 40. And a Gaussian element has to be
+Two details the packing makes concrete. `MODP` was 141 above `2^40`, so a
+uniform coefficient cost 41 bits and not 40, and hashing one took six bytes.
+It is now `2^40 - 195`, the largest prime below `2^40` that is 5 mod 8, which
+packs in 40 bits and hashes in five: 1.8 KB a message off the proof, from 134.6
+to 132.8, and a sixth off what the prover hashes per uniform coefficient. The
+move is `2^-38.4` of the modulus, so no security estimate, Lemma 1 window or
+wraparound margin changes at the precision quoted, and `Q` still satisfies
+`q > 2p(2 DIM N^2 + N + 1)`, more easily. And a Gaussian element has to be
 reconstructed from its CRT components before packing, because only the
 reconstructed polynomial is short: the components of a short element are not.
 
@@ -351,10 +357,10 @@ The `7d2f639` column includes the mask-commitment opening added in `472edfc`,
 which costs 1.04x on its own, within the noise of these measurements. The
 `5551374` column adds the batching of the quadratic proof's garbage terms, and
 the last is the degree change of section 5d. The proof has come down to
-134.6 KB a message since, through sections 5d to 5g and the entropy coding of
-the masked openings. `fix-pkc` has come down too, to 41.2 KB by the table in
-`master`'s README, both without first messages and with the same coding, so
-3.27x. The prover has not been measured against `fix-pkc` since `e798fe1`.
+132.8 KB a message since, through sections 5d to 5g, the entropy coding of
+the masked openings and the 40-bit modulus. `fix-pkc` has come down too, to
+41.2 KB by the table in `master`'s README, both without first messages and with
+the same coding, so 3.22x. The prover has not been measured against `fix-pkc` since `e798fe1`.
 
 Where the 100.6 KB went at `5551374`, per message:
 
@@ -791,7 +797,7 @@ What depends on them:
 | `SIGMA_S` window under Lemma 1 | `[91.2, 5792]`, extracted `16654` against `sqrt(p)` = 1048576 |
 | JL certified bound against `sqrt(p/2)` | unchanged at 1.26x, `SIGMA_P` does not depend on the challenge |
 | Rice parameter for `SIGMA_B` | `k = 18` either way |
-| proof, per message (measured) | 132.9 KB -> 135.1 KB; 134.6 KB since `b3da1c6` stopped sending the last `s_i` |
+| proof, per message (measured) | 132.9 KB -> 135.1 KB; 134.6 KB since `b3da1c6` stopped sending the last `s_i`; 132.8 KB at the 40-bit modulus |
 
 The control, `SIGMA_B` = 165340, reproduces 352.2 and 370.4 exactly. Binding
 at 327 is still far above hiding, so the security level, the least of

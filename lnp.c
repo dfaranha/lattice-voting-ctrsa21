@@ -432,8 +432,8 @@ static void proj_pass(uint8_t seed[SHA256HashSize], ulong *raw,
 			for (int j = 0; j < LNP_LAMBDA; j++) {
 				int64_t m = (int64_t) mu[j][i];
 
-				/* Each term is +-mu[j][i] < MODP < 2^41, and there are PROJ
-				 * of them, so the sum stays below 2^49: no reduction is
+				/* Each term is +-mu[j][i] < MODP < 2^40, and there are PROJ
+				 * of them, so the sum stays below 2^48: no reduction is
 				 * needed until the end. This loop runs PROJ * LNP_LAMBDA *
 				 * DEGREE times, which a modular addition per step made one of
 				 * the dearer things the prover did. */

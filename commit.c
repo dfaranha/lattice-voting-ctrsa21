@@ -22,9 +22,9 @@
 /*============================================================================*/
 
 /* The first square root of -1. */
-#define	P0		499810066026
+#define	P0		22892757571
 /* The second square root of -1. */
-#define P1		599701561891
+#define P1		1076618870010
 
 /* Polynomial defining the cyclotomic ring. */
 static nmod_poly_t cyclo_poly;
@@ -414,8 +414,8 @@ static_assert(MODP - 1 <= (hash_coeff_t) ~(hash_coeff_t) 0,
 
 /* Bytes a coefficient needs: MODP - 1 fits in this many. When MODP < 2^32
  * that is the four of hash_coeff_t, and the bytes are those of the word; above
- * it, a word would carry zero bytes into the hash, two of the eight at the
- * 2^41 modulus here, which were a quarter of everything the prover hashed. */
+ * it, a word would carry zero bytes into the hash, three of the eight at the
+ * 40-bit modulus here, which would be most of what the prover hashes. */
 #define HASH_COEFF_BYTES												\
 	((MODP - 1) < (1ULL << 32) ? 4 : (MODP - 1) < (1ULL << 40) ? 5 :	\
 	(MODP - 1) < (1ULL << 48) ? 6 : (MODP - 1) < (1ULL << 56) ? 7 : 8)

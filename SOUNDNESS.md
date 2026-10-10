@@ -258,7 +258,7 @@ It is narrow because `k = 2`, so (Inv) only reaches `q^(1/2)`, which is small
 against `n = 1024`-dimensional Gaussian responses.
 
 *On the `lnp` branch (2026-10-09).* The figures above are for the parameters
-this argument was written at. With `q = 2^40 + 141`, `n = 2048` and
+this argument was written at. With `q = 2^40 - 195`, `n = 2048` and
 `NONZERO = 18`, `||d * sigma_i|| = sqrt(18) ~ 4.24` and `||delta||_2 <= 8.49`,
 so the window is
 

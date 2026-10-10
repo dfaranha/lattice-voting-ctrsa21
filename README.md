@@ -73,8 +73,8 @@ reports that it cannot make a proof ([LNP-PARAMS.md](LNP-PARAMS.md) section 5).
 ## Proving `sigma_i` in D by a norm bound
 
 **This branch no longer does this.** It proves `is_bin(sigma_i)` as Protocol 1
-does, with the machinery [LNP.md](LNP.md) describes, at `MODP = 2^40 + 141`
-and `DEGREE = 2048`. At `MSGS = 25` the proof is 134.6 KB a message, measured,
+does, with the machinery [LNP.md](LNP.md) describes, at `MODP = 2^40 - 195`
+and `DEGREE = 2048`. At `MSGS = 25` the proof is 132.8 KB a message, measured,
 and the core-SVP estimates are 327.0 bits for MSIS binding, 137.6 for MLWE
 hiding and 316.2 for MLWE encryption, a level of 137.6;
 [LNP-PARAMS.md](LNP-PARAMS.md) section 5g has the derivation. The rest of this

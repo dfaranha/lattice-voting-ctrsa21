@@ -391,7 +391,7 @@ response.
 | | | why |
 | --- | --- | --- |
 | `DEGREE` | 2048 | ring degree; 1024 until the electorate-size question forced it up |
-| `MODP` | `2^40 + 141` | set by the range proof's no-wraparound condition |
+| `MODP` | `2^40 - 195` | set by the range proof's no-wraparound condition |
 | `LNP_LAMBDA` | 4 | `p^-4` is about `2^-160` |
 | `SLOTS` | 3 | witness, product, projection mask |
 | `LNP_RANK` | 1 | rank 1 hiding is 138 bits at this degree, 52 at 1024 |

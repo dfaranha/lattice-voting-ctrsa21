@@ -34,11 +34,13 @@
 /* Modulus p defining the cyclotomic ring for the commitment scheme. Prime and
  * congruent to 5 mod 8, so that (x^DEGREE + 1) splits into exactly NCRT = 2
  * factors as Lemma 1 requires. Sized so that the approximate range proof can
- * certify a bound under sqrt(p/2); see LNP-PARAMS.md. Changing it requires new
+ * certify a bound under sqrt(p/2); see LNP-PARAMS.md. It is the largest such
+ * prime below 2^40, 2^40 - 195, so that p - 1 fits in 40 bits: a uniform
+ * coefficient packs in 40 and hashes in 5 bytes. Changing it requires new
  * CRT constants P0 and P1 in commit.c, and a new Q in encrypt.c. Changing
  * DEGREE does not: P0 is a square root of -1, which does not depend on the
  * degree, and x^(DEGREE/2) +- P0 stays irreducible. */
-#define MODP 	1099511627917
+#define MODP 	1099511627581
 /* Degree of the polynomial defining the cyclotomic ring for the commitment scheme. */
 #ifndef DEGREE
 #define DEGREE 	2048
