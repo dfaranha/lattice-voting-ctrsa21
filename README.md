@@ -26,7 +26,7 @@ ciphertext that decryption refuses. Measured, six trials per value:
 | branch | decrypts | verifies, does not decrypt | does not verify |
 | --- | --- | --- | --- |
 | `master`, `fix-pkc` | `R <= 6000` | `7000 <= R <= 20000` | `R >= 25000` |
-| `balanced-params` | `R <= 5000` | `6000 <= R <= 25000` | `R >= 30000` |
+| `balanced-params` | `R <= 700` | `1000 <= R <= 25000` | `R >= 30000` |
 | `lnp` | `R <= 4000` | `5000 <= R <= 25000` | `R >= 30000` |
 
 Decryption never returned a wrong message: it refuses such a ciphertext. So
@@ -35,6 +35,16 @@ and the implementation assumes honest voters or accepts that risk. Closing it
 would take `q` around `2^63` here and `2^72` on `lnp`, against `2^56` and
 `2^64`, which would weaken encryption; the paper's constraints on `q` cover
 honest ciphertexts only.
+
+Honest ballots always decrypt, in the worst case and not merely with high
+probability. Decryption multiplies by a difference of two challenges and
+accepts below `q / 4`, and with every secret and every piece of randomness
+CB(1) that needs `q >= 8 nu p (2 DIM N + 1.5)`: `2^52.0` on `master` and
+`fix-pkc`, `2^56.9` on `balanced-params` and `2^60.8` on `lnp`, each at least
+one bit below its `q`. The paper's condition, `q > 2p(2 DIM N^2 + N + 1)`, is
+looser by its `N^2`, and `balanced-params` was sized against it until its `q`
+came down from `2^60.79` to `2^58`, raising encryption from 136.7 to 145.4
+bits; that is why its window starts lower than the others.
 
 ## Building
 
@@ -72,7 +82,7 @@ proof. This table is the reference for what each costs and what each is worth.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `master` | `2^31.86` | 1024 | 3 | 36 | 25.3 KB | 117.4 | 72.4 | 87.0 | **72.4** |
 | `fix-pkc` | `2^31.86` | 1024 | 3 | 36 | 41.2 KB | 117.4 | 72.4 | 87.0 | **72.4** |
-| `balanced-params` | `2^37` | 1024 | 4 | 20 | 49.4 KB | 168.2 | 151.9 | 136.7 | **136.7** |
+| `balanced-params` | `2^37` | 1024 | 4 | 20 | 49.4 KB | 168.2 | 151.9 | 145.4 | **145.4** |
 | `lnp` | `2^40` | 2048 | 3 | 18 | 132.8 KB | 327.0 | 137.6 | 316.2 | **137.6** |
 
 Security is core-SVP bits, in the sense of Alkim-Ducas-Pöppelmann-Schwabe,
