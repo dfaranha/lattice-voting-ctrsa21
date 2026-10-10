@@ -64,6 +64,17 @@ with its secrets centred binomial, as the code samples them, which puts the
 hiding and encryption columns a few bits below figures that modelled them
 otherwise.
 
+**Binding is quoted at the paper's bound, and a more conservative one gives
+less.** The column is MSIS at the paper's extractable opening
+`16 sigma sqrt(nu N)`. The soundness write-up on the patched branches
+(`SOUNDNESS.md`, Section 5) instead appeals to MSIS at
+`2 ||delta||_1 * 4 sqrt(N) sigma`, which holds for any two ring elements and is
+larger by `sqrt(nu)`; there binding is 89.9 bits on `master` and `fix-pkc`,
+105.4 on `balanced-params` and 273.6 on `lnp`. The first two are limited by
+hiding either way, and `lnp` stays far above 128, but `balanced-params` reaches
+128 only at the paper's bound. Which bound the extraction needs has not been
+settled; `estimates.sage` prints both.
+
 Sizes are at `MSGS = 25` and are **measured, not estimated**. Every branch
 carries a `serial.c` that packs the values the prover sends, at
 `ceil(log2 p)` bits per uniform coefficient and, for a Gaussian one, against

@@ -15,7 +15,11 @@
 # - Binding: MSIS over R_p with HEIGHT rows, WIDTH columns and bound
 #   16 * sigma * sqrt(nu * N), the extractable opening of the paper's section
 #   3.1, with sigma the width of the masks the extractor sees: SIGMA_C, or on
-#   lnp SIGMA_B, since one rejection test there spans the whole batch.
+#   lnp SIGMA_B, since one rejection test there spans the whole batch. The
+#   last column is the same MSIS at 2 ||delta||_1 * 4 sqrt(N) * sigma, with
+#   ||delta||_1 <= 2 nu, the bound Section 5 of SOUNDNESS.md on the patched
+#   branches uses; it is larger by a factor sqrt(nu), and which of the two the
+#   extraction needs has not been settled.
 # - Hiding: MLWE over R_p of rank WIDTH - HEIGHT - 1 with HEIGHT + 1 samples,
 #   secret and error uniform in {-1, 0, 1}, as commit_sample_short draws them.
 # - Encryption: MLWE over R_q of rank DIM with DIM samples, secret and error
@@ -54,10 +58,11 @@ BRANCHES = {
 }
 
 print(f"{'branch':16s} {'binding':>8s} {'hiding':>8s} {'encryption':>10s} "
-      f"{'level':>7s}", flush=True)
+      f"{'level':>7s} {'binding at 2|delta|_1 4 sqrt(N) sigma':>38s}", flush=True)
 for name, (N, p, k, n, q, dim, nu, sigma) in BRANCHES.items():
     binding = sis(N, k, n, p, 16 * sigma * sqrt(nu * N))
     hiding = lwe((k - n - 1) * N, p, (n + 1) * N, TERNARY, TERNARY)
     encryption = lwe(dim * N, q, dim * N, BINOMIAL, BINOMIAL)
+    rigorous = sis(N, k, n, p, 2 * (2 * nu) * 4 * sqrt(N) * sigma)
     print(f"{name:16s} {binding:8.1f} {hiding:8.1f} {encryption:10.1f} "
-          f"{min(binding, hiding, encryption):7.1f}", flush=True)
+          f"{min(binding, hiding, encryption):7.1f} {rigorous:38.1f}", flush=True)
