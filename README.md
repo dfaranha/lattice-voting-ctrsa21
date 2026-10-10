@@ -40,11 +40,11 @@ Honest ballots always decrypt, in the worst case and not merely with high
 probability. Decryption multiplies by a difference of two challenges and
 accepts below `q / 4`, and with every secret and every piece of randomness
 CB(1) that needs `q >= 8 nu p (2 DIM N + 1.5)`: `2^52.0` on `master` and
-`fix-pkc`, `2^56.9` on `balanced-params` and `2^60.8` on `lnp`, each at least
+`fix-pkc`, `2^58.9` on `balanced-params` and `2^60.8` on `lnp`, each at least
 one bit below its `q`. The paper's condition, `q > 2p(2 DIM N^2 + N + 1)`, is
 looser by its `N^2`, and `balanced-params` was sized against it until its `q`
-came down from `2^60.79` to `2^58`, raising encryption from 136.7 to 145.4
-bits; that is why its window starts lower than the others.
+was set by this bound instead, which put it four bits lower relative to `p`;
+that is why its window starts lower than the others.
 
 ## Building
 
@@ -80,10 +80,10 @@ proof. This table is the reference for what each costs and what each is worth.
 
 | branch | modulus | `DEGREE` | `WIDTH` | `NONZERO` | proof, per message | MSIS binding | MLWE hiding | MLWE encryption | security level |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `master` | `2^31.86` | 1024 | 3 | 36 | 25.3 KB | 117.4 | 72.4 | 87.0 | **72.4** |
-| `fix-pkc` | `2^31.86` | 1024 | 3 | 36 | 41.2 KB | 117.4 | 72.4 | 87.0 | **72.4** |
-| `balanced-params` | `2^37` | 1024 | 4 | 20 | 49.4 KB | 168.2 | 151.9 | 145.4 | **145.4** |
-| `lnp` | `2^40` | 2048 | 3 | 18 | 132.8 KB | 327.0 | 137.6 | 316.2 | **137.6** |
+| `master` | `2^31.86` | 1024 | 3 | 36 | 25.3 KB | 83.2 | 72.4 | 87.0 | **72.4** |
+| `fix-pkc` | `2^31.86` | 1024 | 3 | 36 | 41.2 KB | 83.2 | 72.4 | 87.0 | **72.4** |
+| `balanced-params` | `2^39` | 1024 | 4 | 20 | 50.6 KB | 131.1 | 142.2 | 139.0 | **131.1** |
+| `lnp` | `2^40` | 2048 | 3 | 18 | 132.8 KB | 256.1 | 137.6 | 316.2 | **137.6** |
 
 Security is core-SVP bits, in the sense of Alkim-Ducas-Pöppelmann-Schwabe,
 computed with the `lattice-estimator`. The security level of a branch is the
@@ -94,20 +94,22 @@ with its secrets centred binomial, as the code samples them, which puts the
 hiding and encryption columns a few bits below figures that modelled them
 otherwise.
 
-**Binding is quoted at the paper's bound, and a more conservative one gives
-less.** The column is MSIS at the paper's extractable opening
-`16 sigma sqrt(nu N)`. The soundness write-up on the patched branches
-(`SOUNDNESS.md`, Section 5) instead appeals to MSIS at
-`2 ||delta||_1 * 4 sqrt(N) sigma`, which holds for any two ring elements and is
-larger by `sqrt(nu)`; there binding is 89.9 bits on `master` and `fix-pkc`,
-134.3 on `balanced-params` and 273.6 on `lnp`. The first two are limited by
-hiding either way. `balanced-params` used to reach 128 only at the paper's
-bound -- 105.4 at the conservative one, with `p` at `2^31.25` -- and its modulus
-was raised to `2^37` so that it clears 128 at either: the masked openings do not
-depend on `p`, so only the uniform coefficients widen, 46.3 KB a message becoming
-49.4, and hiding and encryption, which a larger modulus weakens, stay above
-binding. Which bound the extraction needs has not been settled;
-`estimates.sage` prints both.
+**Binding is quoted at the bound extraction needs, not the paper's.** The
+extractor turns two relaxed openings into `delta' zbar - delta zbar'`
+(`SOUNDNESS.md`, Section 5, on the patched branches), and the column is MSIS
+at its norm, `16 nu sigma sqrt(WIDTH N)`: a challenge difference stretches a
+vector by up to its `l1` norm, `2 nu`, and `zbar` has `WIDTH` elements of norm
+at most `4 sigma sqrt(N)` each. The paper's `16 sigma sqrt(nu N)` is smaller by
+`sqrt(nu WIDTH)` because it charges the challenge its `l2` norm, which does
+not bound a product, and charges `zbar` one element. At the paper's bound
+binding would read 117.4 on `master` and `fix-pkc`, 181.0 on `balanced-params`
+and 327.0 on `lnp`; `estimates.sage` prints it for comparison. Only
+`balanced-params` is moved by the difference: at `p = 2^37` it had 121.8, and
+`p` was raised to `2^39`, and `q` with it, to reach 131.1. The masked openings
+do not depend on `p`, so only the uniform coefficients widen, 49.4 KB a
+message becoming 50.6, while hiding and encryption, which a larger modulus
+weakens, fall to 142.2 and 139.0. Raising `p` from `2^31.25` to `2^37` earlier
+had been for the same reason, at a bound that missed the `sqrt(WIDTH)`.
 
 Sizes are at `MSGS = 25` and are **measured, not estimated**. Every branch
 carries a `serial.c` that packs the values the prover sends, at
@@ -143,7 +145,7 @@ and brackets the byte count by it -- below a flat encoding, above the entropy
 | --- | --- | --- | --- | --- | --- |
 | `master` | 17.86 | 20 | 17.77 | 27.0 KB | 25.3 KB |
 | `fix-pkc` | 17.09 | 19.20 | 17.00 | 44.0 KB | 41.2 KB |
-| `balanced-params` | 16.26 | 18.38 | 16.17 | 50.0 KB | 49.4 KB |
+| `balanced-params` | 16.25 | 18.38 | 16.17 | 50.0 KB | 50.6 KB |
 | `lnp` | 20.26 | 21.93 | 20.15 | 137.0 KB | 132.8 KB |
 
 The first three columns are bits a Gaussian coefficient, averaged over the
@@ -153,8 +155,9 @@ essentially the gap between the bound and the distribution, and how much of the
 proof is Gaussian rather than uniform: close to 6 per cent on every branch but
 `lnp`, where the projection and the batch masks make it 3. The "was" column
 is at the widths each branch had when the coding landed; `balanced-params` and
-`lnp` have since moved theirs, below, and `lnp` has moved to `p = 2^40 - 195`,
-whose uniform coefficients pack in 40 bits rather than 41. The "is" column also no longer sends the
+`lnp` have since moved theirs, below, and both have moved `p`: `balanced-params`
+to `2^39 - 19`, whose uniform coefficients take 39 bits rather than 37, and
+`lnp` to `2^40 - 195`, whose take 40 rather than 41. The "is" column also no longer sends the
 last `s_i`, which no linear proof reads: one ring element fewer, about 4 KB a
 proof at `DEGREE = 1024` and 10 KB on `lnp`.
 
@@ -172,8 +175,8 @@ and it costs 132.8 KB.
 **`DEGREE` is 2048 on `lnp` because the batch size became a security
 parameter.** One rejection test spans every message's response, so the masks
 widen as `sqrt(MSGS)` and the extractable opening widens with them. At
-`DEGREE = 1024` that puts binding at 140 bits for 25 messages and 109 for a
-thousand; at 2048 the same two are 327 and 261. Shuffling in blocks is not a
+`DEGREE = 1024` that puts binding at 107 bits for 25 messages and 84 for a
+thousand; at 2048 the same two are 256 and 208. Shuffling in blocks is not a
 way around this, because `MSGS` is the anonymity set, not merely a batch size.
 
 Every branch omits the first messages from the proof and carries the 32-byte
@@ -194,10 +197,11 @@ rest. The branch is gone; its last state is the tag `archive/nocrt`.
 times the longest vector it masks, `nu * beta * sqrt(K * N)` for `K` ternary
 ring elements. `balanced-params` had inherited a width scaled from the paper's
 54000 and now sits at that minimum, which took 0.7 KB off a message and raised
-binding from 128.2 to 132.9 bits at the modulus of the time. `lnp` went the other way: its batched test
+binding from 128.2 to 132.9 bits at the modulus of the time and the paper's
+bound. `lnp` went the other way: its batched test
 masks `K = 285` ring elements, not the 75 its width was sized for, so `SIGMA_B`
 had to grow from 165340 to 295465, at 2.2 KB a message and 25 bits of binding
-that its hiding-limited security level does not notice. `master` and `fix-pkc`
+at the paper's bound that its hiding-limited security level does not notice. `master` and `fix-pkc`
 keep the paper's width, with about 26 per cent to spare.
 
 **Timings.** Median of three interleaved rounds, in millions of cycles of the

@@ -12,14 +12,18 @@
 #
 # The three problems, per branch:
 #
-# - Binding: MSIS over R_p with HEIGHT rows, WIDTH columns and bound
-#   16 * sigma * sqrt(nu * N), the extractable opening of the paper's section
-#   3.1, with sigma the width of the masks the extractor sees: SIGMA_C, or on
-#   lnp SIGMA_B, since one rejection test there spans the whole batch. The
-#   last column is the same MSIS at 2 ||delta||_1 * 4 sqrt(N) * sigma, with
-#   ||delta||_1 <= 2 nu, the bound Section 5 of SOUNDNESS.md on the patched
-#   branches uses; it is larger by a factor sqrt(nu), and which of the two the
-#   extraction needs has not been settled.
+# - Binding: MSIS over R_p with HEIGHT rows and WIDTH columns, at the norm
+#   of the vector the extractor builds from two relaxed openings,
+#   delta' zbar - delta zbar'. Each challenge difference has
+#   ||delta||_1 <= 2 nu, each of the WIDTH elements of zbar has l2-norm at
+#   most 4 sigma sqrt(N), and multiplying by delta stretches a vector by at
+#   most ||delta||_1, so the bound is 2 * 2 nu * 4 sigma sqrt(WIDTH * N)
+#   = 16 nu sigma sqrt(WIDTH * N). sigma is the width of the masks the
+#   extractor sees: SIGMA_C, or on lnp SIGMA_B, since one rejection test there
+#   spans the whole batch. The paper's 16 sigma sqrt(nu N) is smaller by
+#   sqrt(nu WIDTH): it takes ||delta||_2 for ||delta||_1, which does not bound
+#   a product, and the norm of one element for that of the vector. It is
+#   printed for reference and does not enter the level.
 # - Hiding: MLWE over R_p of rank WIDTH - HEIGHT - 1 with HEIGHT + 1 samples,
 #   secret and error uniform in {-1, 0, 1}, as commit_sample_short draws them.
 # - Encryption: MLWE over R_q of rank DIM with DIM samples, secret and error
@@ -52,18 +56,18 @@ def sis(N, k, n, q, beta):
 BRANCHES = {
     "master":          (1024, 3906450253, 3, 1, 72057594037928893, 2, 36, 54000),
     "fix-pkc":         (1024, 3906450253, 3, 1, 72057594037928893, 2, 36, 54000),
-    "balanced-params": (1024, 137438953349, 4, 1, 288230376151711717, 3, 20,
+    "balanced-params": (1024, 549755813869, 4, 1, 1152921504606846869, 3, 20,
                         27501),
     "lnp":             (2048, 1099511627581, 3, 1, 18446744073709551557, 3, 18,
                         295465),
 }
 
 print(f"{'branch':16s} {'binding':>8s} {'hiding':>8s} {'encryption':>10s} "
-      f"{'level':>7s} {'binding at 2|delta|_1 4 sqrt(N) sigma':>38s}", flush=True)
+      f"{'level':>7s} {'binding at the paper bound':>27s}", flush=True)
 for name, (N, p, k, n, q, dim, nu, sigma) in BRANCHES.items():
-    binding = sis(N, k, n, p, 16 * sigma * sqrt(nu * N))
+    binding = sis(N, k, n, p, 16 * nu * sigma * sqrt(k * N))
     hiding = lwe((k - n - 1) * N, p, (n + 1) * N, TERNARY, TERNARY)
     encryption = lwe(dim * N, q, dim * N, BINOMIAL, BINOMIAL)
-    rigorous = sis(N, k, n, p, 2 * (2 * nu) * 4 * sqrt(N) * sigma)
+    paper = sis(N, k, n, p, 16 * sigma * sqrt(nu * N))
     print(f"{name:16s} {binding:8.1f} {hiding:8.1f} {encryption:10.1f} "
-          f"{min(binding, hiding, encryption):7.1f} {rigorous:38.1f}", flush=True)
+          f"{min(binding, hiding, encryption):7.1f} {paper:27.1f}", flush=True)
