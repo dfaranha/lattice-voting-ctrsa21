@@ -56,10 +56,17 @@ Writing `N = DEGREE`, `k = WIDTH`, `n = HEIGHT`, `nu = NONZERO`:
    `= 2^28.20`. The current `p` clears it by a factor of 446 (it was 8.3 at
    `2^31.25`): `sqrt(p / 2) = 262144`, against an extracted norm of at most
    12416.
-4. **Decryption correctness**: `q > 2p(2 * DIM * N^2 * BETA^2 + N + 1)`
-   (paper, Table 1). The factor is 12584962, about `2^23.6`, so `q` scales
-   linearly with `p`: at the current `p` the bound is `2^60.585`, and `q` is
-   `2^60.785`, 1.15 times it.
+4. **Decryption correctness**: `q >= 8 * nu * p * (2 * DIM * N + 1.5)`, which
+   is `2^56.91` at the current `p`; `q` is `2^58`, twice it. This is what the
+   code's decryption checks, bounded in the worst case: it computes
+   `c_bar (w - <v, s_1>)` for `c_bar = c - c'`, `||c_bar||_1 <= 2 nu`, and
+   accepts below `q / 4`, and for an honest ciphertext that is
+   `c_bar (p x + mu)` with `||x||_inf <= 2 * DIM * N + 1`, since every secret
+   and every piece of randomness is CB(1). The paper's Table 1 asks instead for
+   `q > 2p(2 * DIM * N^2 * BETA^2 + N + 1)`, `2^60.585` here, which `q` was
+   sized against until "Lowering q" below: its `N^2` is loose, a product of
+   two ternary elements having coefficients at most `N`, and it leaves out
+   `c_bar`. Either way `q` scales linearly with `p`.
 5. **Quasi-unique responses**: `q > 24 * SIGMA_E^2 = 2^36`. Never binding.
 6. **Challenge space**: Theorem 1 has a `4 * tau * t` term, so `|C|` should
    exceed about `2^135`. The sampler in `shuffle.c` draws challenges with `nu`
@@ -75,7 +82,7 @@ and so weakens encryption as well; it also widens the uniform coefficients of
 the proof. Hiding is no longer what holds `p` down: at rank 2 it has surplus
 (151.9 bits at the current `p`). What sets `p` is binding at Section 5's
 conservative bound, which `p = 2^37` lifts to 134.3, and what caps it is
-encryption, which `q` pulls down to 136.7. At the paper's bound binding has
+encryption, which `q` pulls down to 145.4. At the paper's bound binding has
 surplus (168.2) and the level is set by encryption; at the conservative bound
 it is set by binding. Raising `p` further would buy binding with encryption.
 
@@ -90,10 +97,11 @@ it is set by binding. Raising `p` further would buy binding with encryption.
 | `SIGMA_S` | 256 | 97 |
 | `DIM` | 2 | 3 (now derived as `WIDTH - HEIGHT`) |
 | `VECTOR` | 3 | 4 (now derived as `WIDTH`) |
-| `Q` | 2^56 | 1986862199687640941 (2^60.79) |
+| `Q` | 2^56 | 288230376151711717 (2^58) |
 
 `MODP` and `Q` were 2553802997 (2^31.25) and 36028797018964429 (2^55) until
-they were raised for binding; see "Raising p" below.
+they were raised for binding; see "Raising p" below. `Q` was then
+1986862199687640941 (2^60.79) until it was lowered again; see "Lowering q".
 
 `WIDTH = 4` is what takes the MLWE rank from 1 to 2. There is nothing in
 between: rank 1 gives 72 bits and rank 2 gave 186 at the 2^31.25 modulus
@@ -141,10 +149,11 @@ value, and 54000 is the conservative direction.
 | MLWE, commitment hiding | 72 | **151.9** | 177.9 |
 | MSIS, binding at the paper's `16 * SIGMA_C * sqrt(nu * N)` | 117 | **168.2** | 193.1 |
 | MSIS, binding at Section 5's `2 * ||delta||_1 * 4 * sqrt(N) * SIGMA_C` | 89.9 | **134.3** | 160.7 |
-| MLWE, encryption | 87 | **136.7** | 164.6 |
+| MLWE, encryption | 87 | **145.4** | 172.5 |
 
-The level is 136.7 core-SVP at the paper's bound, set by encryption, and 134.3
-at the conservative one, set by binding. At the previous `p = 2^31.25` the
+The level is 145.4 core-SVP at the paper's bound, set by encryption, and 134.3
+at the conservative one, set by binding. At `q = 2^60.79` encryption was 136.7
+(164.6). At the previous `p = 2^31.25` the
 same columns read 186.1 (213.9) for hiding, 132.9 (159.2) and 105.4 for
 binding, and 155.4 (183.6) for encryption, so the level was 132.9 at the
 paper's bound and 105.4 at the conservative one. Binding at the paper's bound
@@ -159,7 +168,8 @@ against 18.38 for a flat encoding at the bound and 16.17 of entropy. It was
 46.4 KB (1188970 bytes, at 16.25 bits a Gaussian coefficient) when it still
 carried the unused last `s_i`, against 47.1 KB at the previous widths; a
 ciphertext grows by one ring element over the published parameters, and its
-coefficients, which live modulo `q`, widen with `q` from 56 to 61 bits.
+coefficients, which live modulo `q`, widen with `q` from 56 to 58 bits (61
+before "Lowering q").
 Prover time is unchanged: the linear proof expects `M^4 = 9.38` repetitions
 whatever the widths are.
 
@@ -199,12 +209,35 @@ of constraint 3 grows from 8.3 to 446, and the `SIGMA_S` window of
 SOUNDNESS.md, Section 8, widens from a factor of 4.1 to 30.1; the proof grows
 from 46.3 to 49.4 KB a message.
 
+## Lowering q (2026-10-10)
+
+`q` had been sized against the paper's decryption condition, whose `N^2`
+asked for `2^60.585`. Bounding what the code's decryption actually checks, as
+constraint 4 now does, needs `2^56.91` in the worst case, with no failure
+probability to account for. The new `q` is 288230376151711717, `2^58 - 27`,
+the largest prime below `2^58` that is 5 mod 8, with `Q0 = 142220625783425069`
+and `Q1 = 146009750368286648`; `x^512 +- Q0` are irreducible and multiply to
+`x^1024 + 1`. It clears the bound by a factor of 2.1, and its coefficients take
+58 bits. Going to `2^57 - 195` would add 3.1 bits of encryption for a margin of
+6 per cent; one bit of margin seemed the better trade.
+
+Encryption rises from 136.7 to **145.4** core-SVP (164.6 to 172.5 MATZOV), so
+the level at the paper's binding bound rises from 136.7 to 145.4, still set by
+encryption, with hiding at 151.9 above it. At the conservative bound it stays
+134.3, set by binding. A ciphertext coefficient shrinks from 61 to 58 bits. The
+shuffle proof is unaffected, at 49.4 KB a message, since it lives modulo `p`.
+
+What gets worse is a malicious voter's lot. A ballot whose encryption
+randomness is uniform in `[-R, R]` stops decrypting at a smaller `R`, since
+decryption's ceiling `q / 4` fell, while the verifier's tail bound, which
+decides where proofs stop verifying, does not depend on `q`; the window of
+ballots that verify but do not decrypt therefore widens downwards. `master`'s
+README has the measurement.
+
 ## Caveats
 
-- The decryption bound in constraint 4 uses the worst-case ring product bound
-  `||ab||_inf <= N ||a||_inf ||b||_inf` applied twice, hence the `N^2`. A
-  statistical bound would be much smaller and would let `q` drop further, which
-  would shrink ciphertexts and raise encryption security at the same time. That
-  needs a failure-probability analysis, which has not been done here.
+- The decryption bound in constraint 4 is worst case. A statistical bound
+  would be smaller still and would let `q` drop further, at the price of a
+  decryption-failure probability that would have to be analysed and accepted.
 - These are estimates against the best currently known attacks, in a model that
   counts one SVP call. They are not proofs.

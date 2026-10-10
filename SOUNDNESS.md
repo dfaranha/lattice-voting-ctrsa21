@@ -305,7 +305,7 @@ need to be extended accordingly.
    above 128: the modulus was raised from 2553802997 (about `2^31.25`), where
    they were 105.4 and 132.9, precisely so that the answer does not decide
    whether this branch reaches 128 bits. At Section 5's bound binding sets the
-   level, 134.3; at the paper's, encryption does, at 136.7 (PARAMS.md).
+   level, 134.3; at the paper's, encryption does, at 145.4 (PARAMS.md).
 4. **Zero-knowledge sketched only**, as noted in Section 9.
 5. **The window in Section 8 depends on every parameter.** It has slack now,
    a factor of 30.1, but only because `q` was raised for binding; at the
