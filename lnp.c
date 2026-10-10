@@ -1030,6 +1030,25 @@ void lnp_maskkey_gen(lnpmaskkey_t *key) {
 			}
 		}
 	}
+
+	SHA256Context sha;
+
+	SHA256Reset(&sha);
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int j = 0; j < MASK_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				commit_hash_crt(&sha, key->B1[i][j][k]);
+			}
+		}
+	}
+	for (int i = 0; i < LNP_LAMBDA; i++) {
+		for (int j = 0; j < MASK_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				commit_hash_crt(&sha, key->b2[i][j][k]);
+			}
+		}
+	}
+	SHA256Result(&sha, key->digest);
 }
 
 void lnp_maskcom_init(lnpmaskcom_t *com) {
@@ -1130,6 +1149,25 @@ void lnp_garbkey_gen(lnpgarbkey_t *key) {
 			}
 		}
 	}
+
+	SHA256Context sha;
+
+	SHA256Reset(&sha);
+	for (int i = 0; i < HEIGHT; i++) {
+		for (int j = 0; j < GARB_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				commit_hash_crt(&sha, key->B1[i][j][k]);
+			}
+		}
+	}
+	for (int i = 0; i < 2; i++) {
+		for (int j = 0; j < GARB_WIDTH; j++) {
+			for (int k = 0; k < NCRT; k++) {
+				commit_hash_crt(&sha, key->b2[i][j][k]);
+			}
+		}
+	}
+	SHA256Result(&sha, key->digest);
 }
 
 void lnp_garbcom_init(lnpgarbcom_t *com) {
@@ -1540,8 +1578,11 @@ static void bin_local_hash(pcrt_poly_t d, nmod_poly_t dc, lnpkey_t *key,
 	nmod_poly_t c;
 
 	SHA256Reset(&sha);
-	/* Hash public key, through the digest lnp_keygen computed once. */
+	/* Hash public key, through the digest lnp_keygen computed once, and the
+	 * keys the mask and garbage commitments absorbed below were made under. */
 	SHA256Input(&sha, key->digest, SHA256HashSize);
+	SHA256Input(&sha, tst_mkey.digest, SHA256HashSize);
+	SHA256Input(&sha, tst_gkey.digest, SHA256HashSize);
 	for (int k = 0; k < NCRT; k++) {
 		for (int i = 0; i < HEIGHT; i++) {
 			commit_hash_crt(&sha, com->c1[i][k]);

@@ -101,6 +101,9 @@ typedef struct _lnpkey_t {
 typedef struct _lnpmaskkey_t {
 	pcrt_poly_t B1[HEIGHT][MASK_WIDTH];
 	pcrt_poly_t b2[LNP_LAMBDA][MASK_WIDTH];
+	/* A hash of B1 and b2, set by lnp_maskkey_gen, for the challenges that
+	 * follow a mask commitment to bind the key it was made under. */
+	uint8_t digest[SHA256HashSize];
 } lnpmaskkey_t;
 
 typedef struct _lnpmaskcom_t {
@@ -112,6 +115,8 @@ typedef struct _lnpmaskcom_t {
 typedef struct _lnpgarbkey_t {
 	pcrt_poly_t B1[HEIGHT][GARB_WIDTH];
 	pcrt_poly_t b2[2][GARB_WIDTH];
+	/* A hash of B1 and b2, set by lnp_garbkey_gen, as for the mask key. */
+	uint8_t digest[SHA256HashSize];
 } lnpgarbkey_t;
 
 typedef struct _lnpgarbcom_t {

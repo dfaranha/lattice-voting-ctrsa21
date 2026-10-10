@@ -306,7 +306,7 @@ static void challenge_from_hash(nmod_poly_t d[2], nmod_poly_t dc,
  * and so the single opening each message sends answers a challenge that
  * depends on all of them. */
 static void batch_hash(nmod_poly_t d[2], nmod_poly_t dcoef, commitkey_t *key,
-		lnpkey_t *lkey, commit_t com[MSGS], lnpcom_t p[MSGS], commit_t dc[MSGS],
+		lnpkey_t *lkey, lnpmaskkey_t *mkey, lnpgarbkey_t *gkey, commit_t com[MSGS], lnpcom_t p[MSGS], commit_t dc[MSGS],
 		nmod_poly_t t[MSGS][2], nmod_poly_t tp[MSGS][2],
 		nmod_poly_t _t[MSGS][2], nmod_poly_t u[MSGS][2], isbin_t ib[MSGS],
 		nmod_poly_t beta, lnpmaskcom_t *mcom, lnpgarbcom_t *gcom,
@@ -315,9 +315,14 @@ static void batch_hash(nmod_poly_t d[2], nmod_poly_t dcoef, commitkey_t *key,
 	uint8_t hash[SHA256HashSize];
 
 	SHA256Reset(&sha);
-	/* Hash public keys, through the digests their keygens computed once. */
+	/* Hash public keys, through the digests their keygens computed once:
+	 * those of the commitments and also those of the mask and garbage
+	 * commitments, which this challenge follows and which used to go
+	 * unbound. */
 	SHA256Input(&sha, key->digest, SHA256HashSize);
 	SHA256Input(&sha, lkey->digest, SHA256HashSize);
+	SHA256Input(&sha, mkey->digest, SHA256HashSize);
+	SHA256Input(&sha, gkey->digest, SHA256HashSize);
 	commit_hash_poly(&sha, beta);
 	for (int k = 0; k < NCRT; k++) {
 		for (int i = 0; i < HEIGHT; i++) {
@@ -1110,7 +1115,7 @@ static int shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 			lnp_garb_commit(gcom, garb, gkey, gr);
 			lnp_garb_first(batch, gkey, zg);
 			lnp_batch_first(batch, mkey, zm);
-			batch_hash(dch, dc, key, lkey, com, p, d, t, tp, _t, u, ib, beta,
+			batch_hash(dch, dc, key, lkey, mkey, gkey, com, p, d, t, tp, _t, u, ib, beta,
 					mcom, gcom, batch, digest);
 			for (int l = 0; l < MSGS; l++) {
 				lin_respond(&lc[l], y[l], w[l], _y[l], dc, &dot, &norm);
@@ -1250,7 +1255,7 @@ static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(ignored[k], MODP);
 		}
-		batch_hash(ignored, NULL, key, lkey, com, p, d, t, tp, _t, u, ib, beta,
+		batch_hash(ignored, NULL, key, lkey, mkey, gkey, com, p, d, t, tp, _t, u, ib, beta,
 				mcom, gcom, batch, rebuilt);
 		result &= (memcmp(rebuilt, digest, SHA256HashSize) == 0);
 		for (int k = 0; k < NCRT; k++) {
@@ -1432,7 +1437,8 @@ static void proof_walk(proof_t *pf, bitwriter_t *w, bitreader_t *r) {
 
 static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		nmod_poly_t sigma[MSGS], nmod_poly_t r[MSGS][WIDTH][2],
-		commitkey_t *key, lnpkey_t *lkey) {
+		commitkey_t *key, lnpkey_t *lkey, lnpmaskkey_t *mkey,
+		lnpgarbkey_t *gkey) {
 	int result = 1;
 	commit_t d[MSGS];
 	/* These are large enough that they do not belong on the stack. */
@@ -1444,9 +1450,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	static nmod_poly_t gr[GARB_WIDTH][2], zg[GARB_WIDTH][2];
 	static nmod_poly_t bch[MSGS][2];
 	uint8_t digest[SHA256HashSize];
-	lnpmaskkey_t mkey;
 	lnpmaskcom_t mcom;
-	lnpgarbkey_t gkey;
 	lnpgarbcom_t gcom;
 	lnpbatch_t batch;
 	nmod_poly_t s[MSGS], u[MSGS][2];
@@ -1454,11 +1458,9 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	nmod_poly_t t[MSGS][2], tp[MSGS][2], _t[MSGS][2];
 	pcrt_poly_t msg[SLOTS];
 
-	lnp_maskkey_init(&mkey);
-	lnp_maskkey_gen(&mkey);
+	/* The mask and garbage keys are public parameters, generated once with
+	 * the others; they used to be generated afresh inside every proof. */
 	lnp_maskcom_init(&mcom);
-	lnp_garbkey_init(&gkey);
-	lnp_garbkey_gen(&gkey);
 	lnp_garbcom_init(&gcom);
 	lnp_batch_init(&batch);
 	for (int i = 0; i < MASK_WIDTH; i++) {
@@ -1526,8 +1528,8 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 	}
 
 	int proved = shuffle_prover(y, w, _y, t, tp, _t, u, d, s, com, p, ib, m,
-			_m, sigma, r, pr, key, lkey, &mkey, &mcom, &batch, mr, zm,
-			&gkey, &gcom, gr, zg, bch, digest);
+			_m, sigma, r, pr, key, lkey, mkey, &mcom, &batch, mr, zm,
+			gkey, &gcom, gr, zg, bch, digest);
 
 	/* Round-trip the proof through its serialisation before verifying it, so
 	 * that the measured size is the size of something that actually verifies
@@ -1603,8 +1605,8 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		serial_reader_init(&br, buf, sizeof(buf));
 		proof_walk(&pf2, NULL, &br);
 		result = !br.overflow && shuffle_verifier(y2, w2, _y2, t2, tp2, _t2,
-				u2, d2, s2, com, p2, ib2, _m, key, lkey, &mkey, &mcom2,
-				&batch2, zm2, &gkey, &gcom2, zg2, digest2);
+				u2, d2, s2, com, p2, ib2, _m, key, lkey, mkey, &mcom2,
+				&batch2, zm2, gkey, &gcom2, zg2, digest2);
 
 		lnp_maskcom_free(&mcom2);
 		lnp_garbcom_free(&gcom2);
@@ -1641,7 +1643,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		}
 	} else {
 		result = shuffle_verifier(y, w, _y, t, tp, _t, u, d, s, com, p, ib,
-				_m, key, lkey, &mkey, &mcom, &batch, zm, &gkey, &gcom, zg,
+				_m, key, lkey, mkey, &mcom, &batch, zm, gkey, &gcom, zg,
 				digest);
 	}
 
@@ -1667,9 +1669,7 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 			nmod_poly_clear(bch[l][k]);
 		}
 	}
-	lnp_maskkey_free(&mkey);
 	lnp_maskcom_free(&mcom);
-	lnp_garbkey_free(&gkey);
 	lnp_garbcom_free(&gcom);
 	lnp_batch_free(&batch);
 	for (int i = 0; i < MSGS; i++) {
@@ -1759,6 +1759,8 @@ static void crt_swap(nmod_poly_t out0, nmod_poly_t out1, nmod_poly_t in0,
 static void test(void) {
 	commitkey_t key;
 	lnpkey_t lkey;
+	lnpmaskkey_t mkey;
+	lnpgarbkey_t gkey;
 	commit_t com[MSGS], com0[MSGS];
 	int pi[MSGS];
 	nmod_poly_t m[MSGS], _m[MSGS], am[MSGS], sigma[MSGS], r[MSGS][WIDTH][2];
@@ -1794,6 +1796,10 @@ static void test(void) {
 	 * key: it carries one message row per slot of the is_bin sub-proof. */
 	lnp_keyinit(&lkey);
 	lnp_keygen(&lkey);
+	lnp_maskkey_init(&mkey);
+	lnp_maskkey_gen(&mkey);
+	lnp_garbkey_init(&gkey);
+	lnp_garbkey_gen(&gkey);
 
 	for (int i = 0; i < MSGS; i++) {
 		for (int j = 0; j < WIDTH; j++) {
@@ -1837,7 +1843,7 @@ static void test(void) {
 	} TEST_END;
 
 	TEST_ONCE("shuffle proof is consistent") {
-		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey) == 1, end);
+		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey, &mkey, &gkey) == 1, end);
 	} TEST_END;
 
 	TEST_ONCE("decoder rejects encodings no writer produces") {
@@ -1908,7 +1914,7 @@ static void test(void) {
 	 * sigma is CRT-mixed in place below. */
 	TEST_ONCE("proof survives serialisation, and measures what it should") {
 		measure_proof = 1;
-		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey) == 1, end);
+		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey, &mkey, &gkey) == 1, end);
 		measure_proof = 0;
 		printf("\n    %zu bytes, %.1f KB per message\n", proof_bytes,
 				proof_bytes / 1024.0 / MSGS);
@@ -1956,7 +1962,7 @@ static void test(void) {
 		 * constant-coefficient and range halves still pass and only the
 		 * batched quadratic relation can reject. */
 		break_product = 3;
-		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey) == 0, end);
+		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey, &mkey, &gkey) == 0, end);
 		break_product = -1;
 	} TEST_END;
 
@@ -1973,7 +1979,7 @@ static void test(void) {
 				nmod_poly_set(com0[i].c2[k], com[i].c2[k]);
 			}
 		}
-		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey) == 1, end);
+		TEST_ASSERT(run(com, m, _m, sigma, r, &key, &lkey, &mkey, &gkey) == 1, end);
 		for (int i = 0; i < MSGS; i++) {
 			TEST_ASSERT(nmod_poly_equal(m0[i], m[i]) == 1, end);
 			TEST_ASSERT(nmod_poly_equal(_m0[i], _m[i]) == 1, end);
@@ -1994,7 +2000,7 @@ static void test(void) {
 		nmod_poly_set(_m0[0], m[1]);
 		nmod_poly_set_coeff_ui(_m0[0], 0,
 				(nmod_poly_get_coeff_ui(_m0[0], 0) + 2) % MODP);
-		TEST_ASSERT(run(com, m, _m0, sigma, r, &key, &lkey) == 0, end);
+		TEST_ASSERT(run(com, m, _m0, sigma, r, &key, &lkey, &mkey, &gkey) == 0, end);
 	} TEST_END;
 
 	/* Mount the attack of Section 4.1: the output list is obtained from the
@@ -2023,7 +2029,7 @@ static void test(void) {
 	}
 
 	TEST_ONCE("shuffle proof rejects the CRT-mixing attack") {
-		TEST_ASSERT(run(com, m, am, sigma, r, &key, &lkey) == 0, end);
+		TEST_ASSERT(run(com, m, am, sigma, r, &key, &lkey, &mkey, &gkey) == 0, end);
 	} TEST_END;
 
 	/* Second-order attack, targeting the missing is_bin(sigma_i) sub-proof:
@@ -2051,7 +2057,7 @@ static void test(void) {
 
 
 	TEST_ONCE("shuffle proof rejects the CRT-mixing attack on sigma") {
-		TEST_ASSERT(run(com, m, am, sigma, r, &key, &lkey) == 0, end);
+		TEST_ASSERT(run(com, m, am, sigma, r, &key, &lkey, &mkey, &gkey) == 0, end);
 	} TEST_END;
 
   end:
@@ -2080,11 +2086,15 @@ static void test(void) {
 	}
 	commit_keyfree(&key);
 	lnp_keyfree(&lkey);
+	lnp_maskkey_free(&mkey);
+	lnp_garbkey_free(&gkey);
 }
 
 static void bench(void) {
 	commitkey_t key;
 	lnpkey_t lkey;
+	lnpmaskkey_t mkey;
+	lnpgarbkey_t gkey;
 	commit_t com[MSGS];
 	int pi[MSGS];
 	nmod_poly_t m[MSGS], _m[MSGS], sigma[MSGS];
@@ -2115,6 +2125,10 @@ static void bench(void) {
 	 * key: it carries one message row per slot of the is_bin sub-proof. */
 	lnp_keyinit(&lkey);
 	lnp_keygen(&lkey);
+	lnp_maskkey_init(&mkey);
+	lnp_maskkey_gen(&mkey);
+	lnp_garbkey_init(&gkey);
+	lnp_garbkey_gen(&gkey);
 
 	for (int i = 0; i < MSGS; i++) {
 		for (int j = 0; j < WIDTH; j++) {
@@ -2133,7 +2147,7 @@ static void bench(void) {
 	}
 
 	BENCH_BEGIN("shuffle-proof (N messages)") {
-		BENCH_ADD(run(com, m, _m, sigma, r, &key, &lkey));
+		BENCH_ADD(run(com, m, _m, sigma, r, &key, &lkey, &mkey, &gkey));
 	} BENCH_END;
 
 	for (int i = 0; i < NCRT; i++) {
@@ -2179,6 +2193,8 @@ static void bench(void) {
 
 	commit_keyfree(&key);
 	lnp_keyfree(&lkey);
+	lnp_maskkey_free(&mkey);
+	lnp_garbkey_free(&gkey);
 }
 
 /* Select which phases to run: "test", "bench", or neither for both. Keeping
