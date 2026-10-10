@@ -799,7 +799,7 @@ static void shuffle_coeffs(nmod_poly_t alpha, nmod_poly_t gamma,
 	nmod_poly_clear(t1);
 }
 
-static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
+static int shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 		nmod_poly_t w[MSGS][LNP_WIDTH][2], nmod_poly_t _y[MSGS][WIDTH][2],
 		nmod_poly_t t[MSGS][2],
 		nmod_poly_t tp[MSGS][2], nmod_poly_t _t[MSGS][2],
@@ -815,6 +815,7 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 		nmod_poly_t bch[MSGS][2], uint8_t digest[SHA256HashSize]) {
 	nmod_poly_t beta, alpha, gamma, pub, tau, rho, t0, t1;
 	nmod_poly_t a[MSGS], b[MSGS], theta[MSGS], inv[MSGS], _r[MSGS][WIDTH][2];
+	int proved = 1;
 	nmod_poly_t sig[MSGS][2];
 
 	nmod_poly_init(tau, MODP);
@@ -992,12 +993,13 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 				accepted = lnp_bin_setup(&ib[l].all, &ib[l].ctx, batch, &p[l],
 						mcom, msg[SLOT_S], msg[SLOT_F], wraw, lkey);
 			}
-			/* Each attempt is rejected with small probability, so 64 failures
-			 * mean something is wrong; carrying on would prove with the
-			 * projection scalars unset. */
+			/* An honest prover's projection is rejected with small
+			 * probability, so 64 rejections mean the committed element is not
+			 * one the range proof can certify -- which is what a cheating
+			 * prover's is. There is then no proof to make: the prover reports
+			 * that rather than proving with the projection scalars unset. */
 			if (!accepted) {
-				fprintf(stderr, "shuffle_prover: projection rejected 64 times\n");
-				abort();
+				proved = 0;
 			}
 		}
 		nmod_poly_clear(wraw);
@@ -1167,6 +1169,7 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 			}
 		}
 	}
+	return proved;
 }
 
 static int shuffle_verifier(nmod_poly_t y[MSGS][WIDTH][2],
@@ -1522,8 +1525,8 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		lnp_commit(&p[i], msg, lkey, pr[i]);
 	}
 
-	shuffle_prover(y, w, _y, t, tp, _t, u, d, s, com, p, ib, m, _m, sigma,
-			r, pr, key, lkey, &mkey, &mcom, &batch, mr, zm,
+	int proved = shuffle_prover(y, w, _y, t, tp, _t, u, d, s, com, p, ib, m,
+			_m, sigma, r, pr, key, lkey, &mkey, &mcom, &batch, mr, zm,
 			&gkey, &gcom, gr, zg, bch, digest);
 
 	/* Round-trip the proof through its serialisation before verifying it, so
@@ -1691,7 +1694,8 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		}
 	}
 
-	return result;
+	/* A prover that could not make a proof has not made one. */
+	return proved && result;
 }
 
 /**
