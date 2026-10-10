@@ -73,7 +73,7 @@ proof. This table is the reference for what each costs and what each is worth.
 | `master` | `2^31.86` | 1024 | 3 | 36 | 25.3 KB | 117.4 | 72.4 | 87.0 | **72.4** |
 | `fix-pkc` | `2^31.86` | 1024 | 3 | 36 | 41.2 KB | 117.4 | 72.4 | 87.0 | **72.4** |
 | `balanced-params` | `2^37` | 1024 | 4 | 20 | 49.4 KB | 168.2 | 151.9 | 136.7 | **136.7** |
-| `lnp` | `2^40` | 2048 | 3 | 18 | 134.6 KB | 327.0 | 137.6 | 316.2 | **137.6** |
+| `lnp` | `2^40` | 2048 | 3 | 18 | 132.8 KB | 327.0 | 137.6 | 316.2 | **137.6** |
 
 Security is core-SVP bits, in the sense of Alkim-Ducas-Pöppelmann-Schwabe,
 computed with the `lattice-estimator`. The security level of a branch is the
@@ -134,7 +134,7 @@ and brackets the byte count by it -- below a flat encoding, above the entropy
 | `master` | 17.86 | 20 | 17.77 | 27.0 KB | 25.3 KB |
 | `fix-pkc` | 17.09 | 19.20 | 17.00 | 44.0 KB | 41.2 KB |
 | `balanced-params` | 16.26 | 18.38 | 16.17 | 50.0 KB | 49.4 KB |
-| `lnp` | 20.26 | 21.93 | 20.15 | 137.0 KB | 134.6 KB |
+| `lnp` | 20.26 | 21.93 | 20.15 | 137.0 KB | 132.8 KB |
 
 The first three columns are bits a Gaussian coefficient, averaged over the
 widths a branch uses where it has more than one. Rice lands within about a
@@ -143,7 +143,8 @@ essentially the gap between the bound and the distribution, and how much of the
 proof is Gaussian rather than uniform: close to 6 per cent on every branch but
 `lnp`, where the projection and the batch masks make it 3. The "was" column
 is at the widths each branch had when the coding landed; `balanced-params` and
-`lnp` have since moved theirs, below. The "is" column also no longer sends the
+`lnp` have since moved theirs, below, and `lnp` has moved to `p = 2^40 - 195`,
+whose uniform coefficients pack in 40 bits rather than 41. The "is" column also no longer sends the
 last `s_i`, which no linear proof reads: one ring element fewer, about 4 KB a
 proof at `DEGREE = 1024` and 10 KB on `lnp`.
 
@@ -156,7 +157,7 @@ therefore the same security.
 `fix-pkc` establishes the set membership Lemma 5 needs by a norm bound, `lnp`
 proves the committed element is binary, which is the statement the lemma really
 requires. That needs the LNP machinery, a larger modulus, and a larger ring,
-and it costs 134.6 KB.
+and it costs 132.8 KB.
 
 **`DEGREE` is 2048 on `lnp` because the batch size became a security
 parameter.** One rejection test spans every message's response, so the masks
