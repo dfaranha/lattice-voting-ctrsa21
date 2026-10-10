@@ -308,18 +308,47 @@ need to be extended accordingly.
    bookkeeping of the paper's Theorem 5 carries over to effective messages. The
    argument for why it should is given, but the knowledge-error accounting has
    not been redone.
-3. **MSIS parameters not re-derived.** Section 5 appeals to MSIS at a bound
-   driven by `||delta||_1 * 4 sqrt(n) sigma_C`. This is the same regime as the
-   original proof, and the new response is smaller, but the concrete hardness
-   has not been recomputed.
+3. **MSIS at the bound Section 5 uses is weaker than the one quoted.**
+   Section 5 appeals to MSIS at `2 ||delta||_1 * 4 sqrt(n) sigma`, with
+   `||delta||_1 <= 2 NONZERO`. On this branch the masks the extractor sees are
+   at `SIGMA_B = 295465`, and at `NONZERO = 18`, `DEGREE = 2048` that bound is
+   `2^31.84`, which the lattice-estimator (53da598, core-SVP) puts at
+   **273.6 bits**, against the 327.0 quoted at the paper's
+   `16 sigma sqrt(nu N)`, a factor `sqrt(NONZERO)` smaller. Which of the two the
+   extraction needs has not been settled; at either, binding is far above the
+   hiding that sets this branch's level.
 4. **Zero-knowledge sketched only**, as noted in Section 9.
-5. **The batching aggregations are not analysed.** The implementation proves
-   `is_bin` for every message at once, aggregating the constant-coefficient
-   and range relations by random scalars and the quadratic relations by random
-   ring elements `rho_l`. The scalar aggregation contributes
-   `p^-LNP_LAMBDA`, which is accounted for; the `rho` aggregation contributes
-   a term that is not. Its challenge set is the one used for openings, so
-   differences are invertible, but no bound has been written down. Section 5b
+5. **The batching aggregations.** The implementation proves `is_bin` for
+   every message at once, aggregating the constant-coefficient and range
+   relations by random scalars and the quadratic relations by random ring
+   elements `rho_l`. The scalar aggregation contributes `p^-LNP_LAMBDA`. The
+   `rho` aggregation contributes at most `1/|C|` per hash query:
+
+   *Claim.* Let `F_1, ..., F_MSGS` in `R_p` be fixed before the `rho_l` are
+   drawn, and not all zero. Drawing each `rho_l` independently and uniformly
+   from `C`, `Pr[sum_l rho_l F_l = 0] <= 1/|C|`.
+
+   *Proof.* Take `j` with `F_j != 0` and fix every `rho_l` with `l != j`; the
+   sum vanishes only if `rho_j F_j = a` for one fixed `a`. Since
+   `p = 5 mod 8`, `x^N + 1` splits into two irreducible factors and `R_p` is
+   a product of two fields, and `F_j` is nonzero in at least one of them, say
+   modulo `f`. There `rho_j F_j = a` has exactly one solution `rho_j mod f`.
+   For distinct `rho, rho'` in `C`, `rho - rho'` has `||.||_oo <= 2`, below
+   the `sqrt(p/2) = 741455` of Lemma 1, so it is invertible, hence nonzero
+   modulo `f`: reducing `C` modulo `f` is injective, and at most one element
+   of `C` satisfies the equation. QED
+
+   This applies because every message's quadratic relation enters the
+   aggregated check as `rho_l` times a ring element `F_l` that is zero exactly
+   when the relation holds -- the garbage terms carry `rho_l` and
+   `sigma(rho_l)` too, but only in the lower-order coefficients -- and the
+   `F_l` are fixed by the commitments `rho_hash` absorbs before it derives the
+   `rho_l`. With the `rho_l` derived by hashing, a prover who makes `Q` hash
+   queries finds a set that cancels a false relation with probability at most
+   `Q/|C|`; at `NONZERO = 18`, `DEGREE = 2048`, `|C| = 2^18 C(2048, 18)`,
+   about `2^163.4`. What this does not do is replace the analysis of the
+   challenge `d` that follows, which treats the aggregated relation as one
+   statement; it bounds only the step from many relations to one. Section 5b
    of LNP-PARAMS.md has the construction.
 6. **The window in Section 8 has no slack to spare.** Any change to `n`, `q`,
    `NONZERO`, `M` or the encoding `g` invalidates the budget and must be

@@ -461,13 +461,14 @@ and `LNP_RANK` is 2 because rank 1 does not reach the hiding target. So the
 per-message part looks close to done, and what remains is the modulus and the
 ring degree.
 
-What the batching adds and nobody has accounted for is a soundness term. The
-weights `rho_l` are drawn from the same set as the opening challenge, so
-differences are invertible by Lemma 1 and the error should be small, but that
-is an expectation rather than a derivation. The tests show the aggregation is
+What the batching adds is a soundness term. The weights `rho_l` are drawn
+from the same set as the opening challenge, so differences are invertible by
+Lemma 1, and item 5 of Section 10 of SOUNDNESS.md now derives the bound from
+that: a set of weights cancels a false relation with probability at most
+`1/|C|`, `2^-163.4` here, per hash query. The tests show the aggregation is
 not vacuous, in that breaking one message of twenty-five is caught, which is a
-different statement from a bound on the cheating probability. Section 10 of
-SOUNDNESS.md lists it.
+different statement from a bound on the cheating probability, which is why
+the derivation was needed.
 
 ## 5c. What batching cost the parameters
 
