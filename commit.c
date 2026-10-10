@@ -411,13 +411,25 @@ typedef uint64_t hash_coeff_t;
 static_assert(MODP - 1 <= (hash_coeff_t) ~(hash_coeff_t) 0,
 		"commit_hash_poly absorbs coefficients too narrow to hold MODP");
 
+/* Bytes a coefficient needs: MODP - 1 fits in this many. When MODP < 2^32
+ * that is the four of hash_coeff_t, and the bytes are those of the word; above
+ * it, a word would carry zero bytes into the hash, two of the eight at the
+ * 2^41 modulus here, which were a quarter of everything the prover hashed. */
+#define HASH_COEFF_BYTES												\
+	((MODP - 1) < (1ULL << 32) ? 4 : (MODP - 1) < (1ULL << 40) ? 5 :	\
+	(MODP - 1) < (1ULL << 48) ? 6 : (MODP - 1) < (1ULL << 56) ? 7 : 8)
+
 static void hash_coeffs(SHA256Context *sha, nmod_poly_t p, int len) {
-	hash_coeff_t buf[DEGREE];
+	uint8_t buf[DEGREE * sizeof(hash_coeff_t)];
 
 	for (int i = 0; i < len; i++) {
-		buf[i] = (hash_coeff_t) nmod_poly_get_coeff_ui(p, i);
+		ulong c = nmod_poly_get_coeff_ui(p, i);
+
+		for (int b = 0; b < HASH_COEFF_BYTES; b++) {
+			buf[i * HASH_COEFF_BYTES + b] = (uint8_t) (c >> (8 * b));
+		}
 	}
-	SHA256Input(sha, (const uint8_t *)buf, len * sizeof(hash_coeff_t));
+	SHA256Input(sha, buf, len * HASH_COEFF_BYTES);
 }
 
 void commit_hash_poly(SHA256Context *sha, nmod_poly_t p) {
