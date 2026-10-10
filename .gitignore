@@ -5,3 +5,8 @@ encrypt
 vericrypt
 shuffle
 lnp
+fuzz_serial
+fuzz-corpus/
+crash-*
+leak-*
+timeout-*

@@ -1602,8 +1602,9 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		proof_t pf2 = { y2, _y2, w2, t2, tp2, _t2, u2, d2, s2, p2, ib2,
 				&mcom2, &gcom2, &batch2, zm2, zg2, digest2 };
 
-		serial_reader_init(&br, buf, sizeof(buf));
+		serial_reader_init(&br, buf, proof_bytes);
 		proof_walk(&pf2, NULL, &br);
+		serial_reader_finish(&br);
 		result = !br.overflow && shuffle_verifier(y2, w2, _y2, t2, tp2, _t2,
 				u2, d2, s2, com, p2, ib2, _m, key, lkey, mkey, &mcom2,
 				&batch2, zm2, gkey, &gcom2, zg2, digest2);
@@ -1854,11 +1855,14 @@ static void test(void) {
 		static ulong z[PROJ];
 		bitreader_t br;
 		bitwriter_t bw;
-		nmod_poly_t a[2];
+		nmod_poly_t a[2], t;
 		int n = serial_bits_uniform(), bad_u, bad_g, bad_p, bad_e, good;
+		int exact, bad_t, bad_pad;
+		size_t len;
 
 		nmod_poly_init(a[0], MODP);
 		nmod_poly_init(a[1], MODP);
+		nmod_poly_init(t, MODP);
 		/* A uniform coefficient of exactly MODP, the smallest value of
 		 * serial_bits_uniform() bits that is not a residue. */
 		memset(raw, 0, sizeof(raw));
@@ -1905,9 +1909,37 @@ static void test(void) {
 		serial_get_proj(&br, z, PROJ, SIGMA_P);
 		good = !bw.overflow && !br.overflow && z[0] == MODP / 2 &&
 				z[1] == MODP / 2 + 1;
+		/* The reader must also end where the writer did: a byte past the
+		 * end, or a padding bit set in the last byte, would give one proof
+		 * a second byte string. A single coefficient of 2^j, for the first j
+		 * whose code is not a whole number of bytes, leaves padding to set. */
+		for (int j = 0; j < 30; j++) {
+			nmod_poly_zero(t);
+			nmod_poly_set_coeff_ui(t, 0, (ulong) 1 << j);
+			pcrt_poly_reduce(a[0], t, 0);
+			pcrt_poly_reduce(a[1], t, 1);
+			serial_writer_init(&bw, ok, sizeof(ok));
+			serial_put_gauss(&bw, a, SIGMA_C);
+			if (bw.bits % 8 != 0) {
+				break;
+			}
+		}
+		len = serial_bytes(&bw);
+		serial_reader_init(&br, ok, len);
+		serial_get_gauss(&br, a, SIGMA_C);
+		exact = (bw.bits % 8 != 0) && serial_reader_finish(&br);
+		serial_reader_init(&br, ok, len + 1);
+		serial_get_gauss(&br, a, SIGMA_C);
+		bad_t = !serial_reader_finish(&br);
+		ok[len - 1] |= 0x80;
+		serial_reader_init(&br, ok, len);
+		serial_get_gauss(&br, a, SIGMA_C);
+		bad_pad = !serial_reader_finish(&br);
 		nmod_poly_clear(a[0]);
 		nmod_poly_clear(a[1]);
+		nmod_poly_clear(t);
 		TEST_ASSERT(bad_u && bad_g && bad_p && bad_e && good, end);
+		TEST_ASSERT(exact && bad_t && bad_pad, end);
 	} TEST_END;
 
 	/* Both of the next two need an honest witness, so they run before

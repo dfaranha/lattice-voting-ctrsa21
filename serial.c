@@ -167,6 +167,15 @@ void serial_reader_init(bitreader_t *r, const uint8_t *buf, size_t cap) {
 	r->overflow = 0;
 }
 
+int serial_reader_finish(bitreader_t *r) {
+	if ((r->bits + 7) / 8 != r->cap) {
+		r->overflow = 1;
+	} else if (r->bits % 8 != 0 && (r->buf[r->bits / 8] >> (r->bits % 8)) != 0) {
+		r->overflow = 1;
+	}
+	return !r->overflow;
+}
+
 int serial_bits_uniform(void) {
 	return bits_for(MODP - 1);
 }
