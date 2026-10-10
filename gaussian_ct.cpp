@@ -42,6 +42,15 @@ static const double INT64_DOUBLE_FACTOR = 1.0 / (1LL << FP_PRECISION);
 #define DISCRETE_BYTES (1 + NORM_BATCH * COMP_ENTRY_SIZE)
 
 static const double SIGMA = SIGMA_PARAM; /* sigma=2, 32768, 131072 in our benchmark */
+/* comp() compares an acceptance probability with a random value whose
+ * exponent field is R_EXPONENT_L = 19 bits wide, so it is exact only for
+ * probabilities of at least 2^-20; below that it shifts by a negative amount.
+ * The sampler's first comparison is against 1 / (sigma sqrt(2 pi)), which
+ * drops below 2^-20 once sigma exceeds 2^20 / sqrt(2 pi) = 418330, and past
+ * that the sampler returns 0 most of the time: 84 per cent of samples at
+ * sigma = 10^6. A mask of zeros makes a masked opening equal to the secret
+ * times the challenge. */
+static_assert(SIGMA_PARAM < 418330, "gaussian_ct.cpp is not correct past sigma = 418330");
 static const double DISCRETE_NORMALISATION = 0.5 * M_SQRT1_2 * M_2_SQRTPI * (1.0 / SIGMA); /* 1/S=1/(sigma*sqrt(2*pi)) */
 static const double SIGMA_INV = -1.0 / (2 * SIGMA * SIGMA); /* -1/sigma^2 */
 static const double M_1_LN2 = 1.0 / M_LN2;
