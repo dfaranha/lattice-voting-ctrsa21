@@ -167,10 +167,31 @@ repetitions and leaves the certified bound a factor 1.78 inside the ceiling.
 * **Hiding collapses at `WIDTH = 3`.** The commitment's hiding is MLWE of rank
   `k - n - 1`, and rank 1 at `2^40` is 49.6 bits. `WIDTH = 4` is therefore not
   optional here; it is what the modulus forces.
-* **`q` follows `p` linearly** through `q > 2p(2 * DIM * N^2 + N + 1)`, and `q`
-  has to stay inside 64 bits. That ceiling is what fixes `p`: at `2^41` even
-  `DIM = 2` needs `2^64`. At `p = 2^40` the largest workable encryption rank is
-  `DIM = 3`, with `q` saturated just under `2^64`.
+* **`q` follows `p` linearly**, and `q` has to stay inside 64 bits. This bullet
+  used to take the condition from the paper, `q > 2p(2 * DIM * N^2 + N + 1)`,
+  and say `q` was saturated just under `2^64`. It was not: that condition asks
+  for `2^65.6` here, and `q = 2^64 - 59` never met it. The condition is the
+  wrong one, though, in both directions. Its `N^2` is loose, since a product
+  of two ternary ring elements has coefficients at most `N`, not `N^2`; and it
+  leaves out what the code's decryption actually computes, which is
+  Lyubashevsky-Neven decryption, `c_bar (w - <v, s_1>)` for
+  `c_bar = c - c'` a difference of two challenges, checked against `q / 4`.
+  For an honest ciphertext that is `p c_bar x + c_bar mu` with
+  `x = <r, s_2> + e' - <e, s_1>`. Every one of `r, e, e', s_1, s_2` is CB(1),
+  so `||x||_oo <= 2 DIM N + 1`, and `||c_bar||_1 <= 2 NONZERO`, so it decrypts
+  whenever
+
+      q >= 4 * 2 NONZERO * (p (2 DIM N + 1) + p / 2),
+
+  in the worst case and not merely with high probability. That is `2^60.76` at
+  `p = 2^40`, `DIM = 3`, `N = 2048` and `NONZERO = 18`, 3.2 bits inside `q`.
+  The same bound gives 4.0 bits on `master` and `fix-pkc` and 3.9 on
+  `balanced-params`, whose `q` were chosen against the paper's condition and so
+  have room to spare. So `q` does not fix `p` at `2^40`, as this bullet used to
+  say: it would allow `p` up to about `2^43`. What fixes `p` is the wraparound
+  condition from below and MSIS binding, which falls as `p` rises, from above.
+  A ballot whose randomness is not CB(1) is a different matter, and the
+  malicious-ballot window in `master`'s README is about that one.
 * **`DIM = 3` needed the vericrypt indexing fix**, since three places walked
   CRT-indexed arrays with `DIM`. Those were harmless only while `DIM` and
   `NCRT` were both 2.
@@ -325,8 +346,8 @@ It is now `2^40 - 195`, the largest prime below `2^40` that is 5 mod 8, which
 packs in 40 bits and hashes in five: 1.8 KB a message off the proof, from 134.6
 to 132.8, and a sixth off what the prover hashes per uniform coefficient. The
 move is `2^-38.4` of the modulus, so no security estimate, Lemma 1 window or
-wraparound margin changes at the precision quoted, and `Q` still satisfies
-`q > 2p(2 DIM N^2 + N + 1)`, more easily. And a Gaussian element has to be
+wraparound margin changes at the precision quoted, and `Q` still clears the
+worst-case decryption bound of section 4, by a hair more. And a Gaussian element has to be
 reconstructed from its CRT components before packing, because only the
 reconstructed polynomial is short: the components of a short element are not.
 
