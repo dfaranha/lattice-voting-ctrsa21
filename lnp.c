@@ -397,13 +397,21 @@ static void proj_pass(uint8_t seed[SHA256HashSize], ulong *raw,
 	 * the masks that the Gaussian sampler draws from it. */
 	prg_t prg;
 	int8_t row[DEGREE];
-	nmod_t mod;
-
-	nmod_init(&mod, MODP);
+	/* sc's centred coefficients, read once rather than once per row, and the
+	 * rows' sums for raw, kept as plain integers and reduced at the end. */
+	static int64_t scc[DEGREE];
+	static int64_t acc[LNP_LAMBDA][DEGREE];
+	static_assert((int64_t) PROJ * (MODP - 1) < ((int64_t) 1 << 62),
+			"proj_pass sums PROJ terms below MODP in a signed word");
 
 	prg_setseed(&prg, seed);
+	if (sc != NULL) {
+		for (int t = 0; t < DEGREE; t++) {
+			scc[t] = centre(nmod_poly_get_coeff_ui(sc, t));
+		}
+	}
 	if (raw != NULL) {
-		memset(raw, 0, (size_t) LNP_LAMBDA * DEGREE * sizeof(ulong));
+		memset(acc, 0, sizeof(acc));
 	}
 	for (int i = 0; i < PROJ; i++) {
 		proj_row(&prg, row);
@@ -413,7 +421,7 @@ static void proj_pass(uint8_t seed[SHA256HashSize], ulong *raw,
 			int64_t dot = 0;
 
 			for (int t = 0; t < DEGREE; t++) {
-				dot += row[t] * centre(nmod_poly_get_coeff_ui(sc, t));
+				dot += row[t] * scc[t];
 			}
 			rs[i] = (dot < 0) ? MODP - ((-dot) % MODP) : (ulong)(dot % MODP);
 			if (rs[i] == MODP) {
@@ -422,19 +430,29 @@ static void proj_pass(uint8_t seed[SHA256HashSize], ulong *raw,
 		}
 		if (raw != NULL && mu != NULL) {
 			for (int j = 0; j < LNP_LAMBDA; j++) {
-				ulong m = mu[j][i];
-				ulong neg = nmod_neg(m, mod);
-				ulong *dst = raw + (size_t) j * DEGREE;
+				int64_t m = (int64_t) mu[j][i];
 
-				/* Accumulating into a plain array rather than through
-				 * nmod_poly_set_coeff_ui matters here: this loop runs
-				 * PROJ * LNP_LAMBDA * DEGREE times, and the accessor
-				 * renormalises the polynomial on every call. */
+				/* Each term is +-mu[j][i] < MODP < 2^41, and there are PROJ
+				 * of them, so the sum stays below 2^49: no reduction is
+				 * needed until the end. This loop runs PROJ * LNP_LAMBDA *
+				 * DEGREE times, which a modular addition per step made one of
+				 * the dearer things the prover did. */
 				for (int t = 0; t < DEGREE; t++) {
-					dst[t] = nmod_add(dst[t], row[t] > 0 ? m : neg, mod);
+					acc[j][t] += row[t] * m;
 				}
 			}
 		}
+	}
+	if (raw != NULL && mu != NULL) {
+		for (int j = 0; j < LNP_LAMBDA; j++) {
+			for (int t = 0; t < DEGREE; t++) {
+				int64_t v = acc[j][t] % (int64_t) MODP;
+
+				raw[(size_t) j * DEGREE + t] = (ulong) (v < 0 ? v + (int64_t) MODP : v);
+			}
+		}
+	} else if (raw != NULL) {
+		memset(raw, 0, (size_t) LNP_LAMBDA * DEGREE * sizeof(ulong));
 	}
 }
 
