@@ -691,6 +691,9 @@ void lnp_sample_ct_zero(pcrt_poly_t g) {
 
 void lnp_binctx_init(lnpbinctx_t *ctx) {
 	for (int j = 0; j < LNP_LAMBDA; j++) {
+		/* Set by lnp_bin_public; zero until then rather than whatever the
+		 * memory held, which FLINT may not accept as a scalar. */
+		ctx->nu[j] = 0;
 		for (int k = 0; k < NCRT; k++) {
 			nmod_poly_init(ctx->P[j][k], MODP);
 			nmod_poly_init(ctx->M[j][k], MODP);
@@ -1703,54 +1706,61 @@ static int bin_prove_local(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpcom_t *com,
 		}
 	}
 
-	/* The batching challenge comes after every message's commitment and before
-	 * the garbage terms, which depend on it. With a batch of one there is
-	 * still a rho, so that this path exercises what the shuffle does. */
-	tst_rho_hash(tst_rho, key, com);
+	/* A rejected projection leaves ctx without its scalars, nu among them:
+	 * setup returns before deriving them. Running the proof anyway read them
+	 * uninitialised, and a value at or above MODP made FLINT's precomputed
+	 * multiplication trap with SIGFPE, which the CI runner hit at random.
+	 * The caller recommits and calls again, so there is nothing to prove. */
+	if (ok) {
+		/* The batching challenge comes after every message's commitment and before
+		 * the garbage terms, which depend on it. With a batch of one there is
+		 * still a rho, so that this path exercises what the shuffle does. */
+		tst_rho_hash(tst_rho, key, com);
 
-	do {
-		for (int j = 0; j < LNP_LAMBDA; j++) {
-			for (int k = 0; k < NCRT; k++) {
-				nmod_poly_zero(tst_batch.v[j][k]);
+		do {
+			for (int j = 0; j < LNP_LAMBDA; j++) {
+				for (int k = 0; k < NCRT; k++) {
+					nmod_poly_zero(tst_batch.v[j][k]);
+				}
 			}
-		}
-		for (int k = 0; k < NCRT; k++) {
-			nmod_poly_zero(tst_batch.T[k]);
-			nmod_poly_zero(garb[0][k]);
-			nmod_poly_zero(garb[1][k]);
-		}
-		for (int i = 0; i < LNP_WIDTH; i++) {
-			commit_sample_gauss_batch(yc[i]);
 			for (int k = 0; k < NCRT; k++) {
-				pcrt_poly_reduce(y[i][k], yc[i], k);
+				nmod_poly_zero(tst_batch.T[k]);
+				nmod_poly_zero(garb[0][k]);
+				nmod_poly_zero(garb[1][k]);
 			}
-		}
-		for (int i = 0; i < MASK_WIDTH; i++) {
-			commit_sample_gauss_batch(ymc[i]);
-			for (int k = 0; k < NCRT; k++) {
-				pcrt_poly_reduce(ym[i][k], ymc[i], k);
+			for (int i = 0; i < LNP_WIDTH; i++) {
+				commit_sample_gauss_batch(yc[i]);
+				for (int k = 0; k < NCRT; k++) {
+					pcrt_poly_reduce(y[i][k], yc[i], k);
+				}
 			}
-		}
-		for (int i = 0; i < GARB_WIDTH; i++) {
-			commit_sample_gauss_batch(ygc[i]);
-			for (int k = 0; k < NCRT; k++) {
-				pcrt_poly_reduce(yg[i][k], ygc[i], k);
+			for (int i = 0; i < MASK_WIDTH; i++) {
+				commit_sample_gauss_batch(ymc[i]);
+				for (int k = 0; k < NCRT; k++) {
+					pcrt_poly_reduce(ym[i][k], ymc[i], k);
+				}
 			}
-		}
-		lnp_bin_first(ctx, &tst_batch, com, s, key, r, y, tst_rho, garb);
-		lnp_garb_commit(&tst_gcom, garb, &tst_gkey, tst_rg);
-		lnp_garb_first(&tst_batch, &tst_gkey, yg);
-		lnp_batch_first(&tst_batch, &tst_mkey, ym);
-		for (int i = 0; i < HEIGHT; i++) {
-			inner(tst_ajtai[i], key->B1[i], y, LNP_WIDTH);
-		}
-		bin_local_hash(d, dc, key, com, pi, tst_ajtai, tst_digest);
-		dot = norm = 0;
-		commit_rej_respond(tst_z, yc, rc, dc, LNP_WIDTH, &dot, &norm);
-		commit_rej_respond(tst_zm, ymc, mrc, dc, MASK_WIDTH, &dot, &norm);
-		commit_rej_respond(tst_zg, ygc, grc, dc, GARB_WIDTH, &dot, &norm);
-		rej = commit_rej_decide(dot, norm, (uint64_t) SIGMA_B * SIGMA_B);
-	} while (rej);
+			for (int i = 0; i < GARB_WIDTH; i++) {
+				commit_sample_gauss_batch(ygc[i]);
+				for (int k = 0; k < NCRT; k++) {
+					pcrt_poly_reduce(yg[i][k], ygc[i], k);
+				}
+			}
+			lnp_bin_first(ctx, &tst_batch, com, s, key, r, y, tst_rho, garb);
+			lnp_garb_commit(&tst_gcom, garb, &tst_gkey, tst_rg);
+			lnp_garb_first(&tst_batch, &tst_gkey, yg);
+			lnp_batch_first(&tst_batch, &tst_mkey, ym);
+			for (int i = 0; i < HEIGHT; i++) {
+				inner(tst_ajtai[i], key->B1[i], y, LNP_WIDTH);
+			}
+			bin_local_hash(d, dc, key, com, pi, tst_ajtai, tst_digest);
+			dot = norm = 0;
+			commit_rej_respond(tst_z, yc, rc, dc, LNP_WIDTH, &dot, &norm);
+			commit_rej_respond(tst_zm, ymc, mrc, dc, MASK_WIDTH, &dot, &norm);
+			commit_rej_respond(tst_zg, ygc, grc, dc, GARB_WIDTH, &dot, &norm);
+			rej = commit_rej_decide(dot, norm, (uint64_t) SIGMA_B * SIGMA_B);
+		} while (rej);
+	}
 
 	nmod_poly_clear(dc);
 	for (int i = 0; i < LNP_WIDTH; i++) {

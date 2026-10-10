@@ -962,7 +962,9 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 			 * which cannot be retried once its mask is committed, so a
 			 * rejection here means recommitting. The mask-dependent half runs
 			 * inside lin_first, which owns the shared opening. */
-			for (int tries = 0; tries < 64; tries++) {
+			int accepted = 0;
+
+			for (int tries = 0; tries < 64 && !accepted; tries++) {
 				for (int i = 0; i < SLOTS; i++) {
 					for (int k = 0; k < NCRT; k++) {
 						nmod_poly_zero(msg[i][k]);
@@ -987,10 +989,15 @@ static void shuffle_prover(nmod_poly_t y[MSGS][WIDTH][2],
 					nmod_poly_set(msg[SLOT_W][k], wc[k]);
 				}
 				lnp_commit(&p[l], msg, lkey, pr[l]);
-				if (lnp_bin_setup(&ib[l].all, &ib[l].ctx, batch, &p[l], mcom,
-						msg[SLOT_S], msg[SLOT_F], wraw, lkey)) {
-					break;
-				}
+				accepted = lnp_bin_setup(&ib[l].all, &ib[l].ctx, batch, &p[l],
+						mcom, msg[SLOT_S], msg[SLOT_F], wraw, lkey);
+			}
+			/* Each attempt is rejected with small probability, so 64 failures
+			 * mean something is wrong; carrying on would prove with the
+			 * projection scalars unset. */
+			if (!accepted) {
+				fprintf(stderr, "shuffle_prover: projection rejected 64 times\n");
+				abort();
 			}
 		}
 		nmod_poly_clear(wraw);
