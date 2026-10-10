@@ -16,6 +16,26 @@ is not sound, and mounted a working attack against this implementation.
 of that paper lives on the `fix-pkc` branch, along with a draft of the
 corresponding soundness argument.
 
+**A ballot that verifies need not decrypt.** Verifiable encryption bounds a
+voter's encryption randomness only through its response, `||z||_oo < 6 sigma_E`,
+while decryption needs the resulting noise times `p` to stay below `q / 4`. A
+malicious voter who draws that randomness from `[-R, R]` rather than ternary,
+and skips the rejection sampling, produces a proof that verifies and a
+ciphertext that decryption refuses. Measured, six trials per value:
+
+| branch | decrypts | verifies, does not decrypt | does not verify |
+| --- | --- | --- | --- |
+| `master`, `fix-pkc` | `R <= 6000` | `7000 <= R <= 20000` | `R >= 25000` |
+| `balanced-params` | `R <= 5000` | `6000 <= R <= 25000` | `R >= 30000` |
+| `lnp` | `R <= 4000` | `5000 <= R <= 25000` | `R >= 30000` |
+
+Decryption never returned a wrong message: it refuses such a ciphertext. So
+this costs neither privacy nor integrity, only the malicious voter's own ballot,
+and the implementation assumes honest voters or accepts that risk. Closing it
+would take `q` around `2^63` here and `2^72` on `lnp`, against `2^56` and
+`2^64`, which would weaken encryption; the paper's constraints on `q` cover
+honest ciphertexts only.
+
 ## Building
 
 Dependencies are the GMP and FLINT libraries. FLINT 3 or later is recommended;
