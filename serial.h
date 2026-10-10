@@ -10,8 +10,8 @@
  * count come out of the code, and makes the assumption behind it testable.
  *
  * A uniform ring element is written at ceil(log2 p) bits per coefficient,
- * where there is nothing to exploit: 38 at the current MODP, which lies just
- * above 2^37. A Gaussian one is not: writing it at the
+ * where there is nothing to exploit: 37 at the current MODP, which lies just
+ * below 2^37. A Gaussian one is not: writing it at the
  * width of its bound, ceil(log2 12 sigma), spends the difference between that
  * bound and the distribution's entropy, which is log2(sigma sqrt(2 pi e)). At
  * SIGMA_C that is 19 bits against 16.8. So a Gaussian coefficient is zigzagged

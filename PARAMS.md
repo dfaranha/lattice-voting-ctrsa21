@@ -85,7 +85,7 @@ it is set by binding. Raising `p` further would buy binding with encryption.
 | --- | --- | --- |
 | `WIDTH` | 3 | 4 |
 | `NONZERO` | 36 | 20 |
-| `MODP` | 3906450253 (2^31.86) | 137438953501 (2^37.00) |
+| `MODP` | 3906450253 (2^31.86) | 137438953349 (2^37.00) |
 | `SIGMA_C` | 54000 | 27501 |
 | `SIGMA_S` | 256 | 97 |
 | `DIM` | 2 | 3 (now derived as `WIDTH - HEIGHT`) |
@@ -151,11 +151,11 @@ paper's bound and 105.4 at the conservative one. Binding at the paper's bound
 was 128.2 (154.7) at the earlier `SIGMA_C = 34641`: the narrower width shrinks
 that bound from `2^26.24` to `2^25.91`.
 
-Cost: the shuffle proof is 50.0 KB per message at `MSGS = 25` (1280192 bytes),
+Cost: the shuffle proof is 49.4 KB per message at `MSGS = 25` (1264289 bytes),
 measured by the serialisation test, at 16.26 bits a Gaussian coefficient
 against 18.38 for a flat encoding at the bound and 16.17 of entropy. It was
 46.3 KB at the 2^31.25 modulus: the Gaussian coefficients do not depend on
-`p`, and only the uniform ones widen, from 32 to 38 bits. Before that it was
+`p`, and only the uniform ones widen, from 32 to 37 bits. Before that it was
 46.4 KB (1188970 bytes, at 16.25 bits a Gaussian coefficient) when it still
 carried the unused last `s_i`, against 47.1 KB at the previous widths; a
 ciphertext grows by one ring element over the published parameters, and its
@@ -179,13 +179,15 @@ The levers scanned, by core-SVP binding at the conservative bound:
 | `p = 2^33` | 114.2 | |
 | `p = 2^35` | 124.1 | |
 | `p = 2^35`, `nu = 17` | 130.2 | `|C| = 2^138.5`, thin against the `2^135` of constraint 6 |
-| `p = 2^37` | **134.3** | uniform coefficients 32 -> 38 bits, `q` to `2^60.79` |
+| `p = 2^37` | **134.3** | uniform coefficients 32 -> 37 bits, `q` to `2^60.79` |
 | `HEIGHT = 2`, `WIDTH = 5` | 155.3 | about +14 KB a message, and the code assumes `HEIGHT = 1` |
 
 Raising `p` is the cheapest: `SIGMA_C` and `SIGMA_S` do not depend on it, so
 the masked openings, which are most of the proof, do not grow. The new `p` is
-137438953501, prime and 5 mod 8, with square roots of -1 `P0 = 11860615386`
-and `P1 = 125578338115`. `q` follows it through constraint 4:
+137438953349, `2^37 - 123`, the largest prime below `2^37` that is 5 mod 8, so
+that `p - 1` fits in 37 bits; the first choice, `2^37 + 29`, took 38 and cost
+0.6 KB a message for no measurable security. Its square roots of -1 are
+`P0 = 6781345549` and `P1 = 130657607800`. `q` follows it through constraint 4:
 1986862199687640941, about `2^60.785`, against the `2^60.585` required, also 5
 mod 8, with `Q0 = 403703418285289875` and `Q1 = 1583158781402351066`, and far
 above `24 * SIGMA_E^2 = 2^36.03`. The challenge space is unchanged at
@@ -195,7 +197,7 @@ Side effects: hiding falls from 186.1 to 151.9 and encryption from 155.4 to
 136.7, both still above binding at the conservative bound; the Lemma 1 margin
 of constraint 3 grows from 8.3 to 446, and the `SIGMA_S` window of
 SOUNDNESS.md, Section 8, widens from a factor of 4.1 to 30.1; the proof grows
-from 46.3 to 50.0 KB a message.
+from 46.3 to 49.4 KB a message.
 
 ## Caveats
 

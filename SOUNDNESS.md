@@ -42,7 +42,7 @@ Section 7 has to accommodate.
 
 | symbol | meaning | value |
 | --- | --- | --- |
-| `q` | modulus (`MODP`) | 137438953501, `= 5 mod 8` |
+| `q` | modulus (`MODP`) | 137438953349, `= 5 mod 8` |
 | `n` | ring degree (`DEGREE`) | 1024 |
 | `R` | `Z_q[x]/(x^n + 1)` | |
 | `k` | number of CRT factors | 2 |
@@ -297,7 +297,7 @@ need to be extended accordingly.
    Section 5 appeals to MSIS at `2 ||delta||_1 * 4 sqrt(n) sigma_C`, with
    `||delta||_1 <= 2 NONZERO`: at `sigma_C = 27501` and `NONZERO = 20`
    that is `2^28.07`, and the lattice-estimator (53da598, core-SVP) puts it at
-   **134.3 bits** (160.7 MATZOV) at `q = 137438953501`. At the paper's
+   **134.3 bits** (160.7 MATZOV) at `q = 137438953349`. At the paper's
    `16 sigma_C sqrt(nu N)`, `2^25.91`, smaller by a factor `sqrt(NONZERO)`, it
    is 168.2: the paper charges the challenge `sqrt(nu)`, where Section 5's
    bound, which holds for any two ring elements, charges `||delta||_1`. Which

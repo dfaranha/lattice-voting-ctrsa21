@@ -1333,7 +1333,7 @@ static void test(void) {
 
 		nmod_poly_init(a[0], MODP);
 		nmod_poly_init(a[1], MODP);
-		/* All ones: a uniform coefficient of 2^38 - 1, at or above MODP, and a
+		/* All ones: a uniform coefficient of 2^37 - 1, at or above MODP, and a
 		 * Gaussian escape carrying INT64_MIN, whose negation used to be
 		 * undefined. */
 		memset(raw, 0xFF, sizeof(raw));

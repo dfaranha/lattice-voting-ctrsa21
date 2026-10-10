@@ -40,7 +40,7 @@
  * PARAMS.md. It was 2553802997, about 2^31.25, which gave 105.4 at the
  * conservative bound. Changing it requires new CRT constants P0, P1 in
  * commit.c, and a q in encrypt.c large enough for decryption. */
-#define MODP 	137438953501
+#define MODP 	137438953349
 /* Degree of the polynomial defining the cyclotomic ring for the commitment scheme. */
 #ifndef DEGREE
 #define DEGREE 	1024
