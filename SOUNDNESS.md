@@ -279,10 +279,15 @@ need to be extended accordingly.
    bookkeeping of the paper's Theorem 5 carries over to effective messages. The
    argument for why it should is given, but the knowledge-error accounting has
    not been redone.
-3. **MSIS parameters not re-derived.** Section 5 appeals to MSIS at a bound
-   driven by `||delta||_1 * 4 sqrt(n) sigma_C`. This is the same regime as the
-   original proof, and the new response is smaller, but the concrete hardness
-   has not been recomputed.
+3. **MSIS at the bound Section 5 uses is weaker than the one quoted.**
+   Section 5 appeals to MSIS at `2 ||delta||_1 * 4 sqrt(n) sigma_C`, with
+   `||delta||_1 <= 2 NONZERO`: at `sigma_C = 54000` and `NONZERO = 36`
+   that is `2^29.89`, and the lattice-estimator (53da598, core-SVP) puts it at
+   **89.9 bits**. The figure the README quotes, 117.4, is at the paper's
+   `16 sigma_C sqrt(nu N)`, `2^27.31`, smaller by a factor `sqrt(NONZERO)`:
+   the paper charges the challenge `sqrt(nu)`, where Section 5's bound, which
+   holds for any two ring elements, charges `||delta||_1`. Which of the two the
+   extraction actually needs has not been settled; at Section 5's, hiding at 72.4 still sets the level, so the level does not move.
 4. **Zero-knowledge sketched only**, as noted in Section 9.
 5. **The window in Section 8 has no slack to spare.** Any change to `n`, `q`,
    `NONZERO`, `M` or the encoding `g` invalidates the budget and must be
