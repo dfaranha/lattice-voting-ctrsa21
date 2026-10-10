@@ -16,9 +16,9 @@
 /*============================================================================*/
 
 /* The large modulus for the encryption scheme. */
-#define Q		"288230376151711717"
-#define Q0		"142220625783425069"
-#define Q1		"146009750368286648"
+#define Q		"1152921504606846869"
+#define Q0		"383824447308448458"
+#define Q1		"769097057298398411"
 
 /* Prime modulus for defining commitment ring. */
 static fmpz_t p;

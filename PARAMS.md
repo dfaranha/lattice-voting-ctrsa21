@@ -41,29 +41,32 @@ Writing `N = DEGREE`, `k = WIDTH`, `n = HEIGHT`, `nu = NONZERO`:
 1. **Hiding** is MLWE of rank `k - n - 1` over `R_p`, with `n + 1` samples and
    ternary secret and error.
 2. **Binding** is MSIS over `R_p` with `n` rows, `k` columns and bound
-   `16 * SIGMA_C * sqrt(nu * N)` (paper, section 3.1). Note this is the bound
-   the reduction gives, which is about 9 times larger than the `2 * sqrt(k) *
-   2 * sqrt(N) * SIGMA_C` that the verifier's own norm check suggests; using
-   the latter overstates binding security by some 71 bits (239.7 against
-   168.2 at the current `p`; it was 191.0 against 132.9 at the previous one).
-   Section 5 of SOUNDNESS.md appeals to MSIS at the larger
-   `2 * ||delta||_1 * 4 * sqrt(N) * SIGMA_C`, with `||delta||_1 <= 2 * nu`,
-   which is `sqrt(nu)` times the paper's bound: `2^28.07` against `2^25.91`.
-   Which of the two the extraction needs has not been settled, so `p` is
-   sized to clear 128 bits at both.
+   `16 * nu * SIGMA_C * sqrt(k * N)`, `2^29.07`. That is the norm of the vector
+   `delta' zbar - delta zbar'` that Section 5 of SOUNDNESS.md builds from two
+   relaxed openings: each of the `k` elements of `zbar` has norm at most
+   `4 * sqrt(N) * SIGMA_C`, so the vector has at most `sqrt(k)` times that,
+   and multiplying by a challenge difference stretches it by at most
+   `||delta||_1 <= 2 * nu`. The paper's `16 * SIGMA_C * sqrt(nu * N)`,
+   `2^25.91`, is smaller by `sqrt(nu * k)`: it charges the challenge
+   `||delta||_2`, which does not bound a product (`(1 + x)` times the
+   all-ones vector already exceeds it), and an element where the vector is
+   meant. Earlier versions of this note quoted binding at the paper's bound and
+   at `2 * ||delta||_1 * 4 * sqrt(N) * SIGMA_C`, which has the first
+   correction but not the second, and left open which one extraction needs.
+   It needs this one. The paper's figure is still given, for comparison.
 3. **Invertibility (Lemma 1)**: the extracted `||(d - d') * sigma_i||` must
    stay below `sqrt(p / 2)`, which floors `p` at `32 * N * SIGMA_S^2`
-   `= 2^28.20`. The current `p` clears it by a factor of 446 (it was 8.3 at
-   `2^31.25`): `sqrt(p / 2) = 262144`, against an extracted norm of at most
-   12416.
+   `= 2^28.20`. The current `p` clears it by a factor of 1783 (446 at `2^37`,
+   8.3 at `2^31.25`): `sqrt(p / 2) = 524288`, against an extracted norm of at
+   most 12416.
 4. **Decryption correctness**: `q >= 8 * nu * p * (2 * DIM * N + 1.5)`, which
-   is `2^56.91` at the current `p`; `q` is `2^58`, twice it. This is what the
+   is `2^58.91` at the current `p`; `q` is `2^60`, twice it. This is what the
    code's decryption checks, bounded in the worst case: it computes
    `c_bar (w - <v, s_1>)` for `c_bar = c - c'`, `||c_bar||_1 <= 2 nu`, and
    accepts below `q / 4`, and for an honest ciphertext that is
    `c_bar (p x + mu)` with `||x||_inf <= 2 * DIM * N + 1`, since every secret
    and every piece of randomness is CB(1). The paper's Table 1 asks instead for
-   `q > 2p(2 * DIM * N^2 * BETA^2 + N + 1)`, `2^60.585` here, which `q` was
+   `q > 2p(2 * DIM * N^2 * BETA^2 + N + 1)`, `2^62.585` here, which `q` was
    sized against until "Lowering q" below: its `N^2` is loose, a product of
    two ternary elements having coefficients at most `N`, and it leaves out
    `c_bar`. Either way `q` scales linearly with `p`.
@@ -80,11 +83,9 @@ directions, and 3 and 4 pin it from below and tie `q` to it. Raising `p`
 strengthens binding but weakens hiding, and through constraint 4 it raises `q`
 and so weakens encryption as well; it also widens the uniform coefficients of
 the proof. Hiding is no longer what holds `p` down: at rank 2 it has surplus
-(151.9 bits at the current `p`). What sets `p` is binding at Section 5's
-conservative bound, which `p = 2^37` lifts to 134.3, and what caps it is
-encryption, which `q` pulls down to 145.4. At the paper's bound binding has
-surplus (168.2) and the level is set by encryption; at the conservative bound
-it is set by binding. Raising `p` further would buy binding with encryption.
+(142.2 bits at the current `p`). What sets `p` is binding, which `p = 2^39`
+lifts to 131.1, and what caps it is encryption, which `q` pulls down to 139.0,
+and then hiding. Raising `p` further would buy binding with both.
 
 ## What changed
 
@@ -92,25 +93,28 @@ it is set by binding. Raising `p` further would buy binding with encryption.
 | --- | --- | --- |
 | `WIDTH` | 3 | 4 |
 | `NONZERO` | 36 | 20 |
-| `MODP` | 3906450253 (2^31.86) | 137438953349 (2^37.00) |
+| `MODP` | 3906450253 (2^31.86) | 549755813869 (2^39) |
 | `SIGMA_C` | 54000 | 27501 |
 | `SIGMA_S` | 256 | 97 |
 | `DIM` | 2 | 3 (now derived as `WIDTH - HEIGHT`) |
 | `VECTOR` | 3 | 4 (now derived as `WIDTH`) |
-| `Q` | 2^56 | 288230376151711717 (2^58) |
+| `Q` | 2^56 | 1152921504606846869 (2^60) |
 
 `MODP` and `Q` were 2553802997 (2^31.25) and 36028797018964429 (2^55) until
-they were raised for binding; see "Raising p" below. `Q` was then
-1986862199687640941 (2^60.79) until it was lowered again; see "Lowering q".
+they were raised for binding; see "Raising p" below. They were then
+137438953349 (2^37) and 1986862199687640941 (2^60.79), then 2^37 and
+288230376151711717 (2^58) once `q` was sized by what decryption needs ("Lowering
+q"), and are now 2^39 and 2^60, for binding at the bound that extraction
+actually needs ("Raising p again").
 
 `WIDTH = 4` is what takes the MLWE rank from 1 to 2. There is nothing in
 between: rank 1 gives 72 bits and rank 2 gave 186 at the 2^31.25 modulus
-(151.9 at the current 2^37), so hiding ends up over-provisioned, and the only way to trade that surplus back would be a
+(142.2 at the current 2^39), so hiding ends up over-provisioned, and the only way to trade that surplus back would be a
 smaller degree with a higher rank, which cuts against raising `DEGREE` later.
 
 `NONZERO = 20` pays for most of `WIDTH = 4`. The MSIS bound grows as
-`nu^1.5` (once through `SIGMA_C`, which is linear in `nu`, and again through
-the explicit `sqrt(nu)`), so cutting `nu` from 36 improves binding and shrinks
+`nu^2` (once through `SIGMA_C`, which is linear in `nu`, and again through
+`||delta||_1`), so cutting `nu` from 36 improves binding and shrinks
 the responses at the same time. At 36 the challenge space was `2^257.0`, far more
 than soundness needs.
 
@@ -126,7 +130,7 @@ is `alpha >= 21.485`. The challenge `d` has `nu` coefficients of `+-1`, so:
   carry over by rescaling the paper's 54000, which left 21 % of slack.
 - `SIGMA_S = ceil(21.485 * sqrt(nu)) = 97`, since the `sigma_i` are monomials
   and `||d * sigma_i|| = ||d|| = sqrt(nu)`. The Lemma 1 floor on `p` is then
-  `32 * N * SIGMA_S^2 = 2^28.20`, well below `p = 2^37`.
+  `32 * N * SIGMA_S^2 = 2^28.20`, well below `p = 2^39`.
 
 Narrowing the widths does not change the prover's running time. A rejection
 test whose ratio stays below `M` accepts with probability `1 / M` whatever
@@ -146,34 +150,38 @@ value, and 54000 is the conservative direction.
 | Problem | published | here | |
 | --- | --- | --- | --- |
 | | core-SVP | core-SVP | MATZOV |
-| MLWE, commitment hiding | 72 | **151.9** | 177.9 |
-| MSIS, binding at the paper's `16 * SIGMA_C * sqrt(nu * N)` | 117 | **168.2** | 193.1 |
-| MSIS, binding at Section 5's `2 * ||delta||_1 * 4 * sqrt(N) * SIGMA_C` | 89.9 | **134.3** | 160.7 |
-| MLWE, encryption | 87 | **145.4** | 172.5 |
+| MLWE, commitment hiding | 72 | **142.2** | 168.8 |
+| MSIS, binding at `16 * nu * SIGMA_C * sqrt(k * N)` | 83.2 | **131.1** | 157.7 |
+| MSIS, binding at the paper's `16 * SIGMA_C * sqrt(nu * N)`, for comparison | 117 | 181.0 | 205.4 |
+| MLWE, encryption | 87 | **139.0** | 166.7 |
 
-The level is 145.4 core-SVP at the paper's bound, set by encryption, and 134.3
-at the conservative one, set by binding. At `q = 2^60.79` encryption was 136.7
-(164.6). At the previous `p = 2^31.25` the
-same columns read 186.1 (213.9) for hiding, 132.9 (159.2) and 105.4 for
-binding, and 155.4 (183.6) for encryption, so the level was 132.9 at the
-paper's bound and 105.4 at the conservative one. Binding at the paper's bound
-was 128.2 (154.7) at the earlier `SIGMA_C = 34641`: the narrower width shrinks
-that bound from `2^26.24` to `2^25.91`.
+The level is 131.1 core-SVP, set by binding. At `p = 2^37` and `q = 2^58` the
+columns read 151.9 (177.9) for hiding, 121.8 for binding, 168.2 (193.1) at the
+paper's bound, and 145.4 (172.5) for encryption, so the level was 121.8; at
+`q = 2^60.79` encryption was 136.7 (164.6). At `p = 2^31.25` they read 186.1
+(213.9) for hiding, 132.9 (159.2) at the paper's bound, and 155.4 (183.6) for
+encryption. Binding at the paper's bound was 128.2 (154.7) at the earlier
+`SIGMA_C = 34641`: the narrower width shrinks that bound from `2^26.24` to
+`2^25.91`.
 
-Cost: the shuffle proof is 49.4 KB per message at `MSGS = 25` (1264289 bytes),
-measured by the serialisation test, at 16.26 bits a Gaussian coefficient
+Cost: the shuffle proof is 50.6 KB per message at `MSGS = 25` (1295902 bytes),
+measured by the serialisation test, at 16.25 bits a Gaussian coefficient
 against 18.38 for a flat encoding at the bound and 16.17 of entropy. It was
-46.3 KB at the 2^31.25 modulus: the Gaussian coefficients do not depend on
-`p`, and only the uniform ones widen, from 32 to 37 bits. Before that it was
+49.4 KB at `2^37` and 46.3 KB at the 2^31.25 modulus: the Gaussian
+coefficients do not depend on `p`, and only the uniform ones widen, from 32 to
+37 to 39 bits. Before that it was
 46.4 KB (1188970 bytes, at 16.25 bits a Gaussian coefficient) when it still
 carried the unused last `s_i`, against 47.1 KB at the previous widths; a
 ciphertext grows by one ring element over the published parameters, and its
-coefficients, which live modulo `q`, widen with `q` from 56 to 58 bits (61
-before "Lowering q").
+coefficients, which live modulo `q`, widen with `q` from 56 to 60 bits.
 Prover time is unchanged: the linear proof expects `M^4 = 9.38` repetitions
 whatever the widths are.
 
 ## Raising p (2026-10-10)
+
+*This section and the next are history. Their "conservative bound" is
+`2 * ||delta||_1 * 4 * sqrt(N) * SIGMA_C`, which leaves out the `sqrt(k)` of
+constraint 2; "Raising p again" below redoes the choice at the correct bound.*
 
 At `p = 2553802997` (2^31.25), binding was 132.9 bits at the paper's bound
 `16 * SIGMA_C * sqrt(nu * N) = 2^25.91`, but SOUNDNESS.md, Section 5, proves
@@ -233,6 +241,35 @@ decryption's ceiling `q / 4` fell, while the verifier's tail bound, which
 decides where proofs stop verifying, does not depend on `q`; the window of
 ballots that verify but do not decrypt therefore widens downwards. `master`'s
 README has the measurement.
+
+## Raising p again (2026-10-10)
+
+Settling which binding bound extraction needs (constraint 2) put binding at
+121.8 bits at `p = 2^37`: Section 5's vector has `k` elements, and the earlier
+"conservative" bound had counted one. The levers, at the correct bound:
+
+| change | binding | hiding | encryption | cost |
+| --- | --- | --- | --- | --- |
+| `p = 2^37`, `q = 2^58` | 121.8 | 151.9 | 145.4 | |
+| `p = 2^38`, `q = 2^59` | 126.4 | 147.2 | 142.2 | |
+| `p = 2^39`, `q = 2^60` | **131.1** | 142.2 | 139.0 | uniform coefficients 37 -> 39 bits |
+| `p = 2^40`, `q = 2^61` | 136.1 | 137.6 | 135.9 | |
+| `p = 2^37`, challenges with operator norm at most 12.47 | 130.2 | 151.9 | 145.4 | a challenge sampler that rejects by a floating-point FFT |
+
+The last row bounds the stretch of a challenge by its largest singular value
+rather than its `l1` norm, as LNP22 does, keeping the 90 per cent of `C_lin`
+whose singular values are at most 12.47 (`|C_lin|` loses 0.15 bits); it was
+passed over for a parameter change that needs no new code.
+
+The new `p` is 549755813869, `2^39 - 19`, the largest prime below `2^39` that
+is 5 mod 8, with `P0 = 248826153816` and `P1 = 300929660053`. `q` follows it
+through constraint 4, which asks for `2^58.91`: 1152921504606846869,
+`2^60 - 107`, the largest prime below `2^60` that is 5 mod 8, a factor of 2.1
+above it, with `Q0 = 383824447308448458` and `Q1 = 769097057298398411`. For
+both, `x^512 +- P0` are irreducible and multiply to `x^1024 + 1`.
+Coefficients still hash in 5 bytes. The proof grows from 49.4 to 50.6 KB a
+message. The Lemma 1 margin of constraint 3 grows from 446 to 1783, and the
+`SIGMA_S` window of SOUNDNESS.md, Section 8, from a factor of 30.1 to 60.3.
 
 ## Caveats
 

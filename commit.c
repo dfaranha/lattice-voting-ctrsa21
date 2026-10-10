@@ -21,9 +21,9 @@
 /*============================================================================*/
 
 /* The first square root of -1 modulo MODP. */
-#define	P0		6781345549
+#define	P0		248826153816
 /* The second square root of -1, MODP - P0. */
-#define P1		130657607800
+#define P1		300929660053
 
 /* Polynomial defining the cyclotomic ring. */
 static nmod_poly_t cyclo_poly;

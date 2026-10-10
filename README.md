@@ -76,7 +76,7 @@ sub-proof of `is_bin(sigma_i)` delegated to a general-purpose lattice proof
 system (LaZer), which has no counterpart in this code base.
 
 Binary coefficients are more than the lemma needs. By Lemma 1, any element of
-l2-norm below `MODP^(1/2) ~ 370728` is invertible, so taking `D` to be a ball of
+l2-norm below `MODP^(1/2) ~ 741455` is invertible, so taking `D` to be a ball of
 small norm satisfies the requirement, and shortness is exactly what
 Fiat-Shamir-with-aborts proves natively. The linear proof therefore masks the
 committed message with a narrow Gaussian (`SIGMA_S`, see `param.h`) and the
@@ -88,18 +88,18 @@ exactly, which keeps `SIGMA_S` at its minimum whatever the number of messages:
 
 | quantity | value |
 | --- | --- |
-| invertibility ceiling `MODP^(1/2)` | 370728 |
+| invertibility ceiling `MODP^(1/2)` | 741455 |
 | extracted `||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S)` | 12416 |
 | masking ratio `SIGMA_S / ||d * sigma_i||` | ~21.7 |
 
-The extracted norm sits a factor of 29.8 below the ceiling. That margin was
+The extracted norm sits a factor of 59.7 below the ceiling. That margin was
 4.07 at the previous `MODP = 2553802997`, where the ceiling was 50535; it
-widened when `MODP` was raised to about `2^37` for binding (see
+widened when `MODP` was raised to about `2^39` for binding (see
 [PARAMS.md](PARAMS.md)), not by design. A binary encoding would also fit at
 `N = 25`: an index of weight `w` needs `21.485 * sqrt(20) * w <= SIGMA_S <=
 (MODP^(1/2) - sqrt(80) * w) / (4 * sqrt(DEGREE))`, so with up to four bits set
-the window is `[384.3, 2896.0]`, a factor of about 7.5 (it was 1.03 at the
-previous modulus). But it would need `SIGMA_S` about four times wider, and
+the window is `[384.3, 5792.3]`, a factor of about 15 (it was 1.03 at
+`2^31.25`). But it would need `SIGMA_S` about four times wider, and
 more as `N` grows, since `||sigma_i||_1` grows with the bit-length of the
 index. The monomial encoding is independent of `N` and supports up to `DEGREE`
 messages.

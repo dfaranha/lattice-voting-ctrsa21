@@ -34,13 +34,14 @@
 /* Modulus p defining the cyclotomic ring for the commitment scheme. Prime and
  * congruent to 5 mod 8, so that (x^DEGREE + 1) splits into exactly NCRT = 2
  * irreducible factors as Lemma 1 requires for delta = 2. Sized so that the
- * MSIS instance the binding property reduces to clears 128 bits even at the
- * conservative bound 2 ||delta||_1 * 4 sqrt(N) SIGMA_C of SOUNDNESS.md, Section
- * 5: 134.3 there, and 168.2 at the paper's 16 SIGMA_C sqrt(nu N); see
- * PARAMS.md. It was 2553802997, about 2^31.25, which gave 105.4 at the
- * conservative bound. Changing it requires new CRT constants P0, P1 in
- * commit.c, and a q in encrypt.c large enough for decryption. */
-#define MODP 	137438953349
+ * MSIS instance the binding property reduces to clears 128 bits at the bound
+ * 16 NONZERO SIGMA_C sqrt(WIDTH N) of SOUNDNESS.md, Section 5: 131.1 there,
+ * against 181.0 at the paper's 16 SIGMA_C sqrt(nu N), which is too small; see
+ * PARAMS.md. It is 2^39 - 19, the largest such prime below 2^39. It was
+ * 2^37 - 123, which gave 121.8, and before that 2553802997, about 2^31.25.
+ * Changing it requires new CRT constants P0, P1 in commit.c, and a q in
+ * encrypt.c large enough for decryption. */
+#define MODP 	549755813869
 /* Degree of the polynomial defining the cyclotomic ring for the commitment scheme. */
 #ifndef DEGREE
 #define DEGREE 	1024
@@ -98,7 +99,7 @@
  * smallest width that keeps the same 2^-100 bound at M = 1.75, at a ratio of
  * about 21.7. It must also stay small enough that the
  * extracted ||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S) = 12416
- * remains below sqrt(MODP / 2) ~ 262144, the bound under which Lemma 1
+ * remains below sqrt(MODP / 2) ~ 524288, the bound under which Lemma 1
  * guarantees invertibility. */
 #define SIGMA_S 97
 /* Standard deviation of the discrete Gaussian in the verifiable encryption.
