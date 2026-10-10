@@ -68,7 +68,7 @@
  * The map g : [N] -> D of Lemma 5, instantiated as the monomial map i -> x^i.
  *
  * D is the set of monomials. The difference x^a - x^b of two distinct elements
- * has l2-norm sqrt(2), far below MODP^(1/2) ~ 62501, so by Lemma 1 it is
+ * has l2-norm sqrt(2), far below MODP^(1/2) ~ 50535, so by Lemma 1 it is
  * invertible in R_p, as Lemma 5 requires. The map is injective for i < DEGREE,
  * so it supports up to DEGREE messages.
  *

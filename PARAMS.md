@@ -4,7 +4,8 @@ This note records how the parameters in `param.h` were chosen, so that they can
 be re-derived rather than copied. All figures are classical core-SVP
 (`0.292 * beta`, the ADPS16 model) unless stated otherwise; the MATZOV
 gate-count figures are given alongside because the two models disagree by
-roughly 25 bits here and the published claim depends on which one is used.
+roughly 26 to 29 bits here and the published claim depends on which one is
+used.
 
 Estimates come from the reference
 [lattice-estimator](https://github.com/malb/lattice-estimator), which was
@@ -19,7 +20,7 @@ The paper states "at least 100 bits of security". Resolving that:
 | --- | --- | --- | --- |
 | MLWE, commitment hiding | ballot privacy, ZK of the shuffle | **72** | 100 |
 | MSIS, commitment binding | soundness of the shuffle | 117 | 144 |
-| MLWE, encryption | ballot secrecy | 89 | 117 |
+| MLWE, encryption | ballot secrecy | 87 | 116 |
 
 So the claim holds under MATZOV, where the weakest link is 100.5, and does not
 hold under core-SVP, which is the model Kyber and Dilithium quote. The binding
@@ -41,13 +42,14 @@ Writing `N = DEGREE`, `k = WIDTH`, `n = HEIGHT`, `nu = NONZERO`:
    ternary secret and error.
 2. **Binding** is MSIS over `R_p` with `n` rows, `k` columns and bound
    `16 * SIGMA_C * sqrt(nu * N)` (paper, section 3.1). Note this is the bound
-   the reduction gives, which is about 14 times larger than the `2 * sqrt(k) *
+   the reduction gives, which is about 9 times larger than the `2 * sqrt(k) *
    2 * sqrt(N) * SIGMA_C` that the verifier's own norm check suggests; using
-   the latter overstates binding security by some 60 bits.
+   the latter overstates binding security by some 58 bits.
 3. **Invertibility (Lemma 1)**: the extracted `||(d - d') * sigma_i||` must
    stay below `sqrt(p / 2)`, which floors `p` at `32 * N * SIGMA_S^2`.
 4. **Decryption correctness**: `q > 2p(2 * DIM * N^2 * BETA^2 + N + 1)`
-   (paper, Table 1). The factor is `2^22`, so `q` scales linearly with `p`.
+   (paper, Table 1). The factor is about `2^23.6`, so `q` scales linearly with
+   `p`.
 5. **Quasi-unique responses**: `q > 24 * SIGMA_E^2 = 2^36`. Never binding.
 6. **Challenge space**: Theorem 1 has a `4 * tau * t` term, so `|C|` should
    exceed about `2^135`. The sampler in `shuffle.c` draws challenges with `nu`
@@ -117,19 +119,20 @@ value, and 54000 is the conservative direction.
 | Problem | published | here | |
 | --- | --- | --- | --- |
 | | core-SVP | core-SVP | MATZOV |
-| MLWE, commitment hiding | 72 | **186** | 210 |
+| MLWE, commitment hiding | 72 | **186** | 214 |
 | MSIS, commitment binding | 117 | **133** | 159 |
-| MLWE, encryption | 89 | **157** | 184 |
+| MLWE, encryption | 87 | **155** | 184 |
 
 Binding is 132.9 core-SVP (159.2 MATZOV), against 128.2 (154.7) at the
 previous `SIGMA_C = 34641`: the narrower width shrinks the MSIS bound
 `16 * SIGMA_C * sqrt(nu * N)` from `2^26.24` to `2^25.91`.
 
-Cost: the shuffle proof is 46.4 KB per message at `MSGS = 25` (1188970 bytes,
-measured by the serialisation test, at 16.25 bits a Gaussian coefficient),
-against 47.1 KB at the previous widths, and a ciphertext grows by one ring
-element. Prover time is unchanged: the linear proof expects `M^4 = 9.38`
-repetitions whatever the widths are.
+Cost: the shuffle proof is 46.3 KB per message at `MSGS = 25`, measured by the
+serialisation test. It was 46.4 KB (1188970 bytes, at 16.25 bits a Gaussian
+coefficient) when it still carried the unused last `s_i`, against 47.1 KB at
+the previous widths; a ciphertext grows by one ring element. Prover time is
+unchanged: the linear proof expects `M^4 = 9.38` repetitions whatever the
+widths are.
 
 ## Caveats
 

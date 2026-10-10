@@ -250,10 +250,11 @@ against `n = 1024`-dimensional Gaussian responses.
 
 This is also why `g` maps to monomials rather than to binary representations of
 indices, as in the paper. For a binary `g`, `||d * sigma_i||_2 <= ||d||_2 *
-||sigma_i||_1` grows with the bit-length of the index: at `N = 25` the window
-still exists but is about a factor of 1.3 wide, and it closes entirely for
-larger `N`. With monomials, `||d * sigma_i||_2 = ||d||_2` independently of `N`,
-and `g` stays injective up to `N = n`.
+||sigma_i||_1` grows with the bit-length of the index: at `N = 25`, whose
+indices have up to four bits set, the window still exists but is only
+`[384.3, 394.5]`, a factor of 1.03 wide, and it closes entirely at the first
+index with five, 31. With monomials, `||d * sigma_i||_2 = ||d||_2`
+independently of `N`, and `g` stays injective up to `N = n`.
 
 ## 9. Completeness and zero-knowledge
 

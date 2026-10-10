@@ -89,7 +89,7 @@ static int test_norm(nmod_poly_t r) {
 	 * is bounded by. The binding estimates use the same SIGMA_C, through the
 	 * extractable bound 16 * SIGMA_C * sqrt(nu * N). The paper's lower bound
 	 * 11 * nu * beta * sqrt(k * N) on that width, which this used to take,
-	 * accepted only openings 2.5 times shorter than extraction yields. */
+	 * accepted only openings 1.95 times shorter than extraction yields. */
 	const uint64_t sigma_sqr = (uint64_t) SIGMA_C * SIGMA_C;
 
 	/* Compare the squared norm to (4 * sigma * sqrt(N))^2 = 16 * sigma^2 * N.

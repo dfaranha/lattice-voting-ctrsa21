@@ -44,6 +44,9 @@ Concretely, this changed the following:
   public coefficient `tau`.
 * Challenges are now sampled of degree below `N/2`, so that the difference of
   two distinct challenges is invertible, as the soundness argument requires.
+  (The linear proof's challenge has since moved to the paper's challenge space,
+  `NONZERO` coefficients of `+-1`, whose differences are invertible because
+  they are short; `tau`, `rho` and `beta` keep degree below `N/2`.)
 * The linear proof additionally masks the message committed alongside the
   randomness, and the verifier bounds the norm of that response. This is what
   places `sigma_i` in the set `D` that Lemma 5 requires (see below).
@@ -89,7 +92,7 @@ exactly. The budget is tight and this is what makes it comfortable:
 | extracted `||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S)` | 12416 |
 | masking ratio `SIGMA_S / ||d * sigma_i||` | ~21.7 |
 
-A binary encoding would also fit at `N = 25`, but with a factor of about 1.3 to
+A binary encoding would also fit at `N = 25`, but with a factor of about 1.03 to
 spare, and it degrades as `N` grows, since `||sigma_i||_1` grows with the
 bit-length of the index. The monomial encoding is independent of `N` and
 supports up to `DEGREE` messages.
