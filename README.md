@@ -165,4 +165,28 @@ had to grow from 165340 to 295465, at 2.2 KB a message and 25 bits of binding
 that its hiding-limited security level does not notice. `master` and `fix-pkc`
 keep the paper's width, with about 26 per cent to spare.
 
+**Timings.** Median of three interleaved rounds, in millions of cycles of the
+time-stamp counter, on one core of an Intel Core i7-10510U, each branch's
+benchmarks built with the Makefile's flags at `MSGS = 25`. The shuffle row is a
+whole run, proving and verifying all 25 messages; the others are per call.
+
+| | `master` | `fix-pkc` | `balanced-params` | `lnp` |
+| --- | --- | --- | --- | --- |
+| shuffle, prove and verify (25 messages) | 793 | 3044 | 4225 | 5647 |
+| per message | 31.7 | 121.8 | 169.0 | 225.9 |
+| verifiable encryption | 220 | 233 | 449 | 1376 |
+| its verification | 46.1 | 44.8 | 93.8 | 290 |
+| its decryption | 54.5 | 55.5 | 121.7 | 337 |
+| commitment | 0.77 | 0.76 | 1.55 | 2.17 |
+| opening | 2.08 | 2.01 | 3.17 | 5.79 |
+
+The rounds agree within about 10 per cent except one round on `lnp` that ran
+twice as slow; the median sets it aside. The shuffle carries the spread of
+rejection sampling, since the prover's attempts are random: `lnp`'s one batched
+test makes it the widest, as section 5b of its `LNP-PARAMS.md` explains. What
+each branch pays for is in the sizes above: `fix-pkc` is the patched protocol
+at the published parameters, and costs four times `master` to prove, mostly in
+the linear proofs that now relate three commitments under four rejection
+tests.
+
 `LNP-PARAMS.md` on the `lnp` branch has the derivations and the caveats.
