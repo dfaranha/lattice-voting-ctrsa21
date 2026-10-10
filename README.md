@@ -72,7 +72,7 @@ proof. This table is the reference for what each costs and what each is worth.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `master` | `2^31.86` | 1024 | 3 | 36 | 25.3 KB | 117.4 | 72.4 | 87.0 | **72.4** |
 | `fix-pkc` | `2^31.86` | 1024 | 3 | 36 | 41.2 KB | 117.4 | 72.4 | 87.0 | **72.4** |
-| `balanced-params` | `2^37` | 1024 | 4 | 20 | 50.0 KB | 168.2 | 151.9 | 136.7 | **136.7** |
+| `balanced-params` | `2^37` | 1024 | 4 | 20 | 49.4 KB | 168.2 | 151.9 | 136.7 | **136.7** |
 | `lnp` | `2^40` | 2048 | 3 | 18 | 134.6 KB | 327.0 | 137.6 | 316.2 | **137.6** |
 
 Security is core-SVP bits, in the sense of Alkim-Ducas-Pöppelmann-Schwabe,
@@ -95,7 +95,7 @@ hiding either way. `balanced-params` used to reach 128 only at the paper's
 bound -- 105.4 at the conservative one, with `p` at `2^31.25` -- and its modulus
 was raised to `2^37` so that it clears 128 at either: the masked openings do not
 depend on `p`, so only the uniform coefficients widen, 46.3 KB a message becoming
-50.0, and hiding and encryption, which a larger modulus weakens, stay above
+49.4, and hiding and encryption, which a larger modulus weakens, stay above
 binding. Which bound the extraction needs has not been settled;
 `estimates.sage` prints both.
 
@@ -133,7 +133,7 @@ and brackets the byte count by it -- below a flat encoding, above the entropy
 | --- | --- | --- | --- | --- | --- |
 | `master` | 17.86 | 20 | 17.77 | 27.0 KB | 25.3 KB |
 | `fix-pkc` | 17.09 | 19.20 | 17.00 | 44.0 KB | 41.2 KB |
-| `balanced-params` | 16.26 | 18.38 | 16.17 | 50.0 KB | 50.0 KB |
+| `balanced-params` | 16.26 | 18.38 | 16.17 | 50.0 KB | 49.4 KB |
 | `lnp` | 20.26 | 21.93 | 20.15 | 137.0 KB | 134.6 KB |
 
 The first three columns are bits a Gaussian coefficient, averaged over the
