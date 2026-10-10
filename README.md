@@ -72,7 +72,7 @@ proof. This table is the reference for what each costs and what each is worth.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `master` | `2^31.86` | 1024 | 3 | 36 | 25.3 KB | 117.4 | 72.4 | 87.0 | **72.4** |
 | `fix-pkc` | `2^31.86` | 1024 | 3 | 36 | 41.2 KB | 117.4 | 72.4 | 87.0 | **72.4** |
-| `balanced-params` | `2^31.25` | 1024 | 4 | 20 | 46.3 KB | 132.9 | 186.1 | 155.4 | **132.9** |
+| `balanced-params` | `2^37` | 1024 | 4 | 20 | 50.0 KB | 168.2 | 151.9 | 136.7 | **136.7** |
 | `lnp` | `2^40` | 2048 | 3 | 18 | 134.6 KB | 327.0 | 137.6 | 316.2 | **137.6** |
 
 Security is core-SVP bits, in the sense of Alkim-Ducas-Pöppelmann-Schwabe,
@@ -90,10 +90,14 @@ less.** The column is MSIS at the paper's extractable opening
 (`SOUNDNESS.md`, Section 5) instead appeals to MSIS at
 `2 ||delta||_1 * 4 sqrt(N) sigma`, which holds for any two ring elements and is
 larger by `sqrt(nu)`; there binding is 89.9 bits on `master` and `fix-pkc`,
-105.4 on `balanced-params` and 273.6 on `lnp`. The first two are limited by
-hiding either way, and `lnp` stays far above 128, but `balanced-params` reaches
-128 only at the paper's bound. Which bound the extraction needs has not been
-settled; `estimates.sage` prints both.
+134.3 on `balanced-params` and 273.6 on `lnp`. The first two are limited by
+hiding either way. `balanced-params` used to reach 128 only at the paper's
+bound -- 105.4 at the conservative one, with `p` at `2^31.25` -- and its modulus
+was raised to `2^37` so that it clears 128 at either: the masked openings do not
+depend on `p`, so only the uniform coefficients widen, 46.3 KB a message becoming
+50.0, and hiding and encryption, which a larger modulus weakens, stay above
+binding. Which bound the extraction needs has not been settled;
+`estimates.sage` prints both.
 
 Sizes are at `MSGS = 25` and are **measured, not estimated**. Every branch
 carries a `serial.c` that packs the values the prover sends, at
@@ -129,7 +133,7 @@ and brackets the byte count by it -- below a flat encoding, above the entropy
 | --- | --- | --- | --- | --- | --- |
 | `master` | 17.86 | 20 | 17.77 | 27.0 KB | 25.3 KB |
 | `fix-pkc` | 17.09 | 19.20 | 17.00 | 44.0 KB | 41.2 KB |
-| `balanced-params` | 16.25 | 18.38 | 16.17 | 50.0 KB | 46.3 KB |
+| `balanced-params` | 16.26 | 18.38 | 16.17 | 50.0 KB | 50.0 KB |
 | `lnp` | 20.26 | 21.93 | 20.15 | 137.0 KB | 134.6 KB |
 
 The first three columns are bits a Gaussian coefficient, averaged over the
@@ -178,8 +182,8 @@ rest. The branch is gone; its last state is the tag `archive/nocrt`.
 `M = 1.75`, rejection sampling keeps its `2^-100` bound once `sigma` is 21.485
 times the longest vector it masks, `nu * beta * sqrt(K * N)` for `K` ternary
 ring elements. `balanced-params` had inherited a width scaled from the paper's
-54000 and now sits at that minimum, which takes 0.7 KB off a message and raises
-binding from 128.2 to 132.9 bits. `lnp` went the other way: its batched test
+54000 and now sits at that minimum, which took 0.7 KB off a message and raised
+binding from 128.2 to 132.9 bits at the modulus of the time. `lnp` went the other way: its batched test
 masks `K = 285` ring elements, not the 75 its width was sized for, so `SIGMA_B`
 had to grow from 165340 to 295465, at 2.2 KB a message and 25 bits of binding
 that its hiding-limited security level does not notice. `master` and `fix-pkc`
@@ -192,13 +196,13 @@ whole run, proving and verifying all 25 messages; the others are per call.
 
 | | `master` | `fix-pkc` | `balanced-params` | `lnp` |
 | --- | --- | --- | --- | --- |
-| shuffle, prove and verify (25 messages) | 793 | 3044 | 4225 | 5647 |
-| per message | 31.7 | 121.8 | 169.0 | 225.9 |
-| verifiable encryption | 220 | 233 | 449 | 1376 |
-| its verification | 46.1 | 44.8 | 93.8 | 290 |
-| its decryption | 54.5 | 55.5 | 121.7 | 337 |
-| commitment | 0.77 | 0.76 | 1.55 | 2.17 |
-| opening | 2.08 | 2.01 | 3.17 | 5.79 |
+| shuffle, prove and verify (25 messages) | 793 | 3044 | 4256 | 5647 |
+| per message | 31.7 | 121.8 | 170.3 | 225.9 |
+| verifiable encryption | 220 | 233 | 479 | 1376 |
+| its verification | 46.1 | 44.8 | 94.4 | 290 |
+| its decryption | 54.5 | 55.5 | 115.8 | 337 |
+| commitment | 0.77 | 0.76 | 1.68 | 2.17 |
+| opening | 2.08 | 2.01 | 3.03 | 5.79 |
 
 The rounds agree within about 10 per cent except one round on `lnp` that ran
 twice as slow; the median sets it aside. The shuffle carries the spread of
