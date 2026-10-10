@@ -50,14 +50,19 @@ proof. This table is the reference for what each costs and what each is worth.
 
 | branch | modulus | `DEGREE` | `WIDTH` | `NONZERO` | proof, per message | MSIS binding | MLWE hiding | MLWE encryption | security level |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `master` | `2^31.86` | 1024 | 3 | 36 | 25.3 KB | 117.4 | 72.7 | 88.8 | **72.7** |
-| `fix-pkc` | `2^31.86` | 1024 | 3 | 36 | 41.2 KB | 117.4 | 72.7 | 88.8 | **72.7** |
-| `balanced-params` | `2^31.25` | 1024 | 4 | 20 | 46.3 KB | 132.9 | 191.6 | 159.7 | **132.9** |
-| `lnp` | `2^40` | 2048 | 3 | 18 | 134.6 KB | 327.0 | 140.2 | 326.2 | **140.2** |
+| `master` | `2^31.86` | 1024 | 3 | 36 | 25.3 KB | 117.4 | 72.4 | 87.0 | **72.4** |
+| `fix-pkc` | `2^31.86` | 1024 | 3 | 36 | 41.2 KB | 117.4 | 72.4 | 87.0 | **72.4** |
+| `balanced-params` | `2^31.25` | 1024 | 4 | 20 | 46.3 KB | 132.9 | 186.1 | 155.4 | **132.9** |
+| `lnp` | `2^40` | 2048 | 3 | 18 | 134.6 KB | 327.0 | 137.6 | 316.2 | **137.6** |
 
 Security is core-SVP bits, in the sense of Alkim-Ducas-Pöppelmann-Schwabe,
 computed with the `lattice-estimator`. The security level of a branch is the
 minimum of its three columns, since an attacker picks the weakest.
+`estimates.sage` reproduces every column and says which problem each one is:
+hiding with the commitment randomness uniform in `{-1, 0, 1}` and encryption
+with its secrets centred binomial, as the code samples them, which puts the
+hiding and encryption columns a few bits below figures that modelled them
+otherwise.
 
 Sizes are at `MSGS = 25` and are **measured, not estimated**. Every branch
 carries a `serial.c` that packs the values the prover sends, at
@@ -71,7 +76,7 @@ first messages, which the verifier recovers rather than receiving.
 
 Six things the table is worth reading for.
 
-**The published parameters give about 73 bits as per latest estimates, not the 100 claimed in the
+**The published parameters give about 72 bits as per latest estimates, not the 100 claimed in the
 paper at the time.** `master` and `fix-pkc` are both limited by the hiding property
 of the commitment, which is MLWE of rank `WIDTH - HEIGHT - 1`, and at
 `WIDTH = 3` that rank is 1. Binding and encryption are comfortable; hiding is
