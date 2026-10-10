@@ -58,5 +58,16 @@ vericrypt: vericrypt.c encrypt.o sha224-256.c ${RAND} fastrandombytes.h ${TEST} 
 shuffle: shuffle.c commit.c commit.h serial.c serial.h sha224-256.c ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
 	${CPP} ${CFLAGS} commit.c serial.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
+# Fuzzing the proof decoder, with clang's libFuzzer under AddressSanitizer and
+# UndefinedBehaviorSanitizer; fuzz_serial.c says how to run it.
+FUZZ_CPP = clang++
+FUZZ_FLAGS = -O1 -g -march=native -pthread -fsanitize=address,undefined \
+	-fno-sanitize-recover=all
+
+# The samplers are GCC-only and the decoder does not call them, so their
+# objects come from the ordinary build.
+fuzz_serial: fuzz_serial.c serial.c serial.h commit.c commit.h sha224-256.c ${RAND} fastrandombytes.h ${INCLUDES} gaussian_c.o gaussian_s.o
+	${FUZZ_CPP} ${FUZZ_FLAGS} -fsanitize=fuzzer -x c++ fuzz_serial.c serial.c commit.c sha224-256.c ${RAND} -x none gaussian_c.o gaussian_s.o -o $@ ${LIBS}
+
 clean:
-	rm -f *.o commit encrypt vericrypt shuffle
+	rm -f *.o commit encrypt vericrypt shuffle fuzz_serial

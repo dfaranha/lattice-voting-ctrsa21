@@ -4,3 +4,8 @@ commit
 encrypt
 vericrypt
 shuffle
+fuzz_serial
+fuzz-corpus/
+crash-*
+leak-*
+timeout-*

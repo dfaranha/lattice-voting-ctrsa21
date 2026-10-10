@@ -1144,8 +1144,9 @@ static int run(commit_t com[MSGS], nmod_poly_t m[MSGS], nmod_poly_t _m[MSGS],
 		memset(digest2, 0, sizeof(digest2));
 		proof_t pf2 = { y2, w2, _y2, ys2, d2, p2, s2, digest2 };
 
-		serial_reader_init(&br, buf, sizeof(buf));
+		serial_reader_init(&br, buf, proof_bytes);
 		proof_walk(&pf2, NULL, &br);
+		serial_reader_finish(&br);
 		result = !br.overflow && shuffle_verifier(y2, w2, _y2, ys2, t, tp, _t,
 				vs, u, d2, s2, com, p2, _m, key, digest2);
 
@@ -1326,11 +1327,13 @@ static void test(void) {
 		static uint8_t raw[1 << 14], ok[1 << 14];
 		bitreader_t br;
 		bitwriter_t bw;
-		nmod_poly_t a[2];
-		int bad_u, bad_g, bad_e, good;
+		nmod_poly_t a[2], t;
+		int bad_u, bad_g, bad_e, good, exact, bad_t, bad_p;
+		size_t len;
 
 		nmod_poly_init(a[0], MODP);
 		nmod_poly_init(a[1], MODP);
+		nmod_poly_init(t, MODP);
 		/* All ones: a uniform coefficient of 2^32 - 1, at or above MODP, and a
 		 * Gaussian escape carrying INT64_MIN, whose negation used to be
 		 * undefined. */
@@ -1357,9 +1360,37 @@ static void test(void) {
 		serial_get_gauss(&br, a, SIGMA_C);
 		serial_get_uniform(&br, a);
 		good = !br.overflow;
+		/* The reader must also end where the writer did: a byte past the
+		 * end, or a padding bit set in the last byte, would give one proof
+		 * a second byte string. A single coefficient of 2^j, for the first j
+		 * whose code is not a whole number of bytes, leaves padding to set. */
+		for (int j = 0; j < 30; j++) {
+			nmod_poly_zero(t);
+			nmod_poly_set_coeff_ui(t, 0, (ulong) 1 << j);
+			pcrt_poly_reduce(a[0], t, 0);
+			pcrt_poly_reduce(a[1], t, 1);
+			serial_writer_init(&bw, ok, sizeof(ok));
+			serial_put_gauss(&bw, a, SIGMA_C);
+			if (bw.bits % 8 != 0) {
+				break;
+			}
+		}
+		len = serial_bytes(&bw);
+		serial_reader_init(&br, ok, len);
+		serial_get_gauss(&br, a, SIGMA_C);
+		exact = (bw.bits % 8 != 0) && serial_reader_finish(&br);
+		serial_reader_init(&br, ok, len + 1);
+		serial_get_gauss(&br, a, SIGMA_C);
+		bad_t = !serial_reader_finish(&br);
+		ok[len - 1] |= 0x80;
+		serial_reader_init(&br, ok, len);
+		serial_get_gauss(&br, a, SIGMA_C);
+		bad_p = !serial_reader_finish(&br);
 		nmod_poly_clear(a[0]);
 		nmod_poly_clear(a[1]);
+		nmod_poly_clear(t);
 		TEST_ASSERT(bad_u && bad_g && bad_e && good, end);
+		TEST_ASSERT(exact && bad_t && bad_p, end);
 	} TEST_END;
 
 	TEST_ONCE("proof survives serialisation, and measures what it should") {
