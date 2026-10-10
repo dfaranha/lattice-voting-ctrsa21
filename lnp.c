@@ -2675,6 +2675,9 @@ static void test_range(void) {
 }
 
 int main(int argc, char *argv[]) {
+	/* Unbuffered, so that a binary that dies still shows which test it
+	 * was in: a crash used to take the buffered output with it. */
+	setvbuf(stdout, NULL, _IONBF, 0);
 	commit_setup();
 
 	if (phase_selected(argc, argv, "test")) {
