@@ -407,6 +407,32 @@ void vericrypt_sample_gauss_crt(fmpz_mod_poly_t r[2], fmpz_mod_ctx_t *ctx) {
 /* Attempts the prover is made to reject regardless of their norm. A natural
  * rejection is rare, so this is how the test reaches the retry path. */
 static int forced_rejections = 0;
+
+/* When positive, the prover behaves as a malicious voter: its encryption
+ * randomness is uniform in [-ballot_R, ballot_R] instead of ternary, and it
+ * skips the rejection sampling of step 8, keeping only the tail bound the
+ * verifier checks. */
+static long ballot_R = 0;
+
+static void ballot_sample_crt(qcrt_poly_t r, fmpz_mod_ctx_t ctx) {
+	fmpz_mod_poly_t t;
+	fmpz_t c;
+
+	fmpz_mod_poly_init(t, ctx);
+	fmpz_init(c);
+	for (int i = 0; i < DEGREE; i++) {
+		uint64_t b;
+
+		randombytes((unsigned char *)&b, sizeof(b));
+		fmpz_set_si(c, (long) (b % (2 * ballot_R + 1)) - ballot_R);
+		fmpz_mod_poly_set_coeff_fmpz(t, i, c, ctx);
+	}
+	for (int k = 0; k < NCRT; k++) {
+		qcrt_poly_reduce(r[k], t, k, ctx);
+	}
+	fmpz_clear(c);
+	fmpz_mod_poly_clear(t, ctx);
+}
 #endif
 
 int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
@@ -457,8 +483,19 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 		for (int j = 0; j < DIM; j++) {
 			encrypt_sample_short_crt(s_r[i][j], *ctx_q);
 			encrypt_sample_short_crt(s_e[i][j], *ctx_q);
+#ifdef MAIN
+			if (ballot_R > 0) {
+				ballot_sample_crt(s_r[i][j], *ctx_q);
+				ballot_sample_crt(s_e[i][j], *ctx_q);
+			}
+#endif
 		}
 		encrypt_sample_short_crt(s_e_[i], *ctx_q);
+#ifdef MAIN
+		if (ballot_R > 0) {
+			ballot_sample_crt(s_e_[i], *ctx_q);
+		}
+#endif
 	}
 
 	for (int i = 0; i < VECTOR; i++) {
@@ -521,6 +558,9 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 		if (forced_rejections > 0) {
 			forced_rejections--;
 			result = 0;
+		}
+		if (ballot_R > 0) {
+			result = vericrypt_test_norm(out);
 		}
 #endif
 	}
@@ -725,6 +765,28 @@ static void test(flint_rand_t rand) {
 		encrypt_poly_mulmod(u, u, c, *encrypt_modulus_ctx());
 
 		TEST_ASSERT(fmpz_mod_poly_equal(u, v, *encrypt_modulus_ctx()) == 1, end);
+	} TEST_END;
+
+	/* A malicious voter can encrypt with randomness far larger than ternary
+	 * and still pass verification, which bounds it only through the response.
+	 * Decryption cannot recover such a ballot; what it must not do is return
+	 * a wrong message for it. R = 12000 lies inside the window where the proof
+	 * verifies and decryption fails, on every parameter set: see README.md. */
+	TEST_ONCE("a ballot with oversized randomness is refused, not misdecrypted") {
+		int verified, decrypted;
+
+		fmpz_mod_poly_zero(u, *encrypt_modulus_ctx());
+		for (int i = 0; i < VECTOR; i++) {
+			encrypt_poly_mulmod(tmp, t[i], m[i], *encrypt_modulus_ctx());
+			fmpz_mod_poly_add(u, u, tmp, *encrypt_modulus_ctx());
+		}
+		ballot_R = 12000;
+		vericrypt_doit(&cipher, t, u, m, &pk, rand);
+		ballot_R = 0;
+		verified = vericrypt_verify(&cipher, t, u, &pk);
+		decrypted = vericrypt_undo(_m, c, &cipher, t, u, &pk, &sk);
+		TEST_ASSERT(verified == 1, end);
+		TEST_ASSERT(decrypted == 0, end);
 	} TEST_END;
 
   end:
