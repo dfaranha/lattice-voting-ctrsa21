@@ -1,3 +1,5 @@
+#include <math.h>
+
 #include "param.h"
 #include "commit.h"
 #include "test.h"
@@ -29,6 +31,88 @@ typedef struct _veritext_t {
 
 /* Guesses of c' before decryption gives up on a ciphertext. */
 #define VERICRYPT_DEC_TRIES 100
+
+/* Accumulate <z, s> and ||s||^2 over the centred coefficients of z and of
+ * s = z - y, for polynomials modulo n. */
+static void rej_accumulate(int64_t *dot, int64_t *norm, fmpz_mod_poly_t z,
+		fmpz_mod_poly_t y, fmpz_t n, fmpz_mod_ctx_t ctx) {
+	fmpz_t a, b, half;
+
+	fmpz_init(a);
+	fmpz_init(b);
+	fmpz_init(half);
+	fmpz_fdiv_q_ui(half, n, 2);
+	for (int i = 0; i < DEGREE; i++) {
+		fmpz_mod_poly_get_coeff_fmpz(a, z, i, ctx);
+		fmpz_mod_poly_get_coeff_fmpz(b, y, i, ctx);
+		fmpz_sub(b, a, b);
+		fmpz_mod(b, b, n);
+		if (fmpz_cmp(a, half) > 0) {
+			fmpz_sub(a, a, n);
+		}
+		if (fmpz_cmp(b, half) > 0) {
+			fmpz_sub(b, b, n);
+		}
+		*dot += fmpz_get_si(a) * fmpz_get_si(b);
+		*norm += fmpz_get_si(b) * fmpz_get_si(b);
+	}
+	fmpz_clear(a);
+	fmpz_clear(b);
+	fmpz_clear(half);
+}
+
+/* A uniform double in [0, 1), from the operating system. */
+static double rej_uniform(void) {
+	uint64_t bits;
+
+	randombytes((unsigned char *)&bits, sizeof(bits));
+	return (double)(bits >> 11) * 0x1.0p-53;
+}
+
+/**
+ * Rejection sampling for the response z = s + y, with s = [r e e' mu] c.
+ *
+ * Accepts with probability min(1, D_sigma(z) / (3 D_{s,sigma}(z))), which is
+ * exp((-2 <z, s> + ||s||^2) / (2 sigma_E^2)) / 3, as step 8 of the paper's
+ * encryption algorithm prescribes. Without it the response is s + y as it
+ * stands, which is centred on s and so leaks it; the tail check that follows
+ * bounds z but does nothing to hide s.
+ *
+ * @return 1 if the response is to be rejected, 0 if it is accepted.
+ */
+static int vericrypt_rej_sampling(veritext_t *out,
+		qcrt_poly_t y_r[VECTOR][DIM], qcrt_poly_t y_e[VECTOR][DIM],
+		qcrt_poly_t y_e_[VECTOR], fmpz_mod_poly_t y_mu[VECTOR]) {
+	fmpz_mod_ctx_t *ctx_p = encrypt_modulus_ctx();
+	fmpz_mod_ctx_t *ctx_q = encrypt_large_modulus_ctx();
+	fmpz_mod_poly_t z, y;
+	int64_t dot = 0, norm = 0;
+	double r;
+
+	fmpz_mod_poly_init(z, *ctx_q);
+	fmpz_mod_poly_init(y, *ctx_q);
+	for (int i = 0; i < VECTOR; i++) {
+		for (int j = 0; j < DIM; j++) {
+			qcrt_poly_rec(z, out->r[i][j]);
+			qcrt_poly_rec(y, y_r[i][j]);
+			rej_accumulate(&dot, &norm, z, y, *encrypt_large_modulus(), *ctx_q);
+			qcrt_poly_rec(z, out->e[i][j]);
+			qcrt_poly_rec(y, y_e[i][j]);
+			rej_accumulate(&dot, &norm, z, y, *encrypt_large_modulus(), *ctx_q);
+		}
+		qcrt_poly_rec(z, out->e_[i]);
+		qcrt_poly_rec(y, y_e_[i]);
+		rej_accumulate(&dot, &norm, z, y, *encrypt_large_modulus(), *ctx_q);
+		rej_accumulate(&dot, &norm, out->u[i], y_mu[i], *encrypt_modulus(),
+				*ctx_p);
+	}
+	fmpz_mod_poly_clear(z, *ctx_q);
+	fmpz_mod_poly_clear(y, *ctx_q);
+
+	r = (-2.0 * (double) dot + (double) norm)
+			/ (2.0 * (double) SIGMA_E * SIGMA_E);
+	return rej_uniform() > exp(r) / 3.0;
+}
 
 static int vericrypt_test_norm(veritext_t *out) {
 	int result;
@@ -436,7 +520,10 @@ int vericrypt_doit(veritext_t *out, fmpz_mod_poly_t t[VECTOR],
 			fmpz_mod_poly_add(out->u[i], out->u[i], y_mu[i], *ctx_p);
 		}
 
-		result = vericrypt_test_norm(out);
+		/* Steps 8 and 9 of the paper: rejection sampling, then the tail
+		 * bound. Only the second used to be here. */
+		result = !vericrypt_rej_sampling(out, y_r, y_e, y_e_, y_mu)
+				&& vericrypt_test_norm(out);
 #ifdef MAIN
 		if (forced_rejections > 0) {
 			forced_rejections--;
