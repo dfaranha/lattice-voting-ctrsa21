@@ -226,9 +226,10 @@ costs.
 **These are the "after B5" figures, at `DEGREE = 1024`, and none of them is
 current.** The binding row was computed with the masks at `SIGMA_C`, and since
 `d3491d0` they are at `SIGMA_B`; section 5c has the recomputation, 128.8, not
-162.1. The degree change of section 5d then moved all three. As built now,
-binding is 327.0, hiding 137.6 and encryption 316.2, so hiding sets the level;
-section 5g has the derivation.
+162.1. The degree change of section 5d then moved all three, and binding has
+since been recomputed at the bound extraction needs rather than the paper's
+(section 5g). As built now, binding is 256.1, hiding 137.6 and encryption
+316.2, so hiding sets the level.
 
 ### Two latent bugs the modulus change exposed
 
@@ -555,8 +556,12 @@ dimension does too, and the dimension wins comfortably:
 | 1024 | 128.8 | 117.1 | 100.4 |
 | 2048 | 303.1 | 278.6 | 242.9 |
 
-Section 5g has the same table for the construction as it is now: 140.2 and
-108.9 at `DEGREE = 1024`, 327.0 and 261.3 at 2048, for 25 and 1000 messages.
+Section 5g has the same table for the construction as it is now: 106.6 and
+84.1 at `DEGREE = 1024`, 256.1 and 207.9 at 2048, for 25 and 1000 messages,
+at the bound extraction needs. (The table above, and the 140.2, 108.9, 327.0
+and 261.3 this paragraph used to quote, are at the paper's bound, which is
+too small; at the correct one `DEGREE = 1024` misses 128 bits even at 25
+messages.)
 
 The same near-doubling appears between Dilithium2 and Dilithium5, at 1024 and
 2048 MSIS rows and 123 and 265 bits, which is one of the points this estimator
@@ -812,7 +817,8 @@ What depends on them:
 
 | check | value |
 | --- | --- |
-| MSIS binding, `beta = 16 SIGMA_B sqrt(nu N)` | `2^28.92` -> `2^29.76`, 352.2 -> **327.0** core-SVP, 370.4 -> 346.2 MATZOV |
+| MSIS binding at the paper's `beta = 16 SIGMA_B sqrt(nu N)` | `2^28.92` -> `2^29.76`, 352.2 -> 327.0 core-SVP, 370.4 -> 346.2 MATZOV |
+| MSIS binding at `beta = 16 nu SIGMA_B sqrt(k N)`, what extraction needs | `2^32.64`, **256.1** core-SVP, 278.0 MATZOV |
 | verifier bound `4 N SIGMA_B^2` | `7.2 * 10^14`, inside `2^64` |
 | `commit_open` bound `16 N SIGMA_C^2` | `3.0 * 10^13`, inside `2^64` |
 | `SIGMA_S` window under Lemma 1 | `[91.2, 5792]`, extracted `16654` against `sqrt(p)` = 1048576 |
@@ -820,8 +826,11 @@ What depends on them:
 | Rice parameter for `SIGMA_B` | `k = 18` either way |
 | proof, per message (measured) | 132.9 KB -> 135.1 KB; 134.6 KB since `b3da1c6` stopped sending the last `s_i`; 132.8 KB at the 40-bit modulus |
 
-The control, `SIGMA_B` = 165340, reproduces 352.2 and 370.4 exactly. Binding
-at 327 is still far above hiding, so the security level, the least of
+The control, `SIGMA_B` = 165340, reproduces 352.2 and 370.4 exactly. The
+second binding row is the bound SOUNDNESS.md, Section 5, needs: a challenge
+difference stretches a vector by up to its `l1` norm, not its `l2` norm, and
+the vector has `k = WIDTH` elements, which together make it `sqrt(nu k)`, or
+7.3, times the paper's. Binding at 256.1 is still far above hiding, so the security level, the least of
 hiding, binding and encryption, stays where it was, set by MLWE hiding at
 rank 1: 137.6 bits core-SVP, with encryption at 316.2, both with the secrets
 distributed as the code samples them. The proof grows by 0.84 bits a Gaussian
@@ -830,14 +839,15 @@ coefficient, `log2` of the widening, from 19.50 to 20.26 bits measured.
 The batch size still feeds the binding bound as section 5c found, now through
 `K = 11 MSGS + 10`, with `SIGMA_C` and `SIGMA_B` set as above at each degree.
 Recomputed at each point as `master`'s `estimates.sage` computes the binding
-column, with `lattice-estimator` at `53da598`:
+column, at `16 nu SIGMA_B sqrt(k N)`, with `lattice-estimator` at `53da598`:
 
 | `DEGREE` | `MSGS` 1 | `MSGS` 25 | `MSGS` 100 | `MSGS` 1000 |
 | --- | --- | --- | --- | --- |
-| 1024 | 169.4 / 194.3 | 140.2 / 166.3 | 127.6 / 154.4 | 108.9 / 136.5 |
-| 2048 | 387.5 / 404.4 | **327.0** / 346.2 | 300.2 / 320.4 | 261.3 / 283.1 |
+| 1024 | 127.3 / 154.1 | 106.6 / 134.3 | 97.5 / 125.7 | 84.1 / 112.9 |
+| 2048 | 299.9 / 320.1 | **256.1** / 278.0 | 236.8 / 259.5 | 207.9 / 231.8 |
 
-core-SVP / MATZOV. The 1024 row is at `WIDTH = 3`, where hiding is about 52
+core-SVP / MATZOV. At the paper's `16 SIGMA_B sqrt(nu N)` the core-SVP row
+read 169.4, 140.2, 127.6, 108.9 and 387.5, 327.0, 300.2, 261.3. The 1024 row is at `WIDTH = 3`, where hiding is about 52
 bits, so it says what binding would be, not that the degree could come down.
 
 ## 6. What this changes about the decision

@@ -123,7 +123,8 @@ give, writing `delta = d - d'` and `zbar = z - z'` etc.,
           = delta * (alpha * x.c2 + gamma * p.c2 - _x.c2 + beta)
 ```
 
-with `||zbar|| <= 4 sqrt(n) sigma_C` and `||zbar_sigma|| <= 4 sqrt(n) sigma_S
+with `||zbar[i]|| <= 4 sqrt(n) sigma_C` for each of the `WIDTH` elements of
+`zbar`, so `||zbar|| <= 4 sqrt(WIDTH n) sigma_C`, and `||zbar_sigma|| <= 4 sqrt(n) sigma_S
 = 32768`.
 
 So `(mbar_x, zbar, delta)` with `mbar_x := delta * x.c2 - <b2, zbar>` is a
@@ -149,9 +150,16 @@ relaxed openings of the same `c`, then `delta^(-1) mbar = delta'^(-1) mbar'`.
 
 *Proof.* From `delta c1 = B1 zbar` and `delta' c1 = B1 zbar'`, multiply the
 first by `delta'`, the second by `delta`, and subtract:
-`B1 (delta' zbar - delta zbar') = 0`. The vector `delta' zbar - delta zbar'` has
-norm at most `2 ||delta||_1 * 4 sqrt(n) sigma_C`, so under MSIS at that bound it
-is zero, i.e. `delta' zbar = delta zbar'`. Then
+`B1 (delta' zbar - delta zbar') = 0`. Multiplying by a ring element `a`
+stretches an `l2` norm by at most `||a||_1`, so the vector
+`delta' zbar - delta zbar'` has norm at most
+`2 * 2 NONZERO * 4 sqrt(WIDTH n) sigma_C = 16 NONZERO sigma_C sqrt(WIDTH n)`,
+and under MSIS at that bound it is zero, i.e. `delta' zbar = delta zbar'`.
+(The paper's `16 sigma_C sqrt(nu n)` is smaller by `sqrt(NONZERO WIDTH)` and
+does not bound this vector: it charges a challenge its `l2` norm, which does
+not bound the stretch of a product -- `(1 + x)` times the all-ones element
+already exceeds it -- and charges `zbar` the norm of one element rather than
+of all `WIDTH`.) Then
 
 ```
 delta' delta c2 = delta' <b2,zbar> + delta' mbar = delta <b2,zbar'> + delta mbar' ,
@@ -308,15 +316,16 @@ need to be extended accordingly.
    bookkeeping of the paper's Theorem 5 carries over to effective messages. The
    argument for why it should is given, but the knowledge-error accounting has
    not been redone.
-3. **MSIS at the bound Section 5 uses is weaker than the one quoted.**
-   Section 5 appeals to MSIS at `2 ||delta||_1 * 4 sqrt(n) sigma`, with
-   `||delta||_1 <= 2 NONZERO`. On this branch the masks the extractor sees are
-   at `SIGMA_B = 295465`, and at `NONZERO = 18`, `DEGREE = 2048` that bound is
-   `2^31.84`, which the lattice-estimator (53da598, core-SVP) puts at
-   **273.6 bits**, against the 327.0 quoted at the paper's
-   `16 sigma sqrt(nu N)`, a factor `sqrt(NONZERO)` smaller. Which of the two the
-   extraction needs has not been settled; at either, binding is far above the
-   hiding that sets this branch's level.
+3. **MSIS at the bound Section 5 needs is weaker than the paper's.**
+   Section 5 appeals to MSIS at `16 NONZERO sigma sqrt(WIDTH n)`. On this
+   branch the masks the extractor sees are at `SIGMA_B = 295465`, and at
+   `NONZERO = 18`, `WIDTH = 3`, `DEGREE = 2048` that bound is `2^32.64`,
+   which the lattice-estimator (53da598, core-SVP) puts at **256.1 bits**
+   (278.0 MATZOV). The paper's `16 sigma sqrt(nu N)` would give 327.0, but
+   Section 5 explains why it does not bound the vector extraction builds;
+   earlier versions of this note left the choice open, and quoted 273.6 at a
+   bound that had the `l1` norm but not `sqrt(WIDTH)`. Binding is far above
+   the hiding that sets this branch's level either way.
 4. **Zero-knowledge sketched only**, as noted in Section 9.
 5. **The batching aggregations.** The implementation proves `is_bin` for
    every message at once, aggregating the constant-coefficient and range
