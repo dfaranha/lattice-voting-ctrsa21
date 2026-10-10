@@ -64,6 +64,12 @@ typedef struct _bitreader_t {
 void serial_writer_init(bitwriter_t *w, uint8_t *buf, size_t cap);
 void serial_reader_init(bitreader_t *r, const uint8_t *buf, size_t cap);
 
+/* Flags a reader that did not end exactly where a writer would have: with
+ * bytes of its buffer left over, or with a padding bit of the last byte set.
+ * Either gives one proof a second byte string. Returns 1 if the reader read
+ * its whole buffer and nothing it read was flagged. */
+int serial_reader_finish(bitreader_t *r);
+
 /**
  * Bits needed per coefficient. The Gaussian one is the width a flat encoding
  * would take, which nothing writes at any more; it is what the saving of the
