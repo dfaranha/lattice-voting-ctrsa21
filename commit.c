@@ -20,10 +20,10 @@
 /* Private definitions                                                        */
 /*============================================================================*/
 
-/* The first square root of -1. */
-#define	P0		816738466
-/* The second square root of -1. */
-#define P1		1737064531
+/* The first square root of -1 modulo MODP. */
+#define	P0		11860615386
+/* The second square root of -1, MODP - P0. */
+#define P1		125578338115
 
 /* Polynomial defining the cyclotomic ring. */
 static nmod_poly_t cyclo_poly;
@@ -263,8 +263,8 @@ int commit_norm2_leq(nmod_poly_t r, uint64_t bound) {
 		 * coefficient below it can still square past 2^64 and wrap, which
 		 * would let an oversized response pass this check. Dividing decides
 		 * the same question without overflowing. Wrapping needs a centred
-		 * coefficient of 2^32, so at the current MODP this is unreachable,
-		 * with about one bit to spare. */
+		 * coefficient of 2^32, which at the current MODP, about 2^37, is
+		 * reachable: this check is what stops it. */
 		if (coeff != 0 && (uint64_t) coeff > bound / (uint64_t) coeff) {
 			return 0;
 		}
@@ -292,16 +292,24 @@ void commit_keyinit(commitkey_t *key) {
 	}
 }
 
-static_assert(MODP < ((uint64_t) 1 << 32),
-		"commit_hash_poly absorbs coefficients as four bytes");
+/* Bytes a coefficient needs: MODP - 1 fits in this many, five at the 2^37
+ * modulus here. Below 2^32 they are the four bytes of a word, so the digests
+ * of a branch whose modulus fits a word do not depend on this generality. */
+#define HASH_COEFF_BYTES												\
+	((MODP - 1) < (1ULL << 32) ? 4 : (MODP - 1) < (1ULL << 40) ? 5 :	\
+	(MODP - 1) < (1ULL << 48) ? 6 : (MODP - 1) < (1ULL << 56) ? 7 : 8)
 
 static void hash_coeffs(SHA256Context *sha, nmod_poly_t p, int len) {
-	uint32_t buf[DEGREE];
+	uint8_t buf[DEGREE * 8];
 
 	for (int i = 0; i < len; i++) {
-		buf[i] = (uint32_t) nmod_poly_get_coeff_ui(p, i);
+		ulong c = nmod_poly_get_coeff_ui(p, i);
+
+		for (int b = 0; b < HASH_COEFF_BYTES; b++) {
+			buf[i * HASH_COEFF_BYTES + b] = (uint8_t) (c >> (8 * b));
+		}
 	}
-	SHA256Input(sha, (const uint8_t *)buf, len * sizeof(uint32_t));
+	SHA256Input(sha, buf, len * HASH_COEFF_BYTES);
 }
 
 void commit_hash_poly(SHA256Context *sha, nmod_poly_t p) {

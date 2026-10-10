@@ -157,7 +157,7 @@ void commit_keygen(commitkey_t *key);
  *
  * The coefficients are absorbed one by one up to DEGREE, so that the digest
  * depends only on the value of the polynomial and not on the capacity FLINT
- * happens to have allocated. Each takes four bytes, which MODP < 2^32 allows.
+ * happens to have allocated. Each takes the fewest bytes that hold MODP - 1.
  *
  * @param[in,out] sha		- the hash context.
  * @param[in] p				- the polynomial to absorb.

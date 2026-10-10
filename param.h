@@ -34,9 +34,13 @@
 /* Modulus p defining the cyclotomic ring for the commitment scheme. Prime and
  * congruent to 5 mod 8, so that (x^DEGREE + 1) splits into exactly NCRT = 2
  * irreducible factors as Lemma 1 requires for delta = 2. Sized so that the
- * MSIS instance the binding property reduces to stays at 128 bits; see
- * PARAMS.md. Changing it requires new CRT constants P0, P1 in commit.c. */
-#define MODP 	2553802997
+ * MSIS instance the binding property reduces to clears 128 bits even at the
+ * conservative bound 2 ||delta||_1 * 4 sqrt(N) SIGMA_C of SOUNDNESS.md, Section
+ * 5: 134.3 there, and 168.2 at the paper's 16 SIGMA_C sqrt(nu N); see
+ * PARAMS.md. It was 2553802997, about 2^31.25, which gave 105.4 at the
+ * conservative bound. Changing it requires new CRT constants P0, P1 in
+ * commit.c, and a q in encrypt.c large enough for decryption. */
+#define MODP 	137438953501
 /* Degree of the polynomial defining the cyclotomic ring for the commitment scheme. */
 #ifndef DEGREE
 #define DEGREE 	1024
