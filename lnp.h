@@ -43,8 +43,8 @@
 
 /* Ratio between the projection mask and the value it hides. Lower means a
  * tighter certified bound but more rejection-sampling repetitions; 9 gives
- * about 3.8 and leaves the certified bound a factor 1.78 inside the ceiling
- * that no-wraparound imposes. */
+ * about 3.8 and leaves the certified bound a factor 1.26 inside the ceiling
+ * that no-wraparound imposes at DEGREE 2048, 1.78 at 1024. */
 #define TAU_PROJ 	9
 
 /* Slot holding the witness. */
@@ -60,7 +60,7 @@
 /* Rank of the MLWE instance that hides the commitment, which is the number of
  * randomness components beyond those consumed by the Ajtai part and by the
  * message slots. Rank 1 is about 52 bits at DEGREE 1024, which is why this was
- * 2, and about 140 at 2048, which is why it is 1. See LNP-PARAMS.md. */
+ * 2, and about 138 at 2048, which is why it is 1. See LNP-PARAMS.md. */
 #define LNP_RANK 	1
 
 /* Width of the LNP commitment randomness. Unlike commit.h, which carries a

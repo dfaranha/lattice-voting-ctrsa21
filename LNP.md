@@ -26,7 +26,7 @@ coefficient-wise, not by a norm check, and `is_bin` is that proof.
 
 ## 2. The ring, and the one identity everything rests on
 
-`R_p = Z_p[X]/(X^n + 1)` with `n = DEGREE = 1024` and `p = MODP` chosen so that
+`R_p = Z_p[X]/(X^n + 1)` with `n = DEGREE = 2048` and `p = MODP` chosen so that
 `p = 5 mod 8`. That congruence makes `X^n + 1` split into exactly two
 irreducible factors, `X^(n/2) + P0` and `X^(n/2) - P0`. Everything in the code
 carries elements in this two-component CRT representation, `pcrt_poly_t`,
@@ -71,8 +71,9 @@ lnpcom_t:   c1[i] = <B1[i], r>
 unit vector `e_{HEIGHT+i}` plus a random tail on the last `LNP_RANK`
 coordinates, so each slot needs its own randomness component on top of the
 Ajtai part. Binding is MSIS on `[B1; b2]`; hiding is MLWE of rank `LNP_RANK`
-in the trailing components, which is why `LNP_RANK` is 2: rank 1 does not
-reach the target. `LNP-PARAMS.md` has the figures.
+in the trailing components, which is why `LNP_RANK` was 2 at `DEGREE = 1024`,
+where rank 1 does not reach the target, and is 1 at 2048, where it does.
+`LNP-PARAMS.md` has the figures.
 
 The slots:
 
@@ -263,9 +264,11 @@ challenge.
 
 **One rejection test.** One challenge means one rejection test, over the
 concatenation of every response; testing each message separately would multiply
-the abort probabilities. The masked term is therefore `sqrt(MSGS)` times longer
-than for a single message, so the masks widen from `SIGMA_C` to
-`SIGMA_B = SIGMA_C sqrt(MSGS)`, and the verifier's norm bounds widen with them.
+the abort probabilities. The masked term spans every opening in the batch,
+`K = MSGS (2 WIDTH + LNP_WIDTH) + MASK_WIDTH + GARB_WIDTH` ring elements against
+`WIDTH` for a single opening, so the masks widen from `SIGMA_C` to
+`SIGMA_B = SIGMA_C sqrt(K / WIDTH)`, and the verifier's norm bounds widen with
+them.
 
 **One set of garbage terms.** The quadratic proof's two garbage terms are also
 paid for once. Weighting message `l` by a batching challenge `rho_l` and
@@ -320,8 +323,9 @@ zero constant coefficient and solve for `z_mask`. `lnp_batch_check` enforces
 both.
 
 *`MSGS` became a security parameter.* Since `SIGMA_B` scales with
-`sqrt(MSGS)`, so does the extractable opening, and MSIS binding falls with the
-batch size: 162 bits core-SVP at one message, 129 at 25, 100 at 1000.
+`sqrt(K)`, and `K` with `MSGS`, so does the extractable opening, and MSIS
+binding falls with the batch size: 387 bits core-SVP at one message, 327 at
+25, 261 at 1000.
 
 There is no way around this by blocking, because `MSGS` is the anonymity set
 and not merely a batch size: the proof says the output list is a permutation
@@ -329,10 +333,10 @@ of the input list, so shuffling in blocks would prove only that each output
 block permutes its own input block, and would reveal the partition. The way to
 shuffle more messages at a given security level is a larger ring, and that is
 why `DEGREE` is 2048 rather than 1024: the MSIS lattice dimension grows faster
-than the bound does, so binding is 303 bits at `MSGS = 25` and still 243 at
-1000, where at 1024 the same two were 129 and 100. It costs a factor of two in
-the proof. `shuffle.c` asserts both halves of this at compile time, and
-sections 5c and 5d of `LNP-PARAMS.md` have the tables.
+than the bound does, so binding is 327 bits at `MSGS = 25` and still 261 at
+1000, where at 1024 the same two would be 140 and 109. It costs a factor of two
+in the proof. `shuffle.c` asserts both halves of this at compile time, and
+sections 5c, 5d and 5g of `LNP-PARAMS.md` have the tables.
 
 ## 7. The orderings
 
@@ -348,8 +352,10 @@ Most of the soundness is carried by what is fixed before what. In order:
    message's commitment is fixed before the weights applied to it.
 5. The masks are drawn, the garbage terms are formed with those weights and
    committed, and the aggregated values `h_j`, the batched term `T` and the
-   first messages are hashed by `batch_hash` into the challenge `d`. So the
-   garbage is fixed after `rho` and before `d`.
+   first messages are hashed by `batch_hash` into the challenge `d`, together
+   with the digests of all four keys, the mask and garbage keys included:
+   those are public parameters, generated once, not the prover's to choose.
+   So the garbage is fixed after `rho` and before `d`.
 6. Responses are computed, one rejection test is run over all of them, and the
    verifier checks norms, the Ajtai equations of all three commitments, the
    batched product identity, the constant coefficients and the batch rows.
@@ -388,9 +394,9 @@ response.
 | `MODP` | `2^40 + 141` | set by the range proof's no-wraparound condition |
 | `LNP_LAMBDA` | 4 | `p^-4` is about `2^-160` |
 | `SLOTS` | 3 | witness, product, projection mask |
-| `LNP_RANK` | 2 | rank 1 hiding is only 73 bits |
+| `LNP_RANK` | 1 | rank 1 hiding is 138 bits at this degree, 52 at 1024 |
 | `PROJ` | 256 | the projection lemma's requirement for `2^-128` |
-| `TAU_PROJ` | 9 | about 3.8 repetitions, bound 1.78x inside the ceiling |
+| `TAU_PROJ` | 9 | about 3.8 repetitions, bound 1.26x inside the ceiling |
 | `SIGMA_B` | `SIGMA_C sqrt(K / WIDTH)`, `K = 285` | one rejection test spans every opening of the batch |
 | `SIGMA_P` | `TAU_PROJ sqrt(PROJ N / 2)` | and its certified bound grows with it |
 

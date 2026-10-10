@@ -3,9 +3,14 @@
 ## Status
 
 This is a feasibility assessment, not a commitment to build. It estimates what
-it would take to replace the relaxed norm proof currently on this branch with
+it would take to replace the relaxed norm proof then on this branch with
 the `is_bin(sigma_i)` sub-proof that Protocol 1 of ePrint 2025/658 assumes,
 implemented in the style of Lyubashevsky, Nguyen and Plancon (CRYPTO 2022).
+
+It has since been built by Track B, and the relaxed proof is gone from this
+branch. [LNP.md](LNP.md) describes what was built and
+[LNP-PARAMS.md](LNP-PARAMS.md) what it cost; this document is kept as the
+plan it was.
 
 Two facts were checked against this code base rather than assumed; they are
 marked **[checked]** below.
@@ -126,9 +131,9 @@ been sunk.
 
 ## 7. The decision this is really about
 
-The relaxed norm proof on this branch already closes the soundness gap, under a
-restatement of Lemma 5 that is drafted in [SOUNDNESS.md](SOUNDNESS.md) and has
-not been reviewed. Implementing `is_bin` buys fidelity to Protocol 1 as
+The relaxed norm proof then on this branch already closed the soundness gap,
+under a restatement of Lemma 5 that is drafted in [SOUNDNESS.md](SOUNDNESS.md)
+and has not been reviewed. Implementing `is_bin` buys fidelity to Protocol 1 as
 published, and removes the need for anyone to check that restatement.
 
 Whether that is worth 1500-2000 lines of new proof-system code is a judgement

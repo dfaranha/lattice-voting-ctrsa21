@@ -86,11 +86,12 @@ static void fold_mod(nmod_poly_t c, const nmod_poly_t a, slong m, ulong r) {
  * @return the computed norm.
  */
 static int test_norm(nmod_poly_t r) {
-	/* The width the masks are sampled at, and so the one an extracted opening
-	 * is bounded by. The binding estimates use the same SIGMA_C, through the
-	 * extractable bound 16 * SIGMA_C * sqrt(nu * N). The paper's lower bound
-	 * 11 * nu * beta * sqrt(k * N) on that width, which this used to take,
-	 * accepted only openings 2.1 times shorter than extraction yields. */
+	/* The width one opening's masks need, and so the one an extracted opening
+	 * is bounded by. On this branch the masks are drawn at the wider SIGMA_B,
+	 * and the binding estimates use that, through the extractable bound
+	 * 16 * SIGMA_B * sqrt(nu * N), which covers this one. The paper's lower
+	 * bound 11 * nu * beta * sqrt(k * N) on that width, which this used to
+	 * take, accepted only openings 2.1 times shorter than extraction yields. */
 	const uint64_t sigma_sqr = (uint64_t) SIGMA_C * SIGMA_C;
 
 	/* Compare the squared norm to (4 * sigma * sqrt(N))^2 = 16 * sigma^2 * N.

@@ -202,10 +202,12 @@ and no new modulus, which is what distinguishes it from the B5 change.
 Encryption at 129.1 is the thinnest, and is what saturating `q` under 64 bits
 costs.
 
-**The binding row no longer holds.** It was computed with the masks at
-`SIGMA_C`, and since `d3491d0` they are at `SIGMA_B`. Section 5c has the
-recomputation: 128.8, not 162.1, and encryption is no longer the constraint.
-The other two rows are unaffected and stand.
+**These are the "after B5" figures, at `DEGREE = 1024`, and none of them is
+current.** The binding row was computed with the masks at `SIGMA_C`, and since
+`d3491d0` they are at `SIGMA_B`; section 5c has the recomputation, 128.8, not
+162.1. The degree change of section 5d then moved all three. As built now,
+binding is 327.0, hiding 137.6 and encryption 316.2, so hiding sets the level;
+section 5g has the derivation.
 
 ### Two latent bugs the modulus change exposed
 
@@ -259,6 +261,12 @@ than still firing by accident. `isbin = 1` is correct: the product relation
 holds, because the prover computed it honestly; what fails is that the constant
 coefficient of that product is not zero, which is `ct`. The mixed element is
 also far too large, which `range` catches independently.
+
+That was a prover made to carry on regardless. Since `09f91cc` it does not
+get this far: no projection of the mixed element passes the range proof's
+rejection test, so the prover reports that it cannot make a proof, and the
+test counts that as a rejection. The same holds for the CRT-mixed sigma row of
+section 5e.
 
 ### What it costs
 
@@ -316,14 +324,14 @@ uniform coefficient costs 41 bits and not 40. And a Gaussian element has to be
 reconstructed from its CRT components before packing, because only the
 reconstructed polynomial is short: the components of a short element are not.
 
-| | fix-pkc | `a63d9b3` | `d3491d0` | `7d2f639` | `5551374` | now |
+| | fix-pkc | `a63d9b3` | `d3491d0` | `7d2f639` | `5551374` | `e798fe1` |
 | --- | --- | --- | --- | --- | --- | --- |
 | `DEGREE` | 1024 | 1024 | 1024 | 1024 | 1024 | 2048 |
 | modulus, `WIDTH` | `2^31.86`, 3 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 | `2^40`, 4 |
 | prover, per message | 88 ms | 600 ms | 227 ms | 111 ms | 109 ms | 248 ms |
 | prover against fix-pkc | 1.00x | 6.8x | 2.6x | 1.28x | 1.11x | **2.43x** |
-| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 100.6 KB | 137.0 KB |
-| proof against fix-pkc | 1.00x | 5.2x | 3.0x | 1.9x | 1.57x | **2.14x** |
+| proof, per message | 64.0 KB | 330.1 KB | 188.8 KB | 119.9 KB | 100.6 KB | 204.3 KB |
+| proof against fix-pkc | 1.00x | 5.2x | 3.0x | 1.9x | 1.57x | **3.19x** |
 
 The ratios are the comparable quantity. Each was taken against `fix-pkc` in
 its own bracketed session, and the milliseconds come from whichever session
@@ -340,10 +348,15 @@ and every one of those openings carried its own mask, its own challenge and
 its own rejection sampling loop.
 
 The `7d2f639` column includes the mask-commitment opening added in `472edfc`,
-which costs 1.04x on its own, within the noise of these measurements. The last
-column adds the batching of the quadratic proof's garbage terms.
+which costs 1.04x on its own, within the noise of these measurements. The
+`5551374` column adds the batching of the quadratic proof's garbage terms, and
+the last is the degree change of section 5d. The proof has come down to
+134.6 KB a message since, through sections 5d to 5g and the entropy coding of
+the masked openings. `fix-pkc` has come down too, to 41.2 KB by the table in
+`master`'s README, both without first messages and with the same coding, so
+3.27x. The prover has not been measured against `fix-pkc` since `e798fe1`.
 
-Where the 100.6 KB goes now, per message:
+Where the 100.6 KB went at `5551374`, per message:
 
 | | |
 | --- | --- |
@@ -480,9 +493,11 @@ per-message one at `LNP_WIDTH` 8 and the mask one at `MASK_WIDTH` 7.
 
 ### MSGS became a security parameter
 
-`SIGMA_B` is `SIGMA_C sqrt(MSGS)`, because the term one rejection test has to
-mask is `sqrt(MSGS)` times longer than a single message's. So the batch size
-now feeds straight into the binding bound, which it did not before:
+`SIGMA_B` was then `SIGMA_C sqrt(MSGS)`, on the reasoning that the term one
+rejection test has to mask is `sqrt(MSGS)` times longer than a single
+message's. (It is longer still; section 5g has the count and the width now.)
+So the batch size now feeds straight into the binding bound, which it did not
+before:
 
 | `MSGS` | `SIGMA_B` | `beta` | core-SVP | MATZOV |
 | --- | --- | --- | --- | --- |
@@ -511,6 +526,9 @@ dimension does too, and the dimension wins comfortably:
 | --- | --- | --- | --- |
 | 1024 | 128.8 | 117.1 | 100.4 |
 | 2048 | 303.1 | 278.6 | 242.9 |
+
+Section 5g has the same table for the construction as it is now: 140.2 and
+108.9 at `DEGREE = 1024`, 327.0 and 261.3 at 2048, for 25 and 1000 messages.
 
 The same near-doubling appears between Dilithium2 and Dilithium5, at 1024 and
 2048 MSIS rows and 123 and 265 bits, which is one of the points this estimator
@@ -543,7 +561,7 @@ recorded numbers. The difference is the attacks the restricted set leaves out,
 not a change in the parameters, so the lower recorded figures are the ones to
 quote.
 
-So the scheme as it stands is **128.8 bits core-SVP**, set by MSIS binding,
+So the scheme as it then stood was **128.8 bits core-SVP**, set by MSIS binding,
 with encryption just behind it at 129.1. Before batching the same two were
 162.1 and 129.1 and encryption was the constraint; MSIS binding has overtaken
 it. The paper's "at least 100 bits" is still true at `MSGS = 25`, and it is
@@ -772,13 +790,27 @@ What depends on them:
 | `SIGMA_S` window under Lemma 1 | `[91.2, 5792]`, extracted `16654` against `sqrt(p)` = 1048576 |
 | JL certified bound against `sqrt(p/2)` | unchanged at 1.26x, `SIGMA_P` does not depend on the challenge |
 | Rice parameter for `SIGMA_B` | `k = 18` either way |
-| proof, per message (measured) | 132.9 KB -> 135.1 KB |
+| proof, per message (measured) | 132.9 KB -> 135.1 KB; 134.6 KB since `b3da1c6` stopped sending the last `s_i` |
 
 The control, `SIGMA_B` = 165340, reproduces 352.2 and 370.4 exactly. Binding
 at 327 is still far above hiding, so the security level, the least of
 hiding, binding and encryption, stays where it was, set by MLWE hiding at
-rank 1. The proof grows by 0.84 bits a Gaussian coefficient, `log2` of the
-widening, from 19.50 to 20.26 bits measured.
+rank 1: 137.6 bits core-SVP, with encryption at 316.2, both with the secrets
+distributed as the code samples them. The proof grows by 0.84 bits a Gaussian
+coefficient, `log2` of the widening, from 19.50 to 20.26 bits measured.
+
+The batch size still feeds the binding bound as section 5c found, now through
+`K = 11 MSGS + 10`, with `SIGMA_C` and `SIGMA_B` set as above at each degree.
+Recomputed at each point as `master`'s `estimates.sage` computes the binding
+column, with `lattice-estimator` at `53da598`:
+
+| `DEGREE` | `MSGS` 1 | `MSGS` 25 | `MSGS` 100 | `MSGS` 1000 |
+| --- | --- | --- | --- | --- |
+| 1024 | 169.4 / 194.3 | 140.2 / 166.3 | 127.6 / 154.4 | 108.9 / 136.5 |
+| 2048 | 387.5 / 404.4 | **327.0** / 346.2 | 300.2 / 320.4 | 261.3 / 283.1 |
+
+core-SVP / MATZOV. The 1024 row is at `WIDTH = 3`, where hiding is about 52
+bits, so it says what binding would be, not that the degree could come down.
 
 ## 6. What this changes about the decision
 

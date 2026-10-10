@@ -31,15 +31,15 @@
  * elements, which at DEGREE 2048 is 2^163.4 even at 18, comfortably past the
  * 2^128 the knowledge error needs. Lowering it pays twice: SIGMA_C is linear
  * in NONZERO, so the masks narrow, and the extractable opening
- * 16 sigma sqrt(nu N) falls with both, taking MSIS binding from 309 to 352
- * bits. */
+ * 16 sigma sqrt(nu N) falls with both, taking MSIS binding from 287 to 327
+ * bits at the batch width SIGMA_B. */
 #define NONZERO 18
 /* The \infty-norm bound of certain elements. */
 #define BETA 	1
 /* Width k of the commitment matrix. The hiding property is MLWE of rank
  * k - n - 1, so k = 3 gives rank 1 and k = 4 rank 2. Rank 1 was not an option
- * at DEGREE 1024, where it is about 52 bits, but at 2048 it is 140 and rank 2
- * would be 343, far past what is needed. So k = 3 here. */
+ * at DEGREE 1024, where it is about 52 bits, but at 2048 it is 138 and rank 2
+ * would be 333, far past what is needed. So k = 3 here. */
 #define WIDTH 	3
 /* Height of the commitment matrix. */
 #define HEIGHT 	1

@@ -23,8 +23,9 @@
 
 /* The dimension of the encryption matrix. This is the MLWE rank of the
  * encryption scheme and is independent of the commitment width; at the larger
- * modulus that the range proof forces, rank 2 is only about 75 bits.
- * DIM = 4 would be stronger but pushes q past 64 bits. */
+ * modulus that the range proof forces, rank 2 was only about 72 bits at
+ * DEGREE 1024, where this was set. At 2048 it would be about 188, and rank 3
+ * is 316. DIM = 4 would be stronger but pushes q past 64 bits. */
 #define DIM		3
 /* The dimension of the linear relation matrix. */
 #define LAMBDA	1

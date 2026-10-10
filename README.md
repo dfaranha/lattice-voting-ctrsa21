@@ -46,9 +46,9 @@ Concretely, this changed the following:
   public coefficient `tau`.
 * Challenges are now sampled of degree below `N/2`, so that the difference of
   two distinct challenges is invertible, as the soundness argument requires.
-* The linear proof additionally masks the message committed alongside the
-  randomness, and the verifier bounds the norm of that response. This is what
-  places `sigma_i` in the set `D` that Lemma 5 requires (see below).
+* `sigma_i` has to be shown to lie in the set `D` that Lemma 5 requires. On
+  this branch that is `is_bin`, as in Protocol 1; the relaxed proof below
+  bounded its norm instead.
 * Verifier norm checks are ordinary checks rather than `assert`s, which are
   soundness checks that used to vanish entirely under `NDEBUG`, and they no
   longer overflow when handed a dishonestly large response.
@@ -61,13 +61,25 @@ each:
 | CRT-mixed list is not a permutation but passes Neff's product | the attack premise: the old identity accepts a non-permutation |
 | shuffle proof rejects the CRT-mixing attack | the Lemma 5 product catches it |
 | CRT-mixed sigma is outside D | the second-order attack premise |
-| shuffle proof rejects the CRT-mixing attack on sigma | the norm check on `sigma_i` catches it |
+| shuffle proof rejects the CRT-mixing attack on sigma | `is_bin` catches it |
 
 The two attacks are rejected by two different mechanisms, which was confirmed by
 instrumenting the verifier: the first fails the product relation, the second
-fails only the norm check on `sigma_i`.
+fails only the norm check on `sigma_i`, or on this branch the constant
+coefficient and range checks of `is_bin`. The prover here no longer gets that
+far: no projection of a CRT-mixed `sigma_i` passes the range proof, so it
+reports that it cannot make a proof ([LNP-PARAMS.md](LNP-PARAMS.md) section 5).
 
 ## Proving `sigma_i` in D by a norm bound
+
+**This branch no longer does this.** It proves `is_bin(sigma_i)` as Protocol 1
+does, with the machinery [LNP.md](LNP.md) describes, at `MODP = 2^40 + 141`
+and `DEGREE = 2048`. At `MSGS = 25` the proof is 134.6 KB a message, measured,
+and the core-SVP estimates are 327.0 bits for MSIS binding, 137.6 for MLWE
+hiding and 316.2 for MLWE encryption, a level of 137.6;
+[LNP-PARAMS.md](LNP-PARAMS.md) section 5g has the derivation. The rest of this
+section describes the relaxed proof that `is_bin` replaced, which `fix-pkc`
+carries, and its figures are that branch's except where marked.
 
 Lemma 5 requires the committed `sigma_i` to lie in a set `D` whose pairwise
 differences are invertible. Protocol 1 of the same paper discharges this with a

@@ -10,6 +10,11 @@ and Merino-Gallardo, *Efficient Verifiable Mixnets from Lattices, Revisited*
 list what is asserted here without proof and what a full write-up would still
 have to establish.
 
+On the `lnp` branch the relaxed proof has been replaced by `is_bin`, which
+puts `sigma_i` in a binary `D` as Protocol 1 does; see `LNP.md`. The figures
+below are for the parameters this argument was written at, except where
+marked as the `lnp` branch's.
+
 ## 1. The gap this closes
 
 Lemma 5 of that paper proves that

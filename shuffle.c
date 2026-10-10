@@ -32,13 +32,13 @@
  * block, and would reveal the partition. Blocking is a weaker statement, not
  * a mitigation. That is why DEGREE was raised to 2048: the MSIS lattice
  * dimension grows faster than the bound does, so at this degree binding is
- * 303 bits core-SVP at MSGS = 25, 279 at 100 and 243 at 1000, where at
- * DEGREE = 1024 the same three were 129, 117 and 100.
+ * 327 bits core-SVP at MSGS = 25, 300 at 100 and 261 at 1000, where at
+ * DEGREE = 1024 the same three would be 140, 128 and 109.
  *
  * So security is no longer what pins this at 25. SIGMA_B is, since it is sized
  * for exactly this batch, and so is the fact that nothing above 25 has been
- * run. Raising it means widening SIGMA_B to match and re-deriving; sections 5c
- * and 5d of LNP-PARAMS.md have the numbers.
+ * run. Raising it means widening SIGMA_B to match and re-deriving; sections 5c,
+ * 5d and 5g of LNP-PARAMS.md have the numbers.
  *
  * The assertions below catch the two ways of getting this wrong: widening the
  * batch without widening the mask, which breaks completeness, and widening
@@ -175,8 +175,8 @@ typedef struct _isbin_t {
  * proof's opening, and once the challenge is shared across messages the
  * rejection test has to span them too: testing each separately would multiply
  * the abort probabilities, 2^-MSGS rather than about a half. So the masks are
- * drawn at SIGMA_B, wide enough for a term sqrt(MSGS) times longer than one
- * message's.
+ * drawn at SIGMA_B, wide enough for a term sqrt(K / WIDTH) times longer than
+ * one opening's, K the ring elements of every opening in the batch.
  */
 /* Index of a message whose committed product the prover should corrupt, or -1
  * for none. The quadratic relation is proven for the batch rather than per
@@ -2038,7 +2038,7 @@ static void test(void) {
 	 * in the first CRT component, while sigma_i = g(i) in the second, so the
 	 * product of Lemma 5 balances in both components again. The resulting
 	 * sigma_0, sigma_1 are CRT-mixed, hence not short, which is exactly what
-	 * the norm check on the committed sigma_i rules out. */
+	 * the range proof on the committed sigma_i rules out. */
 	int_to_monomial(g0, 0);
 	int_to_monomial(g1, 1);
 	crt_swap(sigma[0], sigma[1], g0, g1);
