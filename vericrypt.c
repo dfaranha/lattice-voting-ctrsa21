@@ -5,6 +5,7 @@
 #include "encrypt.h"
 #include "gaussian.h"
 #include "fastrandombytes.h"
+#include "randombytes.h"
 #include "sha.h"
 
 /*============================================================================*/
@@ -25,6 +26,9 @@ typedef struct _veritext_t {
 	fmpz_mod_poly_t e_[VECTOR][NCRT];
 	fmpz_mod_poly_t u[VECTOR];
 } veritext_t;
+
+/* Guesses of c' before decryption gives up on a ciphertext. */
+#define VERICRYPT_DEC_TRIES 100
 
 static int vericrypt_test_norm(veritext_t *out) {
 	int result;
@@ -542,14 +546,31 @@ int vericrypt_undo(fmpz_mod_poly_t m[VECTOR], fmpz_mod_poly_t c,
 		return 0;
 	}
 
-	encrypt_sample_short(c, *encrypt_modulus_ctx());
-	fmpz_mod_poly_sub(c, in->c, c, *encrypt_modulus_ctx());
+	/* Guess c' from the challenge space and decrypt with c - c' until the
+	 * result is short, as Lyubashevsky-Neven decryption does. A valid proof
+	 * makes some guess succeed with noticeable probability, and in practice
+	 * the first does, so the attempts are bounded rather than letting a
+	 * malformed ciphertext keep the decryptor looping. This used to take a
+	 * single ternary c', not one from the challenge space, and accept
+	 * whatever came out. */
+	for (int attempt = 0; attempt < VERICRYPT_DEC_TRIES; attempt++) {
+		uint8_t seed[SHA256HashSize];
 
-	for (int i = 0; i < VECTOR; i++) {
-		result &= encrypt_undo(m[i], c, &in->cipher[i], sk);
+		randombytes(seed, sizeof(seed));
+		vericrypt_sample_chall(c, seed, sizeof(seed), encrypt_modulus_ctx());
+		fmpz_mod_poly_sub(c, in->c, c, *encrypt_modulus_ctx());
+		if (fmpz_mod_poly_is_zero(c, *encrypt_modulus_ctx())) {
+			continue;
+		}
+		result = 1;
+		for (int i = 0; i < VECTOR; i++) {
+			result &= encrypt_undo(m[i], c, &in->cipher[i], sk);
+		}
+		if (result) {
+			return 1;
+		}
 	}
-
-	return result;
+	return 0;
 }
 
 #ifdef MAIN

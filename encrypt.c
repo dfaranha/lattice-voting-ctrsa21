@@ -560,15 +560,41 @@ int encrypt_undo(fmpz_mod_poly_t m, fmpz_mod_poly_t chall, ciphertext_t *c,
 	fmpz_mod_poly_set_fmpz_poly(m, s, ctx_p);
 
 	if (chall != NULL) {
-		// Check linf-norm.
-		fmpz_set_ui(q2, 12 * SIGMA_E);
+		/* Decryption with a guessed challenge accepts only a short result
+		 * (Lyubashevsky-Neven, as in the paper's decryption algorithm): every
+		 * coefficient at most q / 2C before reducing mod p, where C = 2 is the
+		 * largest coefficient of a difference of challenges, and below
+		 * 12 sigma_E after. Otherwise the guess was wrong, or the ciphertext
+		 * is not one the proof could have been made for, and what came out is
+		 * not the message. The second check used to be commented out, and
+		 * compared residues in [0, p) rather than centred ones, so that every
+		 * negative coefficient failed it. */
+		fmpz_t bound, half;
+
+		fmpz_init(bound);
+		fmpz_init(half);
+		fmpz_fdiv_q_ui(bound, q, 2 * 2);
 		for (int i = 0; i < DEGREE; i++) {
-			fmpz_mod_poly_get_coeff_fmpz(coeff, m, i, ctx_p);
-			if (fmpz_cmp(coeff, q2) >= 0) {
-				//TODO: fixme
-				//result = 0;
+			fmpz_poly_get_coeff_fmpz(coeff, s, i);
+			fmpz_abs(coeff, coeff);
+			if (fmpz_cmp(coeff, bound) > 0) {
+				result = 0;
 			}
 		}
+		fmpz_set_ui(bound, 12 * SIGMA_E);
+		fmpz_fdiv_q_ui(half, p, 2);
+		for (int i = 0; i < DEGREE; i++) {
+			fmpz_mod_poly_get_coeff_fmpz(coeff, m, i, ctx_p);
+			if (fmpz_cmp(coeff, half) > 0) {
+				fmpz_sub(coeff, coeff, p);
+			}
+			fmpz_abs(coeff, coeff);
+			if (fmpz_cmp(coeff, bound) >= 0) {
+				result = 0;
+			}
+		}
+		fmpz_clear(bound);
+		fmpz_clear(half);
 	}
 
 	fmpz_clear(coeff);
@@ -619,7 +645,8 @@ static void test(flint_rand_t rand) {
 
 	fmpz_mod_poly_init(m, ctx_p);
 	fmpz_mod_poly_init(_m, ctx_p);
-
+	fmpz_mod_poly_clear(w[0], ctx_q);
+	fmpz_mod_poly_init(w[0], ctx_p);
 	encrypt_keyinit(&pk, &sk);
 	encrypt_cipher_init(&c);
 
@@ -630,8 +657,21 @@ static void test(flint_rand_t rand) {
 		TEST_ASSERT(encrypt_undo(_m, NULL, &c, &sk) == 1, end);
 		TEST_ASSERT(fmpz_mod_poly_equal(m, _m, ctx_p) == 1, end);
 	} TEST_END;
+
+	TEST_BEGIN("decryption with a challenge rejects a ciphertext that is not short") {
+		/* An honest ciphertext times a short challenge decrypts short; one
+		 * whose w is uniform does not, and must not decrypt to anything. */
+		encrypt_sample_short(m, ctx_p);
+		encrypt_doit(&c, m, &pk, rand);
+		encrypt_sample_short(w[0], ctx_p);
+		TEST_ASSERT(encrypt_undo(_m, w[0], &c, &sk) == 1, end);
+		for (int k = 0; k < NCRT; k++) {
+			encrypt_sample_rand(c.w[k], DEGCRT);
+		}
+		TEST_ASSERT(encrypt_undo(_m, w[0], &c, &sk) == 0, end);
+	} TEST_END;
   end:
-	fmpz_mod_poly_clear(w[0], ctx_q);
+	fmpz_mod_poly_clear(w[0], ctx_p);
 	fmpz_mod_poly_clear(w[1], ctx_q);
 	fmpz_mod_poly_clear(m, ctx_p);
 	fmpz_mod_poly_clear(_m, ctx_p);
