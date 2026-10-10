@@ -42,7 +42,7 @@ Section 7 has to accommodate.
 
 | symbol | meaning | value |
 | --- | --- | --- |
-| `q` | modulus (`MODP`) | 2553802997, `= 5 mod 8` |
+| `q` | modulus (`MODP`) | 137438953501, `= 5 mod 8` |
 | `n` | ring degree (`DEGREE`) | 1024 |
 | `R` | `Z_q[x]/(x^n + 1)` | |
 | `k` | number of CRT factors | 2 |
@@ -54,7 +54,7 @@ Section 7 has to accommodate.
 
 By Lemma 1 with `k = 2`, `R = R_1 x R_2` with `R_l = Z_q[x]/(p_l)` a field, and
 
-> **(Inv)** any `y` with `0 < ||y||_2 < q^(1/2) ~ 50535.2` is invertible in `R`.
+> **(Inv)** any `y` with `0 < ||y||_2 < q^(1/2) ~ 370727.6` is invertible in `R`.
 
 Two norm facts used repeatedly:
 
@@ -63,7 +63,7 @@ Two norm facts used repeatedly:
 * For a difference `delta = d - d'` of two challenges: coefficients in
   `{-2,...,2}` and `||delta||_1 <= 40`, so `||delta||_2 <=
   sqrt(||delta||_oo ||delta||_1) <= sqrt(80) ~ 8.94`. By (Inv), **every nonzero
-  challenge difference is invertible**, since `8.94 << 50535`.
+  challenge difference is invertible**, since `8.94 << 370728`.
 
 For `c, c'` distinct in `C`, `c - c'` is nonzero of degree `< n/2 = deg p_l`,
 hence nonzero modulo each `p_l`, hence invertible. This is why the challenge
@@ -221,7 +221,7 @@ relaxed proof.
 exactly). Hence
 
 ```
-|| delta * (sigma*_i - g(j)) ||_2  <=  12416 + 8.94  ~  12425  <  50535.2 ,
+|| delta * (sigma*_i - g(j)) ||_2  <=  12416 + 8.94  ~  12425  <  370727.6 ,
 ```
 
 so by (Inv) it is zero or invertible, which is (H).
@@ -229,32 +229,40 @@ so by (Inv) it is zero or invertible, which is (H).
 ## 8. Parameter budget
 
 ```
-ceiling            q^(1/2)                          =  50535.2
+ceiling            q^(1/2)                          =  370727.6
 extracted norm     4 sqrt(n) sigma_S + ||delta||_2  ~  12425
-margin                                                 4.07x
+margin                                                 29.8x
 ```
 
 `sigma_S` is constrained from both sides:
 
 | bound | value | source |
 | --- | --- | --- |
-| `sigma_S <= (q^(1/2) - 8.94) / (4 sqrt n)` | 394.7 | (H) via (Inv) |
+| `sigma_S <= (q^(1/2) - 8.94) / (4 sqrt n)` | 2896.2 | (H) via (Inv) |
 | `sigma_S >= 21.485 * ||d * sigma_i||` | 96.1 | rejection sampling at `M = 1.75` |
 
-The feasible window is roughly `[96.1, 394.7]`, a factor of 4.1 wide; the
+The feasible window is roughly `[96.1, 2896.2]`, a factor of 30.1 wide; the
 implementation uses 97, its lower end rounded up, which keeps the statistical
-distance of the rejection sampling at `2^-100` and leaves the 4.07x margin
-above to (H). **This window is the fragile part of the construction.**
-It is narrow because `k = 2`, so (Inv) only reaches `q^(1/2)`, which is small
+distance of the rejection sampling at `2^-100` and leaves the 29.8x margin
+above to (H). At the previous modulus, 2553802997 (about `2^31.25`), the
+ceiling was 50535.2 and the window `[96.1, 394.7]`, a factor of only 4.1, with
+a 4.07x margin: **this window was the fragile part of the construction**, and
+it is wide now only because `q` was raised to `2^37` for binding (PARAMS.md,
+"Raising p"), not by design. It is bounded at all because `k = 2`, so (Inv)
+only reaches `q^(1/2)`, which grows only as the square root of the modulus
 against `n = 1024`-dimensional Gaussian responses.
 
 This is also why `g` maps to monomials rather than to binary representations of
 indices, as in the paper. For a binary `g`, `||d * sigma_i||_2 <= ||d||_2 *
-||sigma_i||_1` grows with the bit-length of the index: at `N = 25`, whose
-indices have up to four bits set, the window still exists but is only
-`[384.3, 394.5]`, a factor of 1.03 wide, and it closes entirely at the first
-index with five, 31. With monomials, `||d * sigma_i||_2 = ||d||_2`
-independently of `N`, and `g` stays injective up to `N = n`.
+||sigma_i||_1` grows with the bit-length of the index, so an index of weight
+`w` needs `96.1 w <= sigma_S <= (q^(1/2) - 8.94 w) / (4 sqrt n)`: at `N = 25`,
+whose indices have up to four bits set, that is `[384.3, 2896.0]`, a factor of
+7.5 wide, and it closes only at weight 31. (At the previous modulus it was
+`[384.3, 394.5]`, a factor of 1.03, and closed at weight 5, index 31.) So a
+binary `g` would now fit, but it would need `sigma_S` four times wider at
+`N = 25`, growing with the bit-length of `N`. With monomials,
+`||d * sigma_i||_2 = ||d||_2` independently of `N`, `sigma_S` stays at its
+minimum, and `g` stays injective up to `N = n`.
 
 ## 9. Completeness and zero-knowledge
 
@@ -285,19 +293,24 @@ need to be extended accordingly.
    bookkeeping of the paper's Theorem 5 carries over to effective messages. The
    argument for why it should is given, but the knowledge-error accounting has
    not been redone.
-3. **MSIS at the bound Section 5 uses is weaker than the one quoted.**
+3. **MSIS at the bound Section 5 uses is weaker than at the paper's.**
    Section 5 appeals to MSIS at `2 ||delta||_1 * 4 sqrt(n) sigma_C`, with
    `||delta||_1 <= 2 NONZERO`: at `sigma_C = 27501` and `NONZERO = 20`
    that is `2^28.07`, and the lattice-estimator (53da598, core-SVP) puts it at
-   **105.4 bits**. The figure the README quotes, 132.9, is at the paper's
-   `16 sigma_C sqrt(nu N)`, `2^25.91`, smaller by a factor `sqrt(NONZERO)`:
-   the paper charges the challenge `sqrt(nu)`, where Section 5's bound, which
-   holds for any two ring elements, charges `||delta||_1`. Which of the two the
-   extraction actually needs has not been settled; at Section 5's, that is below 128, and below the level the README quotes for this branch, which is set by binding.
+   **134.3 bits** (160.7 MATZOV) at `q = 137438953501`. At the paper's
+   `16 sigma_C sqrt(nu N)`, `2^25.91`, smaller by a factor `sqrt(NONZERO)`, it
+   is 168.2: the paper charges the challenge `sqrt(nu)`, where Section 5's
+   bound, which holds for any two ring elements, charges `||delta||_1`. Which
+   of the two the extraction actually needs has not been settled. Both are now
+   above 128: the modulus was raised from 2553802997 (about `2^31.25`), where
+   they were 105.4 and 132.9, precisely so that the answer does not decide
+   whether this branch reaches 128 bits. At Section 5's bound binding sets the
+   level, 134.3; at the paper's, encryption does, at 136.7 (PARAMS.md).
 4. **Zero-knowledge sketched only**, as noted in Section 9.
-5. **The window in Section 8 has no slack to spare.** Any change to `n`, `q`,
-   `NONZERO`, `M` or the encoding `g` invalidates the budget and must be
-   rechecked.
+5. **The window in Section 8 depends on every parameter.** It has slack now,
+   a factor of 30.1, but only because `q` was raised for binding; at the
+   previous modulus it was 4.1. Any change to `n`, `q`, `NONZERO`, `M` or the
+   encoding `g` invalidates the budget and must be rechecked.
 
 The implementation is tested against both attacks it is meant to stop, and the
 verifier was instrumented to confirm each is rejected by the intended check

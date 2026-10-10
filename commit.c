@@ -394,10 +394,9 @@ void commit_keyfree(commitkey_t *key) {
 void commit_sample_short(nmod_poly_t r) {
 	uint64_t buf;
 	/* This holds MODP - 1 + d for d in {0, 1, 2}, so it has to be as wide as
-	 * the modulus. As a uint32_t it is correct at the current MODP but only
-	 * just: the moment MODP passes 2^32 it truncates, the randomness stops
-	 * being ternary, and rejection sampling then never accepts, so the prover
-	 * hangs rather than failing. */
+	 * the modulus. As a uint32_t it would truncate at the current MODP, about
+	 * 2^37: the randomness would stop being ternary, and rejection sampling
+	 * would then never accept, so the prover would hang rather than fail. */
 	ulong coeff;
 	int i, j, s;
 
@@ -739,8 +738,10 @@ static void test(flint_rand_t rand) {
 		TEST_ASSERT(commit_open(&com, _m, &key, _s, _f) == 0, end);
 	} TEST_END;
 
-	/* Four coefficients at MODP / 2 and one more chosen so that the sum of
-	 * their squares wraps a 64-bit word to 1420468769, far below the bound. */
+	/* Four coefficients at MODP / 2 and one more, chosen so that at the
+	 * published MODP = 3906450253 the sum of their squares wrapped a 64-bit
+	 * word to 1420468769, far below the bound. At the current MODP, about 2^37,
+	 * a single coefficient at MODP / 2 already squares past 2^64. */
 	TEST_ONCE("norm bound does not wrap on an oversized opening") {
 		nmod_poly_zero(_m);
 		for (int i = 0; i < 4; i++) {

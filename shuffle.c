@@ -68,15 +68,17 @@
  * The map g : [N] -> D of Lemma 5, instantiated as the monomial map i -> x^i.
  *
  * D is the set of monomials. The difference x^a - x^b of two distinct elements
- * has l2-norm sqrt(2), far below MODP^(1/2) ~ 50535, so by Lemma 1 it is
+ * has l2-norm sqrt(2), far below MODP^(1/2) ~ 370728, so by Lemma 1 it is
  * invertible in R_p, as Lemma 5 requires. The map is injective for i < DEGREE,
  * so it supports up to DEGREE messages.
  *
  * Monomials are used in place of the ring elements with binary coefficients of
  * the paper because multiplication by a monomial is a signed rotation, so
- * ||d * x^i|| = ||d|| exactly. That keeps the Gaussian mask SIGMA_S narrow
- * enough for the norm extracted from the proof below to stay under MODP^(1/2),
- * which a binary encoding would only barely achieve, and only for small N.
+ * ||d * x^i|| = ||d|| exactly. That keeps the Gaussian mask SIGMA_S at its
+ * minimum whatever N is, with the norm extracted from the proof below about
+ * 30 times under MODP^(1/2); a binary encoding would need a SIGMA_S that grows
+ * with the bit-length of N, and at the previous MODP, about 2^31.25, it only
+ * barely fit, and only for small N.
  *
  * @param[out] out			- the resulting ring element.
  * @param[in] i				- the index to encode, must be below DEGREE.
@@ -1331,7 +1333,7 @@ static void test(void) {
 
 		nmod_poly_init(a[0], MODP);
 		nmod_poly_init(a[1], MODP);
-		/* All ones: a uniform coefficient of 2^32 - 1, at or above MODP, and a
+		/* All ones: a uniform coefficient of 2^38 - 1, at or above MODP, and a
 		 * Gaussian escape carrying INT64_MIN, whose negation used to be
 		 * undefined. */
 		memset(raw, 0xFF, sizeof(raw));

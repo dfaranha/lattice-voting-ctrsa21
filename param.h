@@ -98,7 +98,7 @@
  * smallest width that keeps the same 2^-100 bound at M = 1.75, at a ratio of
  * about 21.7. It must also stay small enough that the
  * extracted ||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S) = 12416
- * remains below sqrt(MODP / 2) ~ 35734, the bound under which Lemma 1
+ * remains below sqrt(MODP / 2) ~ 262144, the bound under which Lemma 1
  * guarantees invertibility. */
 #define SIGMA_S 97
 /* Standard deviation of the discrete Gaussian in the verifiable encryption.

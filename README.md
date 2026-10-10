@@ -76,7 +76,7 @@ sub-proof of `is_bin(sigma_i)` delegated to a general-purpose lattice proof
 system (LaZer), which has no counterpart in this code base.
 
 Binary coefficients are more than the lemma needs. By Lemma 1, any element of
-l2-norm below `MODP^(1/2) ~ 50535` is invertible, so taking `D` to be a ball of
+l2-norm below `MODP^(1/2) ~ 370728` is invertible, so taking `D` to be a ball of
 small norm satisfies the requirement, and shortness is exactly what
 Fiat-Shamir-with-aborts proves natively. The linear proof therefore masks the
 committed message with a narrow Gaussian (`SIGMA_S`, see `param.h`) and the
@@ -84,18 +84,25 @@ verifier bounds the norm of the response.
 
 `g` maps indices to monomials rather than to binary representations because
 multiplication by a monomial is a signed rotation, so `||d * x^i|| = ||d||`
-exactly. The budget is tight and this is what makes it comfortable:
+exactly, which keeps `SIGMA_S` at its minimum whatever the number of messages:
 
 | quantity | value |
 | --- | --- |
-| invertibility ceiling `MODP^(1/2)` | 50535 |
+| invertibility ceiling `MODP^(1/2)` | 370728 |
 | extracted `||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S)` | 12416 |
 | masking ratio `SIGMA_S / ||d * sigma_i||` | ~21.7 |
 
-A binary encoding would also fit at `N = 25`, but with a factor of about 1.03 to
-spare, and it degrades as `N` grows, since `||sigma_i||_1` grows with the
-bit-length of the index. The monomial encoding is independent of `N` and
-supports up to `DEGREE` messages.
+The extracted norm sits a factor of 29.8 below the ceiling. That margin was
+4.07 at the previous `MODP = 2553802997`, where the ceiling was 50535; it
+widened when `MODP` was raised to about `2^37` for binding (see
+[PARAMS.md](PARAMS.md)), not by design. A binary encoding would also fit at
+`N = 25`: an index of weight `w` needs `21.485 * sqrt(20) * w <= SIGMA_S <=
+(MODP^(1/2) - sqrt(80) * w) / (4 * sqrt(DEGREE))`, so with up to four bits set
+the window is `[384.3, 2896.0]`, a factor of about 7.5 (it was 1.03 at the
+previous modulus). But it would need `SIGMA_S` about four times wider, and
+more as `N` grows, since `||sigma_i||_1` grows with the bit-length of the
+index. The monomial encoding is independent of `N` and supports up to `DEGREE`
+messages.
 
 ### Caveat: this deviates from Protocol 1
 
