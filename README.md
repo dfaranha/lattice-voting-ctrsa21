@@ -68,6 +68,14 @@ CI, which is what keeps the allocation behaviour honest:
     make CFLAGS="-O1 -g -march=native -pthread \
       -fsanitize=address,undefined -fno-sanitize-recover=all" test
 
+The proof decoder, which reads what an untrusted prover sends, has a libFuzzer
+harness that needs clang. Besides the sanitizers, it checks that any input the
+decoder accepts re-encodes to the same bytes, so that no proof has two
+encodings:
+
+    make fuzz_serial
+    ./fuzz_serial -seeds fuzz-corpus && ./fuzz_serial -max_len=65536 fuzz-corpus
+
 ## Third-party code
 
 `vcl/` vendors Agner Fog's Vector Class Library, used by the constant-time
