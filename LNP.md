@@ -222,8 +222,9 @@ and works because `sigma` is linear.
 The mask `w` cannot be reused: the prover rejection-samples it, and a rejection
 means recommitting, because the projection is fixed by the commitment. That is
 the `for (tries...)` loop around `lnp_bin_setup` in the caller. `TAU_PROJ`
-trades the tightness of the certified bound against the number of repetitions;
-9 gives about 3.8 repetitions.
+sets the width, and the rejection test takes its `M` from the witness's own
+norm (LNP-PARAMS.md, section 5h): about 1.06 repetitions for the shuffle's
+monomial witnesses.
 
 ## 5. Merging the three
 
@@ -396,7 +397,7 @@ response.
 | `SLOTS` | 3 | witness, product, projection mask |
 | `LNP_RANK` | 1 | rank 1 hiding is 138 bits at this degree, 52 at 1024 |
 | `PROJ` | 256 | the projection lemma's requirement for `2^-128` |
-| `TAU_PROJ` | 9 | about 3.8 repetitions, bound 1.26x inside the ceiling |
+| `TAU_PROJ` | 9 | about 1.06 repetitions for monomial witnesses, bound 1.26x inside the ceiling |
 | `SIGMA_B` | `SIGMA_C sqrt(K / WIDTH)`, `K = 285` | one rejection test spans every opening of the batch |
 | `SIGMA_P` | `TAU_PROJ sqrt(PROJ N / 2)` | and its certified bound grows with it |
 

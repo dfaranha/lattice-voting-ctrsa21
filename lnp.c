@@ -541,13 +541,23 @@ static int proj_norm2_leq(ulong z[PROJ], uint64_t bound) {
 	return 1;
 }
 
-/* Rejection sampling on the published projection.
+/* Rejection sampling on the published projection, for a witness of squared
+ * norm snorm2.
+ *
+ * ||R s|| <= sqrt(337) ||s|| except with probability 2^-128 (LNP22, Lemma
+ * 2.8), so the mask's ratio to the shift is gamma = SIGMA_P / (sqrt(337)
+ * ||s||), and M = exp(14 / gamma + 1 / (2 gamma^2)) keeps statistical
+ * distance 2^-128 (Lemma 2.14). M depends on the witness only through the
+ * number of attempts, which is never published. The shuffle's witnesses are
+ * monomials, ||s|| = 1, for which gamma = 251 and M = 1.058; SIGMA_P, sized
+ * for the expected projection of an all-ones witness, has that much room.
  *
  * A witness far outside the range makes the projection enormous, and then the
  * products below would overflow. Such a transcript can never be accepted, so
  * it is rejected before the arithmetic rather than after. */
-static int proj_reject(ulong z[PROJ], ulong v[PROJ]) {
-	double r, u, M = 3.8;
+static int proj_reject(ulong z[PROJ], ulong v[PROJ], double snorm2) {
+	const double gamma = (double) SIGMA_P / (sqrt(337.0 * snorm2) + 1e-300);
+	double r, u, M = exp(14.0 / gamma + 1.0 / (2.0 * gamma * gamma));
 	int64_t dot = 0, norm = 0;
 	/* Beyond this the projection cannot pass the verifier's check anyway, and
 	 * the accumulation below would no longer fit. */
@@ -773,7 +783,14 @@ int lnp_bin_setup(lnpbinproof_t *pi, lnpbinctx_t *ctx, lnpbatch_t *batch,
 	for (int i = 0; i < PROJ; i++) {
 		pi->zp[i] = nmod_add(nmod_poly_get_coeff_ui(w, i), rs[i], sc->mod);
 	}
-	if (proj_reject(pi->zp, rs)) {
+	double snorm2 = 0;
+
+	for (slong i = 0; i < nmod_poly_length(sc); i++) {
+		double c = (double) centre(nmod_poly_get_coeff_ui(sc, i));
+
+		snorm2 += c * c;
+	}
+	if (proj_reject(pi->zp, rs, snorm2)) {
 		/* Return before touching the batch: the caller will recommit and call
 		 * again, and a rejected attempt must not leave its share in the
 		 * aggregated values. */
@@ -2023,8 +2040,19 @@ static int phase_selected(int argc, char *argv[], const char *phase) {
 }
 
 
-/* A uniformly random binary witness, in both representations. */
-static void binary_witness(pcrt_poly_t out, nmod_poly_t raw) {
+/* A random monomial x^k, the shape of the shuffle's witnesses, which the
+ * projection's rejection sampling is set for (proj_reject). */
+static void monomial_raw(nmod_poly_t raw) {
+	uint32_t k;
+
+	randombytes((unsigned char *)&k, sizeof(k));
+	nmod_poly_zero(raw);
+	nmod_poly_set_coeff_ui(raw, k % DEGREE, 1);
+}
+
+/* A uniformly random binary witness, for the tests that do not reach the
+ * projection. */
+static void dense_binary_raw(nmod_poly_t raw) {
 	uint64_t buf = 0;
 
 	nmod_poly_zero(raw);
@@ -2035,6 +2063,11 @@ static void binary_witness(pcrt_poly_t out, nmod_poly_t raw) {
 		}
 		nmod_poly_set_coeff_ui(raw, i, (buf >> (i % 64)) & 1);
 	}
+}
+
+/* A random monomial, in both representations. */
+static void binary_witness(pcrt_poly_t out, nmod_poly_t raw) {
+	monomial_raw(raw);
 	pcrt_poly_reduce(out[0], raw, 0);
 	pcrt_poly_reduce(out[1], raw, 1);
 }
@@ -2144,7 +2177,6 @@ static void test_isbin(void) {
 	pcrt_poly_t r[LNP_WIDTH], m[SLOTS], g[LNP_LAMBDA], wc;
 	nmod_poly_t wraw;
 	nmod_poly_t s;
-	uint64_t buf;
 
 	lnp_keyinit(&key);
 	lnp_com_init(&com);
@@ -2174,14 +2206,7 @@ static void test_isbin(void) {
 	}
 
 	TEST_BEGIN("constant coefficient of the product is zero for binary s") {
-		nmod_poly_zero(s);
-		nmod_poly_fit_length(s, DEGREE);
-		for (int i = 0; i < DEGREE; i++) {
-			if (i % 64 == 0) {
-				randombytes((unsigned char *)&buf, sizeof(buf));
-			}
-			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
-		}
+		dense_binary_raw(s);
 		pcrt_poly_reduce(m[0][0], s, 0);
 		pcrt_poly_reduce(m[0][1], s, 1);
 		lnp_isbin_product(m[1], m[0]);
@@ -2189,14 +2214,7 @@ static void test_isbin(void) {
 	} TEST_END;
 
 	TEST_BEGIN("constant coefficient is non-zero as soon as s is not binary") {
-		nmod_poly_zero(s);
-		nmod_poly_fit_length(s, DEGREE);
-		for (int i = 0; i < DEGREE; i++) {
-			if (i % 64 == 0) {
-				randombytes((unsigned char *)&buf, sizeof(buf));
-			}
-			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
-		}
+		dense_binary_raw(s);
 		/* A single coefficient of 2 contributes 2 * 1 = 2 to the sum, far
 		 * below the modulus, so the sum cannot wrap back to zero. */
 		nmod_poly_set_coeff_ui(s, 7, 2);
@@ -2421,46 +2439,24 @@ static void test_adaptive(void) {
 static void test_isbin_full(void) {
 	lnpkey_t key;
 	nmod_poly_t s;
-	uint64_t buf;
 
 	lnp_keyinit(&key);
 	lnp_keygen(&key);
 	nmod_poly_init(s, MODP);
 
 	TEST_BEGIN("is_bin accepts a binary witness") {
-		nmod_poly_zero(s);
-		nmod_poly_fit_length(s, DEGREE);
-		for (int i = 0; i < DEGREE; i++) {
-			if (i % 64 == 0) {
-				randombytes((unsigned char *)&buf, sizeof(buf));
-			}
-			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
-		}
+		monomial_raw(s);
 		TEST_ASSERT(isbin_full(&key, s) == 1, end);
 	} TEST_END;
 
 	TEST_BEGIN("is_bin rejects a witness with a coefficient of 2") {
-		nmod_poly_zero(s);
-		nmod_poly_fit_length(s, DEGREE);
-		for (int i = 0; i < DEGREE; i++) {
-			if (i % 64 == 0) {
-				randombytes((unsigned char *)&buf, sizeof(buf));
-			}
-			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
-		}
+		monomial_raw(s);
 		nmod_poly_set_coeff_ui(s, 11, 2);
 		TEST_ASSERT(isbin_full(&key, s) == 0, end);
 	} TEST_END;
 
 	TEST_BEGIN("is_bin rejects a witness with a coefficient of -1") {
-		nmod_poly_zero(s);
-		nmod_poly_fit_length(s, DEGREE);
-		for (int i = 0; i < DEGREE; i++) {
-			if (i % 64 == 0) {
-				randombytes((unsigned char *)&buf, sizeof(buf));
-			}
-			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
-		}
+		monomial_raw(s);
 		nmod_poly_set_coeff_ui(s, 23, MODP - 1);
 		TEST_ASSERT(isbin_full(&key, s) == 0, end);
 	} TEST_END;
@@ -2477,7 +2473,6 @@ static void test_range(void) {
 	lnpbinctx_t ctx_pi;
 	pcrt_poly_t r[LNP_WIDTH], m[SLOTS], g[LNP_LAMBDA], w;
 	nmod_poly_t s, wraw;
-	uint64_t buf;
 	int tries;
 
 	lnp_keyinit(&key);
@@ -2507,14 +2502,7 @@ static void test_range(void) {
 	}
 
 	TEST_BEGIN("range proof accepts a binary witness") {
-		nmod_poly_zero(s);
-		nmod_poly_fit_length(s, DEGREE);
-		for (int i = 0; i < DEGREE; i++) {
-			if (i % 64 == 0) {
-				randombytes((unsigned char *)&buf, sizeof(buf));
-			}
-			nmod_poly_set_coeff_ui(s, i, (buf >> (i % 64)) & 1);
-		}
+		monomial_raw(s);
 		/* Rejection sampling needs a fresh mask, and the mask is committed,
 		 * so a rejected transcript is retried by recommitting. */
 		for (tries = 0; tries < 64; tries++) {

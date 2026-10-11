@@ -859,13 +859,24 @@ at every width here, all of them at `alpha >= 21.485`. Widths, sizes and
 binding are unchanged; the batched proof repeats 1.92 times on average instead
 of 1.75.
 
-The projection's rejection test (`proj_reject`, `M = 3.8`) is not changed
-here. Its width `SIGMA_P = TAU_PROJ sqrt(PROJ DEGREE / 2)` is sized for the
-expected projection of an all-ones witness. The shuffle's witnesses are
-monomials, for which `||R s|| <= sqrt(337)` except with probability `2^-128`
-(LNP22, Lemma 2.8), so the true ratio is about 250, and `M = 1.06` would keep
-`2^-128`. For an arbitrary binary witness, which the unit tests use, the
-ratio is 5.5 in the worst case, and `2^-128` would need `M = 12.7`.
+The projection's rejection test (`proj_reject`) was at `M = 3.8`, set for the
+ratio `TAU_PROJ = 9` against `sqrt(PROJ DEGREE / 2)`, the expected projection
+of an all-ones witness. That is not the bound Lemma 2.14 needs:
+`||R s|| <= sqrt(337) ||s||` except with probability `2^-128` (LNP22,
+Lemma 2.8), so the ratio is `SIGMA_P / (sqrt(337) ||s||)`. It is 5.5 for an
+all-ones witness, where `2^-128` needs `M = 12.7`, and 251 for the shuffle's
+witnesses, which are monomials, where it needs `M = 1.058`.
+
+`proj_reject` now takes `M = exp(14/gamma + 1/(2 gamma^2))` with
+`gamma = SIGMA_P / (sqrt(337) ||s||)` from the prover's own witness. That is
+rigorous for any witness, and it changes only the number of attempts, which is
+never published. For the shuffle it means about 1.06 attempts per message
+instead of 3.8; the shuffle benchmark went from 7.35 to 6.80 Gcycles. The
+unit tests that reach the projection now prove random
+monomials, the shuffle's shape, and the product-only tests keep dense random
+binary witnesses. `SIGMA_P` is left as it is: sized for monomials, it could be
+28 times smaller, with a certified bound 28 times tighter, which would leave
+room to lower `MODP`. That is a parameter change of its own.
 
 ## 6. What this changes about the decision
 

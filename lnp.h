@@ -41,10 +41,11 @@
  * projection lemma needs 256 of them for a 2^-128 soundness error. */
 #define PROJ 	256
 
-/* Ratio between the projection mask and the value it hides. Lower means a
- * tighter certified bound but more rejection-sampling repetitions; 9 gives
- * about 3.8 and leaves the certified bound a factor 1.26 inside the ceiling
- * that no-wraparound imposes at DEGREE 2048, 1.78 at 1024. */
+/* Ratio between the projection mask and the expected projection of an
+ * all-ones witness, sqrt(PROJ * DEGREE / 2). It leaves the certified bound a
+ * factor 1.26 inside the ceiling that no-wraparound imposes at DEGREE 2048,
+ * 1.78 at 1024. The rejection test takes its M from the actual witness
+ * (proj_reject): 1.058 for the shuffle's monomials. */
 #define TAU_PROJ 	9
 
 /* Slot holding the witness. */
