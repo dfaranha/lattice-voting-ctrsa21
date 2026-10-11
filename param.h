@@ -56,8 +56,9 @@
 /* Standard deviation for discrete Gaussians masking one commitment opening
  * d * r, r ternary in WIDTH ring elements, so ||d * r|| <= T = NONZERO *
  * sqrt(WIDTH * DEGREE). SIGMA_C = ceil(21.485 * T): alpha = sigma / T = 21.485
- * is the least ratio at which rejection sampling with the code's M = 1.75
- * keeps its 2^-100 statistical bound, M = exp(12 / alpha + 1 / (2 alpha^2)).
+ * is the least ratio at which rejection sampling with the code's M = 1.921
+ * keeps its 2^-128 statistical bound, M = exp(14 / alpha + 1 / (2 alpha^2))
+ * (LNP22, Lemma 2.14).
  * It grows as sqrt(DEGREE) and shrinks with WIDTH. On this branch nothing is
  * masked at this width any more; it sets the opening bound commit_open
  * accepts, and the unit SIGMA_B is derived from. */
@@ -67,7 +68,7 @@
  * ||d|| = sqrt(NONZERO) ~ 4.24 exactly regardless of DEGREE, d having NONZERO
  * coefficients of +-1, which is why this one does not scale with it.
  * SIGMA_S = ceil(21.485 * sqrt(NONZERO)) = 92, a ratio of about 21.7, the
- * rigorous minimum for M = 1.75. It must also stay small enough that the
+ * rigorous minimum for M = 1.921. It must also stay small enough that the
  * extracted ||(d - d') * sigma_i|| <= 2 * (2 * sqrt(DEGREE) * SIGMA_S), which
  * is 16654 at DEGREE 2048, remains below sqrt(MODP) ~ 1048576, the bound under
  * which Lemma 1 guarantees invertibility. The relaxed proof that used it was

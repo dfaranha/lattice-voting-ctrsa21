@@ -415,6 +415,9 @@ machinery are rejected. They do not establish that no attack succeeds. Specifica
   `(c - c')(sigma(c) - sigma(c'))` and yields a *relaxed* opening. What that
   relaxation does to the binding bound has not been worked out, and the MSIS
   figures quoted here are for exact openings.
-- The projection lemma is used with a rough constant of 2.
+- The projection lemma is used with a constant of 2, which is conservative:
+  LNP22's Lemma 2.9 certifies `||s|| < 2 ||z|| / sqrt(26)`, 5.1 times
+  tighter, for `||s|| <= MODP / (41 d)` with `d = DEGREE`, which holds with
+  room. The lemma rests on LNP22's heuristic Lemma 2.8.
 - Zero-knowledge is sketched, not proven. `SOUNDNESS.md` section 9.
 - Nothing here has been reviewed by a second person.

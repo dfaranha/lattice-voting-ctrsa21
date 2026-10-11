@@ -273,12 +273,15 @@ so the window is
 | bound | value | source |
 | --- | --- | --- |
 | `sigma_S <= (q^(1/2) - 8.49) / (4 sqrt n)` | 5792 | (H) via (Inv) |
-| `sigma_S >= 21.485 * ||d * sigma_i||` | 91.2 | rejection sampling at `M = 1.75` |
+| `sigma_S >= 21.485 * ||d * sigma_i||` | 91.2 | rejection sampling at `M = 1.921` |
 
 and `SIGMA_S` was narrowed from 256 to 92, the lower edge rounded up. The
 extracted norm is then `4 sqrt(n) sigma_S + ||delta||_2 = 16663` against a
 ceiling of 1048576. The constant is 21.485 rather than 21.5: it is the least
-`alpha` with `exp(12/alpha + 1/(2 alpha^2)) <= 1.75`. No proof on that branch
+`alpha` with `exp(12/alpha + 1/(2 alpha^2)) <= 1.75`, the code's `M` for
+statistical distance `2^-100`; the code now uses `M = 1.921`, which keeps
+`2^-128` at the same `alpha` (`exp(14/alpha + 1/(2 alpha^2))`, LNP22,
+Lemma 2.14). No proof on that branch
 samples at `SIGMA_S` any more, since `is_bin` replaced the relaxed proof, so
 the window is recorded for completeness rather than load-bearing there.
 
@@ -294,9 +297,11 @@ and `g` stays injective up to `N = n`.
 *Completeness.* An honest `z_sigma` has `||z_sigma|| ~ sigma_S sqrt(n) = 8192`
 against a bound of 16384, so the added check fails with negligible probability.
 The added rejection sampling runs at `alpha = sigma_S / ||d sigma_i|| ~ 30`,
-giving `M ~ 1.49`, within the `M = 1.75` used by the code. At the `lnp`
-branch's `SIGMA_S = 92` and `NONZERO = 18` it is `alpha ~ 21.7` and
-`M ~ 1.741`, just inside 1.75 by construction.
+giving `M ~ 1.49` for `2^-100`, within the `M = 1.75` used by the code. At
+the `lnp` branch's `SIGMA_S = 92` and `NONZERO = 18` it is `alpha ~ 21.7` and
+`M ~ 1.741`, just inside 1.75 by construction; that branch now uses
+`M = 1.921`, which keeps `2^-128` at any `alpha >= 21.485` (`M ~ 1.908` at
+21.7).
 
 *Zero-knowledge.* The proof carries one extra masked value. The simulator picks
 `z_p` and `z_sigma` from their distributions and sets

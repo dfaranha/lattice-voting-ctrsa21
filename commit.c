@@ -189,10 +189,15 @@ void commit_rej_respond(nmod_poly_t z[][2], nmod_poly_t y[], nmod_poly_t v[],
 	nmod_poly_clear(dv);
 }
 
+/* M = exp(14 / alpha + 1 / (2 alpha^2)) at alpha = 21.485, the least ratio
+ * any width here is set at: statistical distance 2^-128 (LNP22, Lemma 2.14).
+ * It was 1.75, which is the same formula with 12 in place of 14, for 2^-100. */
+#define COMMIT_REJ_M 1.921
+
 int commit_rej_decide(int64_t dot, int64_t norm, uint64_t s2) {
 	double r = (-2.0 * (double) dot + (double) norm) / (2.0 * (double) s2);
 
-	return commit_uniform_double() > exp(r) / 1.75;
+	return commit_uniform_double() > exp(r) / COMMIT_REJ_M;
 }
 
 int commit_rej_sampling(nmod_poly_t z[], nmod_poly_t v[], uint64_t s2,

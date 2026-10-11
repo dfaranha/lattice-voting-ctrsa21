@@ -850,6 +850,23 @@ core-SVP / MATZOV. At the paper's `16 SIGMA_B sqrt(nu N)` the core-SVP row
 read 169.4, 140.2, 127.6, 108.9 and 387.5, 327.0, 300.2, 261.3. The 1024 row is at `WIDTH = 3`, where hiding is about 52
 bits, so it says what binding would be, not that the degree could come down.
 
+## 5h. Rejection sampling at `2^-128` (2026-10-11)
+
+LNP22's Lemma 2.14 states rejection sampling at statistical distance `2^-128`,
+`M = exp(14/alpha + 1/(2 alpha^2))`; the `12` in section 5g is the same bound
+for `2^-100`. `commit_rej_decide` now uses `M = 1.921`, which keeps `2^-128`
+at every width here, all of them at `alpha >= 21.485`. Widths, sizes and
+binding are unchanged; the batched proof repeats 1.92 times on average instead
+of 1.75.
+
+The projection's rejection test (`proj_reject`, `M = 3.8`) is not changed
+here. Its width `SIGMA_P = TAU_PROJ sqrt(PROJ DEGREE / 2)` is sized for the
+expected projection of an all-ones witness. The shuffle's witnesses are
+monomials, for which `||R s|| <= sqrt(337)` except with probability `2^-128`
+(LNP22, Lemma 2.8), so the true ratio is about 250, and `M = 1.06` would keep
+`2^-128`. For an arbitrary binary witness, which the unit tests use, the
+ratio is 5.5 in the worst case, and `2^-128` would need `M = 12.7`.
+
 ## 6. What this changes about the decision
 
 Track B is complete: B1, B2, B3, B5 and B6 are built and tested, and B4 is not
@@ -881,6 +898,7 @@ artifact is for.
 Finally, none of this is a soundness proof. The extraction argument for the
 product relation divides by `(c - c')(sigma(c) - sigma(c'))` and yields a
 relaxed opening, and what that relaxation does to the binding bound has not
-been worked out. The projection lemma is used with a rough constant of 2. The
+been worked out. The projection lemma is used with a constant of 2, which is
+5.1 times more conservative than LNP22's Lemma 2.9, whose condition holds. The
 tests establish completeness, and that two specific attacks fail, by the checks
 that should catch them. They do not establish that no attack succeeds.
