@@ -146,12 +146,25 @@ static inline __m128d exp_constant(const __m128d x)
 /* FACCT rejection check */
 static inline int64_t comp(const unsigned char *r, const uint64_t res)
 {
-	uint64_t res_mantissa, res_exponent;
+	uint64_t res_mantissa;
+	int64_t res_exponent, neg, thr;
 	uint64_t r1, r2;
 	uint64_t r_mantissa, r_exponent;
 	
 	res_mantissa = (res & EXP_MANTISSA_MASK) | (1LL << EXP_MANTISSA_PRECISION);
-	res_exponent = R_EXPONENT_L - 1023 + 1 + (res >> EXP_MANTISSA_PRECISION); 
+	res_exponent = R_EXPONENT_L - 1023 + 1 + (int64_t) (res >> EXP_MANTISSA_PRECISION);
+	/* The exponent test is r_exponent < 2^res_exponent, and res_exponent is
+	 * negative for a probability below 2^-20, which the tail of a narrow
+	 * Gaussian reaches. It was used as an unsigned shift count there, which
+	 * is undefined, and on x86 the count is taken mod 64, so the threshold
+	 * became 2^(64 + res_exponent), far above any r_exponent: the test passed
+	 * and the candidate was accepted about half the time instead of with
+	 * probability below 2^-20. The threshold is now 0 there, so the test
+	 * fails, which is wrong by less than 2^-20; without branching, so the
+	 * check stays constant-time. A probability is at most 1, so res_exponent
+	 * is at most R_EXPONENT_L + 1 = 20 and the shift is in range. */
+	neg = res_exponent >> 63;
+	thr = (int64_t) (1ULL << (res_exponent & ~neg & 63)) & ~neg;
 	
 	/* r walks the buffer in COMP_ENTRY_SIZE (9 byte) strides, so this load is
 	 * generally misaligned. Reading it through memcpy avoids the undefined
@@ -162,7 +175,7 @@ static inline int64_t comp(const unsigned char *r, const uint64_t res)
 	r_mantissa = r1 & R_MANTISSA_MASK;
 	r_exponent = (r1 >> R_MANTISSA_PRECISION) | (r2 << (64 - R_MANTISSA_PRECISION));
 	
-	return (((1LL << 63) ^ ((res - DOUBLE_ONE) | (DOUBLE_ONE - res))) | ((r_mantissa - res_mantissa) & (r_exponent - (1LL << res_exponent)))) >> 63;	
+	return (((1LL << 63) ^ ((res - DOUBLE_ONE) | (DOUBLE_ONE - res))) | ((r_mantissa - res_mantissa) & (r_exponent - thr))) >> 63;	
 }
 
 /* We can merge branches in Algorithm 2 in the paper as follows: 
