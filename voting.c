@@ -39,7 +39,9 @@
 #include "vericrypt.h"
 
 /* Number of candidates: a vote for candidate j is the monomial X^j. */
+#ifndef NCAND
 #define NCAND 	8
+#endif
 
 /* A uniform integer in [0, n), from the operating system. */
 static uint32_t uniform_below(uint32_t n) {

@@ -144,7 +144,10 @@ them with a proof of shuffle, as bytes; and a verifier checks that proof from
 the bytes alone and tallies. It also checks that a ballot copied onto another
 voter's commitment, a changed published vote, a corrupted proof and a
 substituted vote are all rejected. It runs in about 25 seconds, and `make test`
-includes it.
+includes it. The election size is a build-time constant: `make CONFIG=-DMSGS=8
+voting` runs it with 8 voters, and `-DNCAND=<n>` sets the number of
+candidates. `CONFIG` takes any such constant, and changing it rebuilds
+everything.
 
 Each binary runs its tests and then its benchmarks. Since the benchmarks
 dominate the runtime by two orders of magnitude, either phase can be selected

@@ -5,6 +5,7 @@ encrypt
 vericrypt
 shuffle
 voting
+.config
 fuzz_serial
 fuzz-corpus/
 crash-*
