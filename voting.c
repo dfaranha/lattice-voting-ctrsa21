@@ -237,8 +237,11 @@ static int candidate(nmod_poly_t m) {
 
 /* The proof as published: the bytes proof_walk writes, which is everything the
  * prover sends; the statement (the commitments and the published votes) and
- * the key are public. */
-static uint8_t published[8 << 20];
+ * the key are public. About 51 KB per message at these parameters, so it is
+ * sized by MSGS: a fixed 8 MB held only about 160 messages, and prove() then
+ * reported the overflow as an empty proof. */
+#define PUBLISHED_CAP 	((size_t) MSGS * (64 << 10) + (1 << 20))
+static uint8_t published[PUBLISHED_CAP];
 
 /* The authority: prove that _m is a shuffle of the votes in com, given their
  * openings (m, r) and the permutation elements sigma_i = g(pi(i)), and write
@@ -484,7 +487,7 @@ static void test(flint_rand_t rand) {
 	} TEST_END;
 
 	TEST_ONCE("a corrupted proof is rejected") {
-		static uint8_t bad[8 << 20];
+		static uint8_t bad[PUBLISHED_CAP];
 
 		memcpy(bad, published, len);
 		bad[len / 2] ^= 1;
