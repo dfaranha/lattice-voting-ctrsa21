@@ -37,6 +37,15 @@
 
 #include "encrypt.h"
 #include "vericrypt.h"
+#include <time.h>
+
+/* Wall-clock seconds, for the phase timings the election reports. */
+static double now_s(void) {
+	struct timespec t;
+
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return t.tv_sec + t.tv_nsec / 1e9;
+}
 
 /* Number of candidates: a vote for candidate j is the monomial X^j. */
 #ifndef NCAND
@@ -381,11 +390,17 @@ static void test(flint_rand_t rand) {
 	int pi[MSGS], cast_ok = 1, board_ok = 1, open_ok = 1, same = 1;
 	int votes[MSGS], tally[MSGS], count[NCAND] = { 0 };
 	size_t len = 0;
+	/* Wall-clock times of the phases, reported at the end; the attack tests
+	 * are not counted. */
+	double t0, t_key, t_cast, t_board = 0, t_open = 0, t_prove = 0;
+	double t_verify = 0;
 
+	t0 = now_s();
 	commit_keyinit(&key);
 	commit_keygen(&key);
 	encrypt_keyinit(&pk, &sk);
 	encrypt_keygen(&pk, &sk);
+	t_key = now_s() - t0;
 	for (int i = 0; i < MSGS; i++) {
 		commit_init(&com[i]);
 		vericrypt_init(&ballot[i]);
@@ -402,20 +417,24 @@ static void test(flint_rand_t rand) {
 
 	/* Voting: the votes are the test oracle, kept apart from what the board,
 	 * the authority and the verifier use. */
+	t0 = now_s();
 	for (int i = 0; i < MSGS; i++) {
 		votes[i] = uniform_below(NCAND);
 		int_to_monomial(vote[i], votes[i]);
 		cast_ok &= cast(&com[i], &ballot[i], vote[i], &key, &pk, rand);
 	}
+	t_cast = now_s() - t0;
 
 	TEST_ONCE("every voter casts a ballot") {
 		TEST_ASSERT(cast_ok, end);
 	} TEST_END;
 
 	TEST_ONCE("the board accepts every ballot against its commitment") {
+		t0 = now_s();
 		for (int i = 0; i < MSGS; i++) {
 			board_ok &= check_ballot(&ballot[i], &com[i], &key, &pk);
 		}
+		t_board = now_s() - t0;
 		TEST_ASSERT(board_ok, end);
 	} TEST_END;
 
@@ -427,10 +446,12 @@ static void test(flint_rand_t rand) {
 	} TEST_END;
 
 	TEST_ONCE("the authority opens every commitment from its ballot") {
+		t0 = now_s();
 		for (int i = 0; i < MSGS; i++) {
 			open_ok &= open_ballot(m[i], r[i], &ballot[i], &com[i], &key, &pk,
 					&sk);
 		}
+		t_open = now_s() - t0;
 		TEST_ASSERT(open_ok, end);
 		/* The oracle: what the authority read is what each voter voted. */
 		for (int i = 0; i < MSGS; i++) {
@@ -454,9 +475,13 @@ static void test(flint_rand_t rand) {
 	}
 
 	TEST_ONCE("the shuffle proof verifies from its published bytes") {
+		t0 = now_s();
 		len = prove(com, m, _m, sigma, r, &key);
+		t_prove = now_s() - t0;
 		TEST_ASSERT(len > 0, end);
+		t0 = now_s();
 		TEST_ASSERT(verify(published, len, com, _m, &key) == 1, end);
+		t_verify = now_s() - t0;
 	} TEST_END;
 
 	TEST_ONCE("the tally of the published votes is the votes cast") {
@@ -526,6 +551,13 @@ static void test(flint_rand_t rand) {
 	}
 	printf("\n    shuffle proof %zu bytes, %.1f KB per vote\n", len,
 			len / 1024.0 / MSGS);
+	printf("    timing, wall clock: key generation %.2f s; casting %.2f s, "
+			"%.2f ms per ballot; board check %.2f s, %.2f ms per ballot\n",
+			t_key, t_cast, 1e3 * t_cast / MSGS, t_board,
+			1e3 * t_board / MSGS);
+	printf("    timing: authority opens the ballots %.2f s, %.2f ms per "
+			"ballot; shuffle prove %.2f s, verify %.2f s\n", t_open,
+			1e3 * t_open / MSGS, t_prove, t_verify);
 
   end:
 	for (int i = 0; i < MSGS; i++) {
