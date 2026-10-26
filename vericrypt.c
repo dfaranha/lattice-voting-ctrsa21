@@ -9,20 +9,12 @@
 #include "fastrandombytes.h"
 #include "randombytes.h"
 #include "sha.h"
+#include "vericrypt.h"
 
 /*============================================================================*/
 /* Private definitions                                                        */
 /*============================================================================*/
 
-/* Type that represents a verifiable encryption ciphertext. */
-typedef struct _veritext_t {
-	ciphertext_t cipher[VECTOR];
-	fmpz_mod_poly_t c;
-	fmpz_mod_poly_t r[VECTOR][DIM][NCRT];
-	fmpz_mod_poly_t e[VECTOR][DIM][NCRT];
-	fmpz_mod_poly_t e_[VECTOR][NCRT];
-	fmpz_mod_poly_t u[VECTOR];
-} veritext_t;
 
 /* Guesses of c' before decryption gives up on a ciphertext. */
 #define VERICRYPT_DEC_TRIES 100

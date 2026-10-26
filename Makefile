@@ -8,7 +8,7 @@ LIBS = -lflint -lgmp
 
 .PHONY: all test bench clean
 
-all: commit encrypt vericrypt shuffle
+all: commit encrypt vericrypt shuffle voting
 
 # Run only the test phase of each binary. The benchmarks dominate the runtime,
 # so keeping them out of a test run is what makes this usable in CI. TESTS,
@@ -19,6 +19,7 @@ test: all
 	./encrypt test
 	./vericrypt test
 	./shuffle test
+	./voting
 
 bench: all
 	./commit bench
@@ -43,6 +44,16 @@ gaussian_s.o: gaussian_ct.cpp fastrandombytes.h ${INCLUDES}
 	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_S \
 		-Ddiscrete_gaussian=discrete_gaussian_small -c gaussian_ct.cpp -o $@
 
+# The end-to-end test links the verifiable encryption, at SIGMA_E, with the
+# commitments and the proof of shuffle, at SIGMA_C: both samplers are called
+# discrete_gaussian, so the verifiable encryption gets one of its own name.
+gaussian_ev.o: gaussian_ct.cpp fastrandombytes.h ${INCLUDES}
+	${CPP} ${CFLAGS} -DSIGMA_PARAM=SIGMA_E \
+		-Ddiscrete_gaussian=discrete_gaussian_e -c gaussian_ct.cpp -o $@
+
+vericrypt_v.o: vericrypt.c vericrypt.h encrypt.h commit.h ${INCLUDES}
+	${CPP} ${CFLAGS} -Ddiscrete_gaussian=discrete_gaussian_e -c vericrypt.c -o $@
+
 encrypt.o: encrypt.c encrypt.h ${INCLUDES}
 	${CPP} ${CFLAGS} -c encrypt.c -o $@
 
@@ -58,6 +69,10 @@ vericrypt: vericrypt.c encrypt.o sha224-256.c ${RAND} fastrandombytes.h ${TEST} 
 shuffle: shuffle.c commit.c commit.h serial.c serial.h sha224-256.c ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
 	${CPP} ${CFLAGS} commit.c serial.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
+# The voting protocol end to end: voters, board, authority and verifier.
+voting: voting.c shuffle.c commit.c commit.h serial.c serial.h vericrypt.h encrypt.h vericrypt_v.o encrypt.o gaussian_ev.o sha224-256.c ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o
+	${CPP} ${CFLAGS} voting.c commit.c serial.c sha224-256.c vericrypt_v.o encrypt.o gaussian_c.o gaussian_s.o gaussian_ev.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
+
 # Fuzzing the proof decoder, with clang's libFuzzer under AddressSanitizer and
 # UndefinedBehaviorSanitizer; fuzz_serial.c says how to run it.
 FUZZ_CPP = clang++
@@ -70,4 +85,4 @@ fuzz_serial: fuzz_serial.c serial.c serial.h commit.c commit.h sha224-256.c ${RA
 	${FUZZ_CPP} ${FUZZ_FLAGS} -fsanitize=fuzzer -x c++ fuzz_serial.c serial.c commit.c sha224-256.c ${RAND} -x none gaussian_c.o gaussian_s.o -o $@ ${LIBS}
 
 clean:
-	rm -f *.o commit encrypt vericrypt shuffle fuzz_serial
+	rm -f *.o commit encrypt vericrypt shuffle voting fuzz_serial

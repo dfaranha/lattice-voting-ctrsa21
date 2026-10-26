@@ -4,6 +4,7 @@ commit
 encrypt
 vericrypt
 shuffle
+voting
 fuzz_serial
 fuzz-corpus/
 crash-*

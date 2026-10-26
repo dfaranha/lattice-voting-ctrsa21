@@ -132,7 +132,19 @@ Dependencies are the GMP and FLINT libraries. FLINT 3 or later is recommended;
 the sources use the context-based `fmpz_mod_poly` interface, so releases older
 than FLINT 2.8 will not build.
 
-For building the code, run `make` inside the source directory. This will build the binaries for `commit`, `vericrypt` and `shuffle` to test and benchmark different modules of the code.
+For building the code, run `make` inside the source directory. This will build the binaries for `commit`, `vericrypt` and `shuffle` to test and benchmark different modules of the code, and `voting`, which runs the voting protocol end to end.
+
+`voting` puts the three modules together, with `MSGS` voters (25 by default):
+each voter commits to a vote for one of 8 candidates and verifiably encrypts
+the commitment randomness; the board verifies every ballot against its
+commitment; the authority decrypts each ballot, recovers the randomness from
+the relaxed witness that decryption returns (multiplying by the inverse of the
+challenge difference), checks the opening, shuffles the votes and publishes
+them with a proof of shuffle, as bytes; and a verifier checks that proof from
+the bytes alone and tallies. It also checks that a ballot copied onto another
+voter's commitment, a changed published vote, a corrupted proof and a
+substituted vote are all rejected. It runs in about 25 seconds, and `make test`
+includes it.
 
 Each binary runs its tests and then its benchmarks. Since the benchmarks
 dominate the runtime by two orders of magnitude, either phase can be selected

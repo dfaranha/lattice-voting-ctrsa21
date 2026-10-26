@@ -9,6 +9,9 @@
  * @ingroup encrypt
  */
 
+#ifndef ENCRYPT_H
+#define ENCRYPT_H
+
 #include <flint/flint.h>
 #include <flint/fmpz.h>
 #include <flint/fmpz_mod.h>
@@ -237,3 +240,5 @@ void encrypt_cipher_init(ciphertext_t *c);
  * @param[out] sk 		- the private key to initialize.
  */
 void encrypt_keyinit(publickey_t *pk, privatekey_t *sk);
+
+#endif /* ENCRYPT_H */

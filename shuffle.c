@@ -1067,6 +1067,11 @@ static void proof_walk(proof_t *pf, bitwriter_t *bw, bitreader_t *r) {
 	nmod_poly_clear(crt[1]);
 }
 
+/* Everything below is the binary's own driver, tests and benchmarks. voting.c
+ * includes this file for the prover, the verifier and the serialisation, and
+ * defines SHUFFLE_NO_MAIN to leave them out. */
+#ifndef SHUFFLE_NO_MAIN
+
 /* Set by the size test: round-trip the proof through its serialisation before
  * verifying, and record how many bytes it took. */
 static int measure_proof = 0;
@@ -1726,3 +1731,5 @@ int main(int argc, char *argv[]) {
 
 	return test_failures() != 0;
 }
+
+#endif /* SHUFFLE_NO_MAIN */
