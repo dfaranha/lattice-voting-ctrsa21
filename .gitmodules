@@ -1,0 +1,4 @@
+[submodule "third_party/lazer"]
+	path = third_party/lazer
+	url = git@github.com:dfaranha/lazer.git
+	branch = skip-zeros

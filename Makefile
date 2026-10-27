@@ -9,6 +9,18 @@ TEST = test.c
 RAND = fastrandombytes.c randombytes.c
 LIBS = -lflint -lgmp
 
+# LaZer, for the voters' validity proofs (validity.c), is the submodule
+# third_party/lazer: branch skip-zeros of dfaranha/lazer, LaZer with fixes and
+# speed-ups. Its own Makefile builds it on first use, HEXL included; fetch it
+# with git submodule update --init third_party/lazer. validity.c is C, compiled
+# with CC against LaZer's headers; the rest, built as C++, calls it through
+# validity.h.
+CC = gcc
+LAZER = third_party/lazer
+LAZER_LIB = $(LAZER)/liblazer.a
+HEXL_LIB = $(LAZER)/third_party/hexl-development/build/hexl/lib64/libhexl.a
+LAZER_LIBS = $(LAZER_LIB) $(HEXL_LIB) -lmpfr -lstdc++
+
 .PHONY: all test bench clean FORCE
 
 all: commit encrypt vericrypt shuffle voting
@@ -80,8 +92,17 @@ shuffle: shuffle.c commit.c commit.h serial.c serial.h sha224-256.c ${RAND} fast
 	${CPP} ${CFLAGS} commit.c serial.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
 # The voting protocol end to end: voters, board, authority and verifier.
-voting: voting.c shuffle.c commit.c commit.h serial.c serial.h vericrypt.h encrypt.h vericrypt_v.o encrypt.o gaussian_ev.o sha224-256.c ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o $(STAMP)
-	${CPP} ${CFLAGS} voting.c commit.c serial.c sha224-256.c vericrypt_v.o encrypt.o gaussian_c.o gaussian_s.o gaussian_ev.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
+$(LAZER_LIB):
+	$(MAKE) -C $(LAZER) liblazer.a
+$(HEXL_LIB): $(LAZER_LIB)
+
+# The validity proof, in C against LaZer (its parameters: lazer/validity.h,
+# generated from lazer/validity.py by LaZer's lin-codegen.sage).
+validity.o: validity.c validity.h lazer/validity.h $(LAZER_LIB)
+	$(CC) -O3 -march=native -mtune=native -Wall -Wextra -ggdb -I $(LAZER) -c validity.c -o $@
+
+voting: voting.c shuffle.c commit.c commit.h serial.c serial.h vericrypt.h encrypt.h validity.h vericrypt_v.o encrypt.o gaussian_ev.o validity.o sha224-256.c ${RAND} fastrandombytes.h ${TEST} ${BENCH} ${INCLUDES} gaussian_c.o gaussian_s.o $(STAMP)
+	${CPP} ${CFLAGS} voting.c commit.c serial.c sha224-256.c vericrypt_v.o encrypt.o gaussian_c.o gaussian_s.o gaussian_ev.o validity.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS} $(LAZER_LIBS)
 
 # Fuzzing the proof decoder, with clang's libFuzzer under AddressSanitizer and
 # UndefinedBehaviorSanitizer; fuzz_serial.c says how to run it.

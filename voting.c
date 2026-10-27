@@ -10,7 +10,10 @@
  *      candidates, as com = (c1, c2) = (<B1, r>, <b2, r> + m), and verifiably
  *      encrypts the commitment randomness r: a proof that the ciphertexts hold
  *      a short r with <B1, r> = c1, the linear relation of the commitment.
- *   3. The board verifies every ballot, against its own commitment.
+ *      It also proves the vote valid (validity.c, on LaZer): the commitment is
+ *      to m = X^j or 0 under short r, bound to the election and the voter.
+ *   3. The board verifies every ballot and its validity proof, against its
+ *      own commitment.
  *   4. The authority decrypts every ballot. Decryption gives a relaxed
  *      witness c r for a difference of challenges c, so it multiplies by
  *      c^-1 in R_p to recover r, checks the opening of the commitment, and
@@ -37,7 +40,11 @@
 
 #include "encrypt.h"
 #include "vericrypt.h"
+#include "validity.h"
 #include <time.h>
+
+static_assert(VALIDITY_DEG == DEGREE && VALIDITY_P == MODP && VALIDITY_WIDTH == WIDTH,
+		"the validity proof is for this ring and commitment width");
 
 /* Wall-clock seconds, for the phase timings the election reports. */
 static double now_s(void) {
@@ -93,6 +100,56 @@ static void mod_to_crt(pcrt_poly_t out, fmpz_mod_poly_t in) {
 	nmod_poly_clear(t);
 }
 
+/* The coefficients of a in R_p, centred, as the validity proof takes them. */
+static void nmod_to_i64(int64_t out[DEGREE], const nmod_poly_t a) {
+	for (int i = 0; i < DEGREE; i++) {
+		uint64_t c = i < nmod_poly_length(a) ? nmod_poly_get_coeff_ui(a, i) : 0;
+		out[i] = c > MODP / 2 ? (int64_t) c - MODP : (int64_t) c;
+	}
+}
+
+/* The same for an element in CRT form. */
+static void crt_to_i64(int64_t out[DEGREE], pcrt_poly_t a) {
+	nmod_poly_t t;
+
+	nmod_poly_init(t, MODP);
+	pcrt_poly_rec(t, a);
+	nmod_to_i64(out, t);
+	nmod_poly_clear(t);
+}
+
+/* A commitment and its key as the validity proof takes them: c1, c2, then
+ * B1[0][j] and b2[j] for every j. */
+typedef struct {
+	int64_t c1[DEGREE], c2[DEGREE], B1[WIDTH * DEGREE], b2[WIDTH * DEGREE];
+} validity_stmt_t;
+
+static void validity_stmt(validity_stmt_t *st, commit_t *com, commitkey_t *key) {
+	crt_to_i64(st->c1, com->c1);
+	crt_to_i64(st->c2, com->c2);
+	for (int j = 0; j < WIDTH; j++) {
+		crt_to_i64(st->B1 + j * DEGREE, key->B1[0][j]);
+		crt_to_i64(st->b2 + j * DEGREE, key->b2[j]);
+	}
+}
+
+/* The context a validity proof is bound to: the election and the voter. */
+#define VCTX_BYTES 	(16 + 16 + 4)
+static void validity_ctx(uint8_t ctx[VCTX_BYTES], const uint8_t eid[16],
+		int voter) {
+	memcpy(ctx, "ctrsa21/validity", 16);
+	memcpy(ctx + 16, eid, 16);
+	for (int b = 0; b < 4; b++) {
+		ctx[32 + b] = (uint8_t) ((uint32_t) voter >> (8 * b));
+	}
+}
+
+/* A ballot's validity proof: proof[0 .. len - 1]. */
+typedef struct {
+	uint8_t *proof;
+	size_t len;
+} vproof_t;
+
 /* The relation a ballot proves, for a commitment: t = B1 and u = c1. */
 static void ballot_relation(fmpz_mod_poly_t t[VECTOR], fmpz_mod_poly_t u,
 		commit_t *com, commitkey_t *key) {
@@ -102,11 +159,15 @@ static void ballot_relation(fmpz_mod_poly_t t[VECTOR], fmpz_mod_poly_t u,
 	crt_to_mod(u, com->c1);
 }
 
-/* A voter: commit to the vote and verifiably encrypt the randomness. */
-static int cast(commit_t *com, veritext_t *ballot, nmod_poly_t vote,
-		commitkey_t *key, publickey_t *pk, flint_rand_t rand) {
+/* A voter: commit to the vote, verifiably encrypt the randomness, and prove
+ * the vote valid, bound to ctx. */
+static int cast(commit_t *com, veritext_t *ballot, vproof_t *vp, nmod_poly_t vote,
+		commitkey_t *key, publickey_t *pk, const uint8_t ctx[VCTX_BYTES],
+		flint_rand_t rand) {
 	pcrt_poly_t r[WIDTH];
 	fmpz_mod_poly_t t[VECTOR], u, w[VECTOR];
+	static validity_stmt_t st;
+	static int64_t r64[WIDTH * DEGREE], m64[DEGREE];
 	int ok;
 
 	for (int j = 0; j < WIDTH; j++) {
@@ -124,6 +185,13 @@ static int cast(commit_t *com, veritext_t *ballot, nmod_poly_t vote,
 	}
 	ballot_relation(t, u, com, key);
 	ok = vericrypt_doit(ballot, t, u, w, pk, rand);
+	validity_stmt(&st, com, key);
+	for (int j = 0; j < WIDTH; j++) {
+		crt_to_i64(r64 + j * DEGREE, r[j]);
+	}
+	nmod_to_i64(m64, vote);
+	ok &= validity_prove(vp->proof, &vp->len, st.c1, st.c2, st.B1, st.b2, r64,
+			m64, ctx, VCTX_BYTES);
 	for (int j = 0; j < VECTOR; j++) {
 		fmpz_mod_poly_clear(t[j], *encrypt_modulus_ctx());
 		fmpz_mod_poly_clear(w[j], *encrypt_modulus_ctx());
@@ -135,9 +203,20 @@ static int cast(commit_t *com, veritext_t *ballot, nmod_poly_t vote,
 	return ok;
 }
 
-/* The board: a ballot verifies against the commitment it was cast with. */
-static int check_ballot(veritext_t *ballot, commit_t *com, commitkey_t *key,
-		publickey_t *pk) {
+/* The validity proof of a commitment, under the context ctx. */
+static int check_validity(vproof_t *vp, commit_t *com, commitkey_t *key,
+		const uint8_t ctx[VCTX_BYTES]) {
+	static validity_stmt_t st;
+
+	validity_stmt(&st, com, key);
+	return validity_verify(vp->proof, vp->len, st.c1, st.c2, st.B1, st.b2, ctx,
+			VCTX_BYTES);
+}
+
+/* The board: a ballot and its validity proof verify against the commitment it
+ * was cast with. */
+static int check_ballot(veritext_t *ballot, vproof_t *vp, commit_t *com,
+		commitkey_t *key, publickey_t *pk, const uint8_t ctx[VCTX_BYTES]) {
 	fmpz_mod_poly_t t[VECTOR], u;
 	int ok;
 
@@ -146,7 +225,7 @@ static int check_ballot(veritext_t *ballot, commit_t *com, commitkey_t *key,
 		fmpz_mod_poly_init(t[j], *encrypt_modulus_ctx());
 	}
 	ballot_relation(t, u, com, key);
-	ok = vericrypt_verify(ballot, t, u, pk);
+	ok = vericrypt_verify(ballot, t, u, pk) && check_validity(vp, com, key, ctx);
 	for (int j = 0; j < VECTOR; j++) {
 		fmpz_mod_poly_clear(t[j], *encrypt_modulus_ctx());
 	}
@@ -387,9 +466,11 @@ static void test(flint_rand_t rand) {
 	static veritext_t ballot[MSGS];
 	static nmod_poly_t vote[MSGS], m[MSGS], _m[MSGS], sigma[MSGS];
 	static nmod_poly_t r[MSGS][WIDTH][2];
+	static vproof_t vproof[MSGS];
 	int pi[MSGS], cast_ok = 1, board_ok = 1, open_ok = 1, same = 1;
 	int votes[MSGS], tally[MSGS], count[NCAND] = { 0 };
-	size_t len = 0;
+	size_t len = 0, vbytes = 0;
+	uint8_t eid[16], ctx[VCTX_BYTES];
 	/* Wall-clock times of the phases, reported at the end; the attack tests
 	 * are not counted. */
 	double t0, t_key, t_cast, t_board = 0, t_open = 0, t_prove = 0;
@@ -401,7 +482,11 @@ static void test(flint_rand_t rand) {
 	encrypt_keyinit(&pk, &sk);
 	encrypt_keygen(&pk, &sk);
 	t_key = now_s() - t0;
+	validity_setup();
+	randombytes(eid, sizeof(eid));
 	for (int i = 0; i < MSGS; i++) {
+		vproof[i].proof = (uint8_t *) malloc(validity_proof_len());
+		vproof[i].len = 0;
 		commit_init(&com[i]);
 		vericrypt_init(&ballot[i]);
 		nmod_poly_init(vote[i], MODP);
@@ -421,7 +506,10 @@ static void test(flint_rand_t rand) {
 	for (int i = 0; i < MSGS; i++) {
 		votes[i] = uniform_below(NCAND);
 		int_to_monomial(vote[i], votes[i]);
-		cast_ok &= cast(&com[i], &ballot[i], vote[i], &key, &pk, rand);
+		validity_ctx(ctx, eid, i);
+		cast_ok &= cast(&com[i], &ballot[i], &vproof[i], vote[i], &key, &pk, ctx,
+				rand);
+		vbytes += vproof[i].len;
 	}
 	t_cast = now_s() - t0;
 
@@ -432,7 +520,9 @@ static void test(flint_rand_t rand) {
 	TEST_ONCE("the board accepts every ballot against its commitment") {
 		t0 = now_s();
 		for (int i = 0; i < MSGS; i++) {
-			board_ok &= check_ballot(&ballot[i], &com[i], &key, &pk);
+			validity_ctx(ctx, eid, i);
+			board_ok &= check_ballot(&ballot[i], &vproof[i], &com[i], &key, &pk,
+					ctx);
 		}
 		t_board = now_s() - t0;
 		TEST_ASSERT(board_ok, end);
@@ -441,8 +531,40 @@ static void test(flint_rand_t rand) {
 	TEST_ONCE("a ballot copied onto another voter's commitment is rejected") {
 		/* A voter cannot reuse another's ballot for its own commitment: the
 		 * proof is for the relation of the commitment it was made with. */
-		int copied = check_ballot(&ballot[0], &com[1], &key, &pk);
+		validity_ctx(ctx, eid, 1);
+		int copied = check_ballot(&ballot[0], &vproof[0], &com[1], &key, &pk,
+				ctx);
 		TEST_ASSERT(copied == 0, end);
+	} TEST_END;
+
+	TEST_ONCE("a validity proof does not verify for another voter") {
+		/* The proof is bound to the voter: moved, with its commitment, to
+		 * another voter, it fails. */
+		validity_ctx(ctx, eid, 1);
+		TEST_ASSERT(check_validity(&vproof[0], &com[0], &key, ctx) == 0, end);
+	} TEST_END;
+
+	TEST_ONCE("a vote for two candidates cannot be cast") {
+		/* X^0 + X^1, committed honestly: binary, but not one vote. */
+		static commit_t c;
+		static veritext_t b;
+		vproof_t v;
+		nmod_poly_t two;
+
+		commit_init(&c);
+		vericrypt_init(&b);
+		nmod_poly_init(two, MODP);
+		nmod_poly_set_coeff_ui(two, 0, 1);
+		nmod_poly_set_coeff_ui(two, 1, 1);
+		v.proof = (uint8_t *) malloc(validity_proof_len());
+		v.len = 0;
+		validity_ctx(ctx, eid, 0);
+		int ok = cast(&c, &b, &v, two, &key, &pk, ctx, rand);
+		free(v.proof);
+		nmod_poly_clear(two);
+		vericrypt_free(&b);
+		commit_free(&c);
+		TEST_ASSERT(ok == 0, end);
 	} TEST_END;
 
 	TEST_ONCE("the authority opens every commitment from its ballot") {
@@ -551,8 +673,10 @@ static void test(flint_rand_t rand) {
 	}
 	printf("\n    shuffle proof %zu bytes, %.1f KB per vote\n", len,
 			len / 1024.0 / MSGS);
-	printf("    timing, wall clock: key generation %.2f s; casting %.2f s, "
-			"%.2f ms per ballot; board check %.2f s, %.2f ms per ballot\n",
+	printf("    validity proof %.1f KB on average\n", vbytes / 1024.0 / MSGS);
+	printf("    timing, wall clock: key generation %.2f s; casting (and proving "
+			"the vote valid) %.2f s, %.2f ms per ballot; board check %.2f s, %.2f "
+			"ms per ballot\n",
 			t_key, t_cast, 1e3 * t_cast / MSGS, t_board,
 			1e3 * t_board / MSGS);
 	printf("    timing: authority opens the ballots %.2f s, %.2f ms per "
@@ -561,6 +685,7 @@ static void test(flint_rand_t rand) {
 
   end:
 	for (int i = 0; i < MSGS; i++) {
+		free(vproof[i].proof);
 		commit_free(&com[i]);
 		vericrypt_free(&ballot[i]);
 		nmod_poly_clear(vote[i]);

@@ -130,24 +130,45 @@ via the LNP22 automorphism machinery, which this code base does not have.
 
 Dependencies are the GMP and FLINT libraries. FLINT 3 or later is recommended;
 the sources use the context-based `fmpz_mod_poly` interface, so releases older
-than FLINT 2.8 will not build.
+than FLINT 2.8 will not build. The voters' validity proofs use
+[LaZer](https://github.com/lazer-crypto/lazer), the submodule
+`third_party/lazer` (branch `skip-zeros` of
+[this fork](https://github.com/dfaranha/lazer), with fixes and speed-ups);
+fetch it with `git submodule update --init third_party/lazer`. The first
+`make` of `voting` builds it, HEXL included, and it needs MPFR.
 
 For building the code, run `make` inside the source directory. This will build the binaries for `commit`, `vericrypt` and `shuffle` to test and benchmark different modules of the code, and `voting`, which runs the voting protocol end to end.
 
 `voting` puts the three modules together, with `MSGS` voters (25 by default):
-each voter commits to a vote for one of 8 candidates and verifiably encrypts
-the commitment randomness; the board verifies every ballot against its
-commitment; the authority decrypts each ballot, recovers the randomness from
+each voter commits to a vote for one of 8 candidates, verifiably encrypts
+the commitment randomness and proves the vote valid (below); the board
+verifies every ballot and validity proof against its commitment; the authority decrypts each ballot, recovers the randomness from
 the relaxed witness that decryption returns (multiplying by the inverse of the
 challenge difference), checks the opening, shuffles the votes and publishes
 them with a proof of shuffle, as bytes; and a verifier checks that proof from
 the bytes alone and tallies. It also checks that a ballot copied onto another
-voter's commitment, a changed published vote, a corrupted proof and a
-substituted vote are all rejected. It runs in about 25 seconds, and `make test`
+voter's commitment, a validity proof moved to another voter, a vote for two
+candidates, a changed published vote, a corrupted proof and a substituted vote
+are all rejected. It runs in about 45 seconds, about 25 of them the validity
+proofs (0.7 s to prove and 0.4 s to check each, on a laptop), and `make test`
 includes it. The election size is a build-time constant: `make CONFIG=-DMSGS=8
 voting` runs it with 8 voters, and `-DNCAND=<n>` sets the number of
 candidates. `CONFIG` takes any such constant, and changing it rebuilds
 everything.
+
+The verifiable encryption shows only that the authority can open each
+commitment. The validity proof (`validity.c`) shows, with LaZer's linear
+proofs, what it opens to: com = (sum_j B1_j r_j, sum_j b2_j r_j + m) with r
+ternary and short and m = X^j or 0, one vote or none. It proves m binary and
+equal to a u with ||u|| <= 1, which leaves only those, and it is bound to the
+election and the voter. LaZer lifts the statement to its ring of degree 64 and
+a 65-bit proof modulus; `lazer/validity.py` describes it, and
+`lazer/validity.h` is generated from it, from `third_party/lazer/scripts`,
+with `sage lin-codegen.sage ../../../lazer/validity.py >
+../../../lazer/validity.h`. LaZer's default target, a root Hermite factor of
+1.0044, is about 102 bits core-SVP under the lattice-estimator, so the file
+asks for 1.0036: MLWE 136.6 and MSIS 135.5 bits, knowledge error 2^-126. The
+proof is about 35 KiB.
 
 Each binary runs its tests and then its benchmarks. Since the benchmarks
 dominate the runtime by two orders of magnitude, either phase can be selected
