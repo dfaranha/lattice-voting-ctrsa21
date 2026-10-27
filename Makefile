@@ -19,7 +19,7 @@ CC = gcc
 LAZER = third_party/lazer
 LAZER_LIB = $(LAZER)/liblazer.a
 HEXL_LIB = $(LAZER)/third_party/hexl-development/build/hexl/lib64/libhexl.a
-LAZER_LIBS = $(LAZER_LIB) $(HEXL_LIB) -lmpfr -lstdc++
+LAZER_LIBS = $(LAZER_LIB) $(HEXL_LIB) -lmpfr -lgmp -lstdc++
 
 .PHONY: all test bench clean FORCE
 
