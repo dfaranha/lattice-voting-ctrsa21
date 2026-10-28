@@ -59,6 +59,17 @@ static double now_s(void) {
 #define NCAND 	8
 #endif
 
+/* The election is sized with the same knobs in every codebase benchmarked
+ * against this one: MSGS voters, NCAND candidates, MIXERS mix servers and
+ * PARTIES trustees, as make CONFIG="-D...". Here one authority shuffles and
+ * decrypts, so the last two can only be 1. */
+#if defined(MIXERS) && MIXERS != 1
+#error "lattice-voting-ctrsa21: one authority shuffles, so MIXERS can only be 1"
+#endif
+#if defined(PARTIES) && PARTIES != 1
+#error "lattice-voting-ctrsa21: the authority decrypts alone, so PARTIES can only be 1"
+#endif
+
 /* A uniform integer in [0, n), from the operating system. */
 static uint32_t uniform_below(uint32_t n) {
 	uint32_t x, lim = UINT32_MAX - UINT32_MAX % n;
