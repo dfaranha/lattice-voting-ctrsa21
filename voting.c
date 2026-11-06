@@ -171,10 +171,10 @@ static void ballot_relation(fmpz_mod_poly_t t[VECTOR], fmpz_mod_poly_t u,
 }
 
 /* A voter: commit to the vote, verifiably encrypt the randomness, and prove
- * the vote valid, bound to ctx. */
+ * the vote valid for an election of ncand candidates, bound to ctx. */
 static int cast(commit_t *com, veritext_t *ballot, vproof_t *vp, nmod_poly_t vote,
-		commitkey_t *key, publickey_t *pk, const uint8_t ctx[VCTX_BYTES],
-		flint_rand_t rand) {
+		commitkey_t *key, publickey_t *pk, int ncand,
+		const uint8_t ctx[VCTX_BYTES], flint_rand_t rand) {
 	pcrt_poly_t r[WIDTH];
 	fmpz_mod_poly_t t[VECTOR], u, w[VECTOR];
 	static validity_stmt_t st;
@@ -202,7 +202,7 @@ static int cast(commit_t *com, veritext_t *ballot, vproof_t *vp, nmod_poly_t vot
 	}
 	nmod_to_i64(m64, vote);
 	ok &= validity_prove(vp->proof, &vp->len, st.c1, st.c2, st.B1, st.b2, r64,
-			m64, ctx, VCTX_BYTES);
+			m64, ncand, ctx, VCTX_BYTES);
 	for (int j = 0; j < VECTOR; j++) {
 		fmpz_mod_poly_clear(t[j], *encrypt_modulus_ctx());
 		fmpz_mod_poly_clear(w[j], *encrypt_modulus_ctx());
@@ -214,14 +214,15 @@ static int cast(commit_t *com, veritext_t *ballot, vproof_t *vp, nmod_poly_t vot
 	return ok;
 }
 
-/* The validity proof of a commitment, under the context ctx. */
+/* The validity proof of a commitment, for an election of ncand candidates,
+ * under the context ctx. */
 static int check_validity(vproof_t *vp, commit_t *com, commitkey_t *key,
-		const uint8_t ctx[VCTX_BYTES]) {
+		int ncand, const uint8_t ctx[VCTX_BYTES]) {
 	static validity_stmt_t st;
 
 	validity_stmt(&st, com, key);
-	return validity_verify(vp->proof, vp->len, st.c1, st.c2, st.B1, st.b2, ctx,
-			VCTX_BYTES);
+	return validity_verify(vp->proof, vp->len, st.c1, st.c2, st.B1, st.b2,
+			ncand, ctx, VCTX_BYTES);
 }
 
 /* The board: a ballot and its validity proof verify against the commitment it
@@ -236,7 +237,7 @@ static int check_ballot(veritext_t *ballot, vproof_t *vp, commit_t *com,
 		fmpz_mod_poly_init(t[j], *encrypt_modulus_ctx());
 	}
 	ballot_relation(t, u, com, key);
-	ok = vericrypt_verify(ballot, t, u, pk) && check_validity(vp, com, key, ctx);
+	ok = vericrypt_verify(ballot, t, u, pk) && check_validity(vp, com, key, NCAND, ctx);
 	for (int j = 0; j < VECTOR; j++) {
 		fmpz_mod_poly_clear(t[j], *encrypt_modulus_ctx());
 	}
@@ -518,7 +519,7 @@ static void test(flint_rand_t rand) {
 		votes[i] = uniform_below(NCAND);
 		int_to_monomial(vote[i], votes[i]);
 		validity_ctx(ctx, eid, i);
-		cast_ok &= cast(&com[i], &ballot[i], &vproof[i], vote[i], &key, &pk, ctx,
+		cast_ok &= cast(&com[i], &ballot[i], &vproof[i], vote[i], &key, &pk, NCAND, ctx,
 				rand);
 		vbytes += vproof[i].len;
 	}
@@ -552,7 +553,7 @@ static void test(flint_rand_t rand) {
 		/* The proof is bound to the voter: moved, with its commitment, to
 		 * another voter, it fails. */
 		validity_ctx(ctx, eid, 1);
-		TEST_ASSERT(check_validity(&vproof[0], &com[0], &key, ctx) == 0, end);
+		TEST_ASSERT(check_validity(&vproof[0], &com[0], &key, NCAND, ctx) == 0, end);
 	} TEST_END;
 
 	TEST_ONCE("a vote for two candidates cannot be cast") {
@@ -570,12 +571,44 @@ static void test(flint_rand_t rand) {
 		v.proof = (uint8_t *) malloc(validity_proof_len());
 		v.len = 0;
 		validity_ctx(ctx, eid, 0);
-		int ok = cast(&c, &b, &v, two, &key, &pk, ctx, rand);
+		int ok = cast(&c, &b, &v, two, &key, &pk, NCAND, ctx, rand);
 		free(v.proof);
 		nmod_poly_clear(two);
 		vericrypt_free(&b);
 		commit_free(&c);
 		TEST_ASSERT(ok == 0, end);
+	} TEST_END;
+
+	TEST_ONCE("a vote for a candidate past the last is rejected") {
+		/* X^NCAND, a vote for no candidate of this election, cast as a ballot
+		 * of an election with one candidate more: its validity proof is a
+		 * valid one, of that other statement, and the board must refuse it. */
+		static commit_t c;
+		static veritext_t b;
+		vproof_t v;
+		nmod_poly_t past;
+		int refused, cast_other, ok_other, ok_this;
+
+		commit_init(&c);
+		vericrypt_init(&b);
+		nmod_poly_init(past, MODP);
+		nmod_poly_set_coeff_ui(past, NCAND, 1);
+		v.proof = (uint8_t *) malloc(validity_proof_len());
+		v.len = 0;
+		validity_ctx(ctx, eid, 0);
+		refused = !cast(&c, &b, &v, past, &key, &pk, NCAND, ctx, rand);
+		commit_free(&c);
+		vericrypt_free(&b);
+		commit_init(&c);
+		vericrypt_init(&b);
+		cast_other = cast(&c, &b, &v, past, &key, &pk, NCAND + 1, ctx, rand);
+		ok_other = check_validity(&v, &c, &key, NCAND + 1, ctx);
+		ok_this = check_validity(&v, &c, &key, NCAND, ctx);
+		free(v.proof);
+		nmod_poly_clear(past);
+		vericrypt_free(&b);
+		commit_free(&c);
+		TEST_ASSERT(refused && cast_other && ok_other && !ok_this, end);
 	} TEST_END;
 
 	TEST_ONCE("the authority opens every commitment from its ballot") {

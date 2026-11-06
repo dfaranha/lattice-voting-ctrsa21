@@ -3,7 +3,7 @@
  *
  * The voter's proof that its commitment holds a valid vote, on LaZer's linear
  * proofs: com = (c1, c2) = (sum_j B1_j r_j, sum_j b2_j r_j + m) with short r and
- * m = X^j or 0, bound to a context such as the election and the voter. The
+ * m = X^j, j < ncand, or 0, bound to a context such as the election and the voter. The
  * verifiable encryption of r shows that the authority can open the
  * commitment; this proof shows that what it opens to is one vote.
  *
@@ -37,7 +37,7 @@ size_t validity_proof_len(void);
 
 /**
  * Prove that c1 = sum_j B1[j] r[j] and c2 = sum_j b2[j] r[j] + m with r ternary
- * and short and m = X^j or 0, bound to ctx. Refuses (returns 0, no proof) if
+ * and short and m = X^j, j < ncand, or 0, bound to ctx. Refuses (returns 0, no proof) if
  * the witness is not of that form or the equations do not hold.
  *
  * @param[out] proof		- room for validity_proof_len() bytes.
@@ -46,16 +46,17 @@ size_t validity_proof_len(void);
  */
 int validity_prove(uint8_t *proof, size_t *len, const int64_t *c1,
 		const int64_t *c2, const int64_t *B1, const int64_t *b2,
-		const int64_t *r, const int64_t *m, const uint8_t *ctx, size_t ctxlen);
+		const int64_t *r, const int64_t *m, int ncand, const uint8_t *ctx,
+		size_t ctxlen);
 
 /**
- * Verify a validity proof for the commitment (c1, c2) under the key (B1, b2)
- * and the context ctx. B1, b2 and r hold VALIDITY_WIDTH elements in turn.
+ * Verify a validity proof for the commitment (c1, c2) under the key (B1, b2),
+ * for an election of ncand candidates, and the context ctx. B1, b2 and r hold VALIDITY_WIDTH elements in turn.
  *
  * @return 1 if it verifies, 0 otherwise.
  */
 int validity_verify(const uint8_t *proof, size_t len, const int64_t *c1,
-		const int64_t *c2, const int64_t *B1, const int64_t *b2,
+		const int64_t *c2, const int64_t *B1, const int64_t *b2, int ncand,
 		const uint8_t *ctx, size_t ctxlen);
 
 #ifdef __cplusplus
