@@ -16,7 +16,9 @@ LIBS = -lflint -lgmp
 # with CC against LaZer's headers; the rest, built as C++, calls it through
 # validity.h.
 CC = gcc
-LAZER = third_party/lazer
+# The codebases side by side in one directory share one LaZer: ../lazer, the
+# same branch, is used instead of the submodule when it is there.
+LAZER ?= $(if $(wildcard ../lazer/Makefile),../lazer,third_party/lazer)
 LAZER_LIB = $(LAZER)/liblazer.a
 HEXL_LIB = $(LAZER)/third_party/hexl-development/build/hexl/lib64/libhexl.a
 LAZER_LIBS = $(LAZER_LIB) $(HEXL_LIB) -lmpfr -lgmp -lstdc++
