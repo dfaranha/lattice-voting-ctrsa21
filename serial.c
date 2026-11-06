@@ -246,6 +246,32 @@ void serial_get_gauss(bitreader_t *r, nmod_poly_t a[2], ulong sigma) {
 }
 
 
+void serial_put_commit(bitwriter_t *w, commit_t *com) {
+	serial_put_uniform(w, com->c1);
+	serial_put_uniform(w, com->c2);
+}
+
+void serial_get_commit(bitreader_t *r, commit_t *com) {
+	serial_get_uniform(r, com->c1);
+	serial_get_uniform(r, com->c2);
+}
+
+void serial_put_bits(bitwriter_t *w, uint64_t v, int n) {
+	put_bits(w, v, n);
+}
+
+uint64_t serial_get_bits(bitreader_t *r, int n) {
+	return get_bits(r, n);
+}
+
+void serial_put_rice(bitwriter_t *w, int64_t x, ulong sigma) {
+	put_rice(w, x, rice_k(sigma));
+}
+
+int64_t serial_get_rice(bitreader_t *r, ulong sigma) {
+	return get_rice(r, rice_k(sigma));
+}
+
 void serial_put_byte(bitwriter_t *w, uint8_t v) {
 	put_bits(w, v, 8);
 }

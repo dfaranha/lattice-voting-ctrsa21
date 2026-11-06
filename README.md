@@ -141,13 +141,16 @@ For building the code, run `make` inside the source directory. This will build t
 
 `voting` puts the three modules together, with `MSGS` voters (25 by default):
 each voter commits to a vote for one of 8 candidates, verifiably encrypts the
-commitment randomness and proves the vote valid (below); the board verifies
+commitment randomness and proves the vote valid (below), and publishes the
+commitment and the verifiable ciphertext as bytes, which is all that the
+board, the authority and the shuffle's verifier read of them; the board verifies
 every ballot and validity proof against its commitment; the authority decrypts
 each ballot, recovers the randomness from the relaxed witness that decryption
 returns (multiplying by the inverse of the challenge difference), checks the
 opening, shuffles the votes and publishes them with a proof of shuffle, as
 bytes; and a verifier checks that proof from the bytes alone and tallies. It
-also checks that a ballot copied onto another voter's commitment, a validity
+also checks that a published ballot with a byte appended or a residue past q,
+a ballot copied onto another voter's commitment, a validity
 proof moved to another voter, a vote for two candidates, a vote for a candidate
 past the last, a changed published vote, a corrupted proof and a substituted
 vote are all rejected. It runs in about 45 seconds, about 25 of them the

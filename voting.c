@@ -161,6 +161,235 @@ typedef struct {
 	size_t len;
 } vproof_t;
 
+/*============================================================================*/
+/* A voter's published ballot, as bytes                                       */
+/*============================================================================*/
+
+/* What a voter publishes besides its validity proof: the commitment and the
+ * verifiable ciphertext of its randomness, in this order:
+ *
+ *   - the commitment (c1, c2), uniform mod p, at 39 bits a coefficient;
+ *   - the ciphertexts cipher[i] = (v[0..DIM-1], w), uniform mod q in CRT form,
+ *     at 60 bits a coefficient;
+ *   - the challenge c, its NONZERO coefficients +-1 as (position, sign), in
+ *     increasing position, at 11 bits each;
+ *   - the responses r, e, e_ (mod q) and u (mod p), short, as the centred
+ *     coefficients of the reconstructed polynomial, Golomb-Rice coded about
+ *     SIGMA_E.
+ *
+ * Everything the board, the authority and the shuffle verifier use of a ballot
+ * is what they read back from these bytes. The reader refuses any encoding no
+ * writer produces: a residue at or past its modulus, a centred coefficient
+ * outside (-m/2, m/2], challenge positions out of order, a Rice escape for a
+ * short value, or bytes left over. */
+
+#define DEG_BITS 	10			/* bits of a position below DEGREE */
+
+static int qbits(void) {
+	return (int) fmpz_bits(*encrypt_large_modulus());
+}
+
+static void put_uniform_q(bitwriter_t *w, qcrt_poly_t a) {
+	fmpz_t c;
+	fmpz_init(c);
+	for (int k = 0; k < NCRT; k++) {
+		for (int i = 0; i < DEGCRT; i++) {
+			fmpz_mod_poly_get_coeff_fmpz(c, a[k], i,
+					*encrypt_large_modulus_ctx());
+			serial_put_bits(w, fmpz_get_ui(c), qbits());
+		}
+	}
+	fmpz_clear(c);
+}
+
+static void get_uniform_q(bitreader_t *r, qcrt_poly_t a) {
+	for (int k = 0; k < NCRT; k++) {
+		fmpz_mod_poly_zero(a[k], *encrypt_large_modulus_ctx());
+		for (int i = 0; i < DEGCRT; i++) {
+			ulong v = serial_get_bits(r, qbits());
+			if (fmpz_cmp_ui(*encrypt_large_modulus(), v) <= 0) {
+				r->overflow = 1;
+				v = 0;
+			}
+			fmpz_mod_poly_set_coeff_ui(a[k], i, v,
+					*encrypt_large_modulus_ctx());
+		}
+	}
+}
+
+/* The centred coefficients of t, of degree below DEGREE, modulo m. */
+static void put_short(bitwriter_t *w, fmpz_mod_poly_t t, fmpz_t m,
+		fmpz_mod_ctx_t ctx) {
+	fmpz_t c, half;
+	fmpz_init(c);
+	fmpz_init(half);
+	fmpz_fdiv_q_2exp(half, m, 1);
+	for (int i = 0; i < DEGREE; i++) {
+		fmpz_mod_poly_get_coeff_fmpz(c, t, i, ctx);
+		if (fmpz_cmp(c, half) > 0) {
+			fmpz_sub(c, c, m);
+		}
+		serial_put_rice(w, fmpz_get_si(c), SIGMA_E);
+	}
+	fmpz_clear(c);
+	fmpz_clear(half);
+}
+
+static void get_short(bitreader_t *r, fmpz_mod_poly_t t, fmpz_t m,
+		fmpz_mod_ctx_t ctx) {
+	fmpz_t c, half;
+	fmpz_init(c);
+	fmpz_init(half);
+	fmpz_fdiv_q_2exp(half, m, 1);
+	fmpz_mod_poly_zero(t, ctx);
+	for (int i = 0; i < DEGREE; i++) {
+		int64_t x = serial_get_rice(r, SIGMA_E);
+		/* m is odd, so the writer's range is [-(m-1)/2, (m-1)/2]. */
+		if (fmpz_cmp_si(half, x) < 0 || fmpz_cmp_si(half, -x) < 0
+				|| x == INT64_MIN) {
+			r->overflow = 1;
+			x = 0;
+		}
+		fmpz_set_si(c, x);
+		if (x < 0) {
+			fmpz_add(c, c, m);
+		}
+		fmpz_mod_poly_set_coeff_fmpz(t, i, c, ctx);
+	}
+	fmpz_clear(c);
+	fmpz_clear(half);
+}
+
+static void put_short_q(bitwriter_t *w, qcrt_poly_t a) {
+	fmpz_mod_poly_t t;
+	fmpz_mod_poly_init(t, *encrypt_large_modulus_ctx());
+	qcrt_poly_rec(t, a);
+	put_short(w, t, *encrypt_large_modulus(), *encrypt_large_modulus_ctx());
+	fmpz_mod_poly_clear(t, *encrypt_large_modulus_ctx());
+}
+
+static void get_short_q(bitreader_t *r, qcrt_poly_t a) {
+	fmpz_mod_poly_t t;
+	fmpz_mod_poly_init(t, *encrypt_large_modulus_ctx());
+	get_short(r, t, *encrypt_large_modulus(), *encrypt_large_modulus_ctx());
+	for (int k = 0; k < NCRT; k++) {
+		qcrt_poly_reduce(a[k], t, k, *encrypt_large_modulus_ctx());
+	}
+	fmpz_mod_poly_clear(t, *encrypt_large_modulus_ctx());
+}
+
+/* The challenge: NONZERO coefficients +-1 mod p. Returns 0, writing nothing
+ * past what it wrote, if it is not of that form. */
+static int put_chall(bitwriter_t *w, fmpz_mod_poly_t c) {
+	fmpz_t x;
+	int n = 0;
+
+	fmpz_init(x);
+	for (int i = 0; i < DEGREE; i++) {
+		fmpz_mod_poly_get_coeff_fmpz(x, c, i, *encrypt_modulus_ctx());
+		if (fmpz_is_zero(x)) {
+			continue;
+		}
+		if (!fmpz_is_one(x)) {
+			fmpz_add_ui(x, x, 1);
+			if (fmpz_cmp(x, *encrypt_modulus()) != 0) {
+				fmpz_clear(x);
+				return 0;
+			}
+		}
+		serial_put_bits(w, (uint64_t) i, DEG_BITS);
+		serial_put_bits(w, !fmpz_equal(x, *encrypt_modulus()) ? 0 : 1, 1);
+		n++;
+	}
+	fmpz_clear(x);
+	return n == NONZERO;
+}
+
+static void get_chall(bitreader_t *r, fmpz_mod_poly_t c) {
+	int last = -1;
+
+	fmpz_mod_poly_zero(c, *encrypt_modulus_ctx());
+	for (int j = 0; j < NONZERO; j++) {
+		int pos = (int) serial_get_bits(r, DEG_BITS);
+		int neg = (int) serial_get_bits(r, 1);
+		if (pos <= last) {
+			r->overflow = 1;
+			continue;
+		}
+		last = pos;
+		if (neg) {
+			fmpz_mod_poly_set_coeff_si(c, pos, -1, *encrypt_modulus_ctx());
+		} else {
+			fmpz_mod_poly_set_coeff_ui(c, pos, 1, *encrypt_modulus_ctx());
+		}
+	}
+}
+
+/* Bytes of one published ballot are at most this: two uniform elements mod p,
+ * 4 (DIM + 1) mod q, the challenge, and 4 (2 DIM + 2) short elements whose
+ * coefficients cost at most 24 + 64 bits each, escapes included. */
+#define BALLOT_CAP 	((2 * DEGREE * 40 + VECTOR * (DIM + 1) * DEGREE * 61 \
+		+ NONZERO * (DEG_BITS + 1) + VECTOR * (2 * DIM + 2) * DEGREE * 88) / 8 + 64)
+
+/* The published bytes of (com, ballot), or an empty vector if the
+ * ciphertext's challenge is not of the form a prover makes. */
+static uint8_t *write_ballot(size_t *len, commit_t *com, veritext_t *ballot) {
+	static uint8_t buf[BALLOT_CAP];
+	bitwriter_t bw;
+	uint8_t *out;
+	int ok;
+
+	serial_writer_init(&bw, buf, sizeof(buf));
+	serial_put_commit(&bw, com);
+	for (int i = 0; i < VECTOR; i++) {
+		for (int j = 0; j < DIM; j++) {
+			put_uniform_q(&bw, ballot->cipher[i].v[j]);
+		}
+		put_uniform_q(&bw, ballot->cipher[i].w);
+	}
+	ok = put_chall(&bw, ballot->c);
+	for (int i = 0; i < VECTOR; i++) {
+		for (int j = 0; j < DIM; j++) {
+			put_short_q(&bw, ballot->r[i][j]);
+			put_short_q(&bw, ballot->e[i][j]);
+		}
+		put_short_q(&bw, ballot->e_[i]);
+		put_short(&bw, ballot->u[i], *encrypt_modulus(),
+				*encrypt_modulus_ctx());
+	}
+	*len = (ok && !bw.overflow) ? serial_bytes(&bw) : 0;
+	out = (uint8_t *) malloc(*len > 0 ? *len : 1);
+	memcpy(out, buf, *len);
+	return out;
+}
+
+/* Read a published ballot into (com, ballot), both initialised. Returns 1 if
+ * the bytes are exactly an encoding a writer produces. */
+static int read_ballot(const uint8_t *buf, size_t len, commit_t *com,
+		veritext_t *ballot) {
+	bitreader_t br;
+
+	serial_reader_init(&br, buf, len);
+	serial_get_commit(&br, com);
+	for (int i = 0; i < VECTOR; i++) {
+		for (int j = 0; j < DIM; j++) {
+			get_uniform_q(&br, ballot->cipher[i].v[j]);
+		}
+		get_uniform_q(&br, ballot->cipher[i].w);
+	}
+	get_chall(&br, ballot->c);
+	for (int i = 0; i < VECTOR; i++) {
+		for (int j = 0; j < DIM; j++) {
+			get_short_q(&br, ballot->r[i][j]);
+			get_short_q(&br, ballot->e[i][j]);
+		}
+		get_short_q(&br, ballot->e_[i]);
+		get_short(&br, ballot->u[i], *encrypt_modulus(),
+				*encrypt_modulus_ctx());
+	}
+	return len > 0 && serial_reader_finish(&br);
+}
+
 /* The relation a ballot proves, for a commitment: t = B1 and u = c1. */
 static void ballot_relation(fmpz_mod_poly_t t[VECTOR], fmpz_mod_poly_t u,
 		commit_t *com, commitkey_t *key) {
@@ -479,7 +708,11 @@ static void test(flint_rand_t rand) {
 	static nmod_poly_t vote[MSGS], m[MSGS], _m[MSGS], sigma[MSGS];
 	static nmod_poly_t r[MSGS][WIDTH][2];
 	static vproof_t vproof[MSGS];
+	static uint8_t *pub[MSGS];
+	static size_t pub_len[MSGS];
 	int pi[MSGS], cast_ok = 1, board_ok = 1, open_ok = 1, same = 1;
+	int read_ok = 1;
+	size_t cbytes = 0;
 	int votes[MSGS], tally[MSGS], count[NCAND] = { 0 };
 	size_t len = 0, vbytes = 0;
 	uint8_t eid[16], ctx[VCTX_BYTES];
@@ -527,6 +760,62 @@ static void test(flint_rand_t rand) {
 
 	TEST_ONCE("every voter casts a ballot") {
 		TEST_ASSERT(cast_ok, end);
+	} TEST_END;
+
+	/* Publication: each voter's commitment and verifiable ciphertext go to the
+	 * board as bytes, and the voter's own copies are dropped. The board, the
+	 * authority and the shuffle's verifier use only what they read back. */
+	for (int i = 0; i < MSGS; i++) {
+		pub[i] = write_ballot(&pub_len[i], &com[i], &ballot[i]);
+		cbytes += pub_len[i];
+		commit_free(&com[i]);
+		vericrypt_free(&ballot[i]);
+		commit_init(&com[i]);
+		vericrypt_init(&ballot[i]);
+		read_ok &= read_ballot(pub[i], pub_len[i], &com[i], &ballot[i]);
+	}
+
+	TEST_ONCE("every ballot reads back from its published bytes") {
+		TEST_ASSERT(read_ok, end);
+	} TEST_END;
+
+	TEST_ONCE("a published ballot with a byte appended is refused") {
+		static commit_t c;
+		static veritext_t b;
+		uint8_t *longer = (uint8_t *) malloc(pub_len[0] + 1);
+		int ok;
+
+		memcpy(longer, pub[0], pub_len[0]);
+		longer[pub_len[0]] = 0;
+		commit_init(&c);
+		vericrypt_init(&b);
+		ok = read_ballot(longer, pub_len[0] + 1, &c, &b);
+		commit_free(&c);
+		vericrypt_free(&b);
+		free(longer);
+		TEST_ASSERT(ok == 0, end);
+	} TEST_END;
+
+	TEST_ONCE("a published ballot with a residue past q is refused") {
+		/* The first ciphertext coefficient, right after the commitment, set
+		 * to all ones: a 60-bit value above q, which no writer produces. */
+		static commit_t c;
+		static veritext_t b;
+		uint8_t *bad = (uint8_t *) malloc(pub_len[0]);
+		size_t at = 2 * DEGREE * (size_t) serial_bits_uniform();
+		int ok;
+
+		memcpy(bad, pub[0], pub_len[0]);
+		for (int i = 0; i < qbits(); i++) {
+			bad[(at + i) / 8] |= (uint8_t) (1u << ((at + i) % 8));
+		}
+		commit_init(&c);
+		vericrypt_init(&b);
+		ok = read_ballot(bad, pub_len[0], &c, &b);
+		commit_free(&c);
+		vericrypt_free(&b);
+		free(bad);
+		TEST_ASSERT(ok == 0, end);
 	} TEST_END;
 
 	TEST_ONCE("the board accepts every ballot against its commitment") {
@@ -718,6 +1007,12 @@ static void test(flint_rand_t rand) {
 	printf("\n    shuffle proof %zu bytes, %.1f KB per vote\n", len,
 			len / 1024.0 / MSGS);
 	printf("    validity proof %.1f KB on average\n", vbytes / 1024.0 / MSGS);
+	printf("    published ballot, besides the validity proof: %.1f KB on "
+			"average (commitment %.1f KB, verifiable encryption %.1f KB)\n",
+			cbytes / 1024.0 / MSGS,
+			2.0 * DEGREE * serial_bits_uniform() / 8 / 1024,
+			(cbytes / (double) MSGS - 2.0 * DEGREE * serial_bits_uniform() / 8)
+			/ 1024);
 	printf("    timing, wall clock: key generation %.2f s; casting (and proving "
 			"the vote valid) %.2f s, %.2f ms per ballot; board check %.2f s, %.2f "
 			"ms per ballot\n",
@@ -730,6 +1025,7 @@ static void test(flint_rand_t rand) {
   end:
 	for (int i = 0; i < MSGS; i++) {
 		free(vproof[i].proof);
+		free(pub[i]);
 		commit_free(&com[i]);
 		vericrypt_free(&ballot[i]);
 		nmod_poly_clear(vote[i]);

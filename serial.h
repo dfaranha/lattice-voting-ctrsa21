@@ -36,6 +36,7 @@
 #include <flint/nmod_poly.h>
 
 #include "param.h"
+#include "commit.h"
 
 /*============================================================================*/
 /* Type definitions                                                           */
@@ -99,6 +100,23 @@ void serial_get_uniform(bitreader_t *r, nmod_poly_t a[2]);
  */
 void serial_put_gauss(bitwriter_t *w, nmod_poly_t a[2], ulong sigma);
 void serial_get_gauss(bitreader_t *r, nmod_poly_t a[2], ulong sigma);
+
+/**
+ * Pack and unpack a commitment: its two ring elements, which are uniform.
+ */
+void serial_put_commit(bitwriter_t *w, commit_t *com);
+void serial_get_commit(bitreader_t *r, commit_t *com);
+
+/**
+ * The primitives the encodings above are made of, for encodings of other
+ * structures: n raw bits (n <= 64), and one integer Golomb-Rice coded about a
+ * discrete Gaussian of width sigma, which reads back any value the writer
+ * wrote and flags any encoding it does not produce.
+ */
+void serial_put_bits(bitwriter_t *w, uint64_t v, int n);
+uint64_t serial_get_bits(bitreader_t *r, int n);
+void serial_put_rice(bitwriter_t *w, int64_t x, ulong sigma);
+int64_t serial_get_rice(bitreader_t *r, ulong sigma);
 
 /**
  * Pack and unpack one raw byte, for the Fiat-Shamir digest.
