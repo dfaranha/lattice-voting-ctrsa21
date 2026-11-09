@@ -94,8 +94,12 @@ shuffle: shuffle.c commit.c commit.h serial.c serial.h sha224-256.c ${RAND} fast
 	${CPP} ${CFLAGS} commit.c serial.c shuffle.c sha224-256.c gaussian_c.o gaussian_s.o ${RAND} ${TEST} ${BENCH} -o $@ ${LIBS}
 
 # The voting protocol end to end: voters, board, authority and verifier.
+# LaZer builds with its own flags. A CFLAGS given on make's command line, as
+# the CI's sanitizer job does, reaches its make through MAKEFLAGS and through
+# the environment, which LaZer's Makefile honours in place of its own flags,
+# so the sub-make gets neither.
 $(LAZER_LIB):
-	$(MAKE) -C $(LAZER) liblazer.a
+	env -u MAKEFLAGS -u MFLAGS -u CFLAGS -u CPPFLAGS $(MAKE) -C $(LAZER) liblazer.a
 $(HEXL_LIB): $(LAZER_LIB)
 
 # The validity proof, in C against LaZer (its parameters: lazer/validity.h,
