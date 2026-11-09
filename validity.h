@@ -3,7 +3,7 @@
  *
  * The voter's proof that its commitment holds a valid vote, on LaZer's linear
  * proofs: com = (c1, c2) = (sum_j B1_j r_j, sum_j b2_j r_j + m) with short r and
- * m = X^j, j < ncand, or 0, bound to a context such as the election and the voter. The
+ * m = X^(VALIDITY_STRIDE j), j < ncand, or 0, bound to a context such as the election and the voter. The
  * verifiable encryption of r shows that the authority can open the
  * commitment; this proof shows that what it opens to is one vote.
  *
@@ -29,6 +29,12 @@ extern "C" {
 /* The commitment width, WIDTH of param.h. */
 #define VALIDITY_WIDTH 	4
 
+/* A vote for candidate j is X^(VALIDITY_STRIDE j): the proof is stated over
+ * LaZer's ring of degree 64, and these are the elements of R_p that lie in
+ * one element of it. So there are at most VALIDITY_MAXCAND candidates. */
+#define VALIDITY_STRIDE 	(VALIDITY_DEG / 64)
+#define VALIDITY_MAXCAND 	64
+
 /* Initialise LaZer; call once before proving or verifying. */
 void validity_setup(void);
 
@@ -37,7 +43,8 @@ size_t validity_proof_len(void);
 
 /**
  * Prove that c1 = sum_j B1[j] r[j] and c2 = sum_j b2[j] r[j] + m with r ternary
- * and short and m = X^j, j < ncand, or 0, bound to ctx. Refuses (returns 0, no proof) if
+ * and short and m = X^(VALIDITY_STRIDE j), j < ncand <= VALIDITY_MAXCAND, or 0,
+ * bound to ctx. Refuses (returns 0, no proof) if
  * the witness is not of that form or the equations do not hold.
  *
  * @param[out] proof		- room for validity_proof_len() bytes.

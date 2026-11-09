@@ -6,12 +6,13 @@
  *
  *   1. Setup: a commitment key, and a key pair for the verifiable encryption,
  *      whose secret key the decryption authority holds.
- *   2. Voting: each voter commits to its vote, X^j for one of NCAND
+ *   2. Voting: each voter commits to its vote, X^(16 j) for one of NCAND
  *      candidates, as com = (c1, c2) = (<B1, r>, <b2, r> + m), and verifiably
  *      encrypts the commitment randomness r: a proof that the ciphertexts hold
  *      a short r with <B1, r> = c1, the linear relation of the commitment.
  *      It also proves the vote valid (validity.c, on LaZer): the commitment is
- *      to m = X^j or 0 under short r, bound to the election and the voter.
+ *      to m = X^(16 j), j < NCAND, or 0 under short r, bound to the election
+ *      and the voter.
  *   3. The board verifies every ballot and its validity proof, against its
  *      own commitment.
  *   4. The authority decrypts every ballot. Decryption gives a relaxed
@@ -54,10 +55,22 @@ static double now_s(void) {
 	return t.tv_sec + t.tv_nsec / 1e9;
 }
 
-/* Number of candidates: a vote for candidate j is the monomial X^j. */
+/* Number of candidates: a vote for candidate j is the monomial
+ * X^(VALIDITY_STRIDE j), Y^j in the ring of degree 64 the validity proof is
+ * stated over (validity.c). */
 #ifndef NCAND
 #define NCAND 	8
 #endif
+#if NCAND < 1 || NCAND >= VALIDITY_MAXCAND
+#error "lattice-voting-ctrsa21: the validity proof allows 1 to 63 candidates (NCAND); the tests use NCAND + 1"
+#endif
+#define STRIDE 	VALIDITY_STRIDE
+
+/* The vote for candidate j. */
+static void vote_monomial(nmod_poly_t out, int j) {
+	nmod_poly_zero(out);
+	nmod_poly_set_coeff_ui(out, STRIDE * j, 1);
+}
 
 /* The election is sized with the same knobs in every codebase benchmarked
  * against this one: MSGS voters, NCAND candidates, MIXERS mix servers and
@@ -549,14 +562,15 @@ static int open_ballot(nmod_poly_t m, nmod_poly_t r[WIDTH][2],
 	return ok;
 }
 
-/* The candidate a vote is for, or -1 if it is not X^j for some j < NCAND. */
+/* The candidate a vote is for, or -1 if it is not X^(STRIDE j) for some
+ * j < NCAND. */
 static int candidate(nmod_poly_t m) {
 	int j = -1;
 
 	for (int i = 0; i < DEGREE; i++) {
 		ulong c = nmod_poly_get_coeff_ui(m, i);
-		if (c == 1 && i < NCAND && j < 0) {
-			j = i;
+		if (c == 1 && i % STRIDE == 0 && i / STRIDE < NCAND && j < 0) {
+			j = i / STRIDE;
 		} else if (c != 0) {
 			return -1;
 		}
@@ -750,7 +764,7 @@ static void test(flint_rand_t rand) {
 	t0 = now_s();
 	for (int i = 0; i < MSGS; i++) {
 		votes[i] = uniform_below(NCAND);
-		int_to_monomial(vote[i], votes[i]);
+		vote_monomial(vote[i], votes[i]);
 		validity_ctx(ctx, eid, i);
 		cast_ok &= cast(&com[i], &ballot[i], &vproof[i], vote[i], &key, &pk, NCAND, ctx,
 				rand);
@@ -846,7 +860,8 @@ static void test(flint_rand_t rand) {
 	} TEST_END;
 
 	TEST_ONCE("a vote for two candidates cannot be cast") {
-		/* X^0 + X^1, committed honestly: binary, but not one vote. */
+		/* Votes for candidates 0 and 1 at once, committed honestly: binary,
+		 * but not one vote. */
 		static commit_t c;
 		static veritext_t b;
 		vproof_t v;
@@ -856,7 +871,7 @@ static void test(flint_rand_t rand) {
 		vericrypt_init(&b);
 		nmod_poly_init(two, MODP);
 		nmod_poly_set_coeff_ui(two, 0, 1);
-		nmod_poly_set_coeff_ui(two, 1, 1);
+		nmod_poly_set_coeff_ui(two, STRIDE, 1);
 		v.proof = (uint8_t *) malloc(validity_proof_len());
 		v.len = 0;
 		validity_ctx(ctx, eid, 0);
@@ -869,7 +884,7 @@ static void test(flint_rand_t rand) {
 	} TEST_END;
 
 	TEST_ONCE("a vote for a candidate past the last is rejected") {
-		/* X^NCAND, a vote for no candidate of this election, cast as a ballot
+		/* Candidate NCAND, a vote for no candidate of this election, cast as a ballot
 		 * of an election with one candidate more: its validity proof is a
 		 * valid one, of that other statement, and the board must refuse it. */
 		static commit_t c;
@@ -881,7 +896,7 @@ static void test(flint_rand_t rand) {
 		commit_init(&c);
 		vericrypt_init(&b);
 		nmod_poly_init(past, MODP);
-		nmod_poly_set_coeff_ui(past, NCAND, 1);
+		nmod_poly_set_coeff_ui(past, STRIDE * NCAND, 1);
 		v.proof = (uint8_t *) malloc(validity_proof_len());
 		v.len = 0;
 		validity_ctx(ctx, eid, 0);
@@ -959,7 +974,7 @@ static void test(flint_rand_t rand) {
 
 		nmod_poly_init(keep, MODP);
 		nmod_poly_set(keep, _m[0]);
-		int_to_monomial(_m[0], (j + 1) % NCAND);
+		vote_monomial(_m[0], (j + 1) % NCAND);
 		int ok = verify(published, len, com, _m, &key);
 		nmod_poly_set(_m[0], keep);
 		nmod_poly_clear(keep);
@@ -985,7 +1000,7 @@ static void test(flint_rand_t rand) {
 			nmod_poly_init(sub[i], MODP);
 			nmod_poly_set(sub[i], _m[i]);
 		}
-		int_to_monomial(sub[0], (candidate(_m[0]) + 1) % NCAND);
+		vote_monomial(sub[0], (candidate(_m[0]) + 1) % NCAND);
 		n = prove(com, m, sub, sigma, r, &key);
 		ok = n > 0 && verify(published, n, com, sub, &key);
 		for (int i = 0; i < MSGS; i++) {

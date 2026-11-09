@@ -153,8 +153,8 @@ also checks that a published ballot with a byte appended or a residue past q,
 a ballot copied onto another voter's commitment, a validity
 proof moved to another voter, a vote for two candidates, a vote for a candidate
 past the last, a changed published vote, a corrupted proof and a substituted
-vote are all rejected. It runs in about 45 seconds, about 25 of them the
-validity proofs (0.7 s to prove and 0.4 s to check each, on a laptop), and `make
+vote are all rejected. It runs in well under a minute on a laptop, most of it
+the ballots, and `make
 test` includes it. The election size is a build-time constant: `make
 CONFIG=-DMSGS=8 voting` runs it with 8 voters, and `-DNCAND=<n>` sets the number
 of candidates. `CONFIG` takes any such constant, and changing it rebuilds
@@ -163,17 +163,26 @@ everything.
 The verifiable encryption shows only that the authority can open each
 commitment. The validity proof (`validity.c`) shows, with LaZer's linear proofs,
 what it opens to: com = (sum_j B1_j r_j, sum_j b2_j r_j + m) with r ternary and
-short and m = X^j with j < NCAND, or 0: a vote for one candidate, or a blank
-one. It proves m binary and equal to a u with ||u|| <= 1, which leaves only X^j
-or 0, and X^(1024 - NCAND) m binary, which in the negacyclic ring holds for j <
-NCAND and fails for j >= NCAND; and it is bound to the election and the voter.
-LaZer lifts the statement to its ring of degree 64 and a 65-bit proof modulus;
-`lazer/validity.py` describes it, and `lazer/validity.h` is generated from it,
-from `third_party/lazer/scripts`, with `sage lin-codegen.sage
-../../../lazer/validity.py > ../../../lazer/validity.h`. LaZer's default target,
-a root Hermite factor of 1.0044, is about 102 bits core-SVP under the
-lattice-estimator, so the file asks for 1.0036: MLWE 136.6 and MSIS 135.8 bits,
-knowledge error 2^-126. The proof is about 39 KiB.
+short and m a vote for one of NCAND candidates, or 0 for a blank one, bound to
+the election and the voter. A vote for candidate j is X^(16j): the proof is
+stated over LaZer's own ring of degree 64, R_64 = Z_p[Y]/(Y^64 + 1), with
+R_p = R_64[X]/(X^16 - Y), and X^(16j) = Y^j is one element of it rather than
+16. The two commitment equations become 32 equations over R_64, one per piece
+of c1 and of c2; the proof shows m binary and equal to a u with ||u|| <= 1,
+which leaves only Y^j or 0, and Y^(64 - NCAND) m binary, which in the
+negacyclic ring holds for j < NCAND and fails for j >= NCAND, so NCAND is at
+most 64 (63 with the tests, which also try NCAND + 1). Stating it over R_p and
+letting LaZer lift it made m and the last row's witness 16 binary elements of
+R_64 each; this way the witness is 67 elements, not 112. `lazer/validity.py`
+describes it, and `lazer/validity.h` is generated from it, from
+`third_party/lazer/scripts`, with `sage lin-codegen.sage
+../../../lazer/validity.py > ../../../lazer/validity.h`, for a 64-bit proof
+modulus (the file's comment says why not the 63-bit one LaZer would choose).
+LaZer's default target, a root Hermite factor of 1.0044, is about 102 bits
+core-SVP under the lattice-estimator, so the file asks for 1.0036: MLWE 136.6
+and MSIS 136.1 bits (`LWE.estimate.rough`, `SIS.lattice` with `RC.ADPS16`),
+knowledge error 2^-126. The proof is about 31 KiB, against 39 KiB for the lifted
+statement, and the board checks it in about half the time.
 
 Each binary runs its tests and then its benchmarks. Since the benchmarks
 dominate the runtime by two orders of magnitude, either phase can be selected
