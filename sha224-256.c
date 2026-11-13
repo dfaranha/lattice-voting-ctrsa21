@@ -58,10 +58,16 @@
 /*
  * add "length" to the length
  */
+/* Add length bits to the 64-bit message length (Length_High:Length_Low);
+ * the context is corrupted only if the whole 64-bit length overflows, as in
+ * RFC 6234. (The earlier parenthesisation set Corrupted as soon as the low
+ * 32 bits wrapped, after 512 MB of input, and SHA224/256Result then left
+ * the digest unwritten.) */
 #define SHA224_256AddLength(context, length)                \
-  (addTemp = (context)->Length_Low, ((context)->Corrupted = \
-    (((context)->Length_Low += (length)) < addTemp)) &&     \
-    (++(context)->Length_High == 0) ? 1 : 0)
+  (addTemp = (context)->Length_Low, (context)->Corrupted =  \
+    ((((context)->Length_Low += (length)) < addTemp) &&     \
+     (++(context)->Length_High == 0)) ? shaInputTooLong :   \
+    (context)->Corrupted)
 
 /* Local Function Prototypes */
 static void SHA224_256Finalize(SHA256Context * context, uint8_t Pad_Byte);
